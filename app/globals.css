@@ -1,0 +1,13 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --crimson: #8B1A3A;
+  --crimson-deep: #6B1230;
+  --crimson-light: #C44060;
+  --crimson-pale: #f9eaee;
+  --dark: #1a0d12;
+  --surface: #f7f3f4;
+  --border: #e4d8dc;
+}
