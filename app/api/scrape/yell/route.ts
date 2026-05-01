@@ -34,12 +34,13 @@ export async function GET(req: NextRequest) {
       status: 'not_contacted';
     }> = [];
 
-    $('.businessCapsule--mainRow').each((i: number, el: cheerio.Element) => {
+    $('.businessCapsule--mainRow').each((i, el) => {
       if (i >= limit) return false;
-      const name = $(el).find('.businessCapsule--name').text().trim();
-      const address = $(el).find('.businessCapsule--address').text().trim();
-      const phone = $(el).find('.businessCapsule--telephone').text().trim();
-      const website = $(el).find('a.businessCapsule--websiteLink').attr('href') || '';
+      const element = $(el);
+      const name = element.find('.businessCapsule--name').text().trim();
+      const address = element.find('.businessCapsule--address').text().trim();
+      const phone = element.find('.businessCapsule--telephone').text().trim();
+      const website = element.find('a.businessCapsule--websiteLink').attr('href') || '';
 
       if (name) {
         results.push({
