@@ -1,3 +1,5 @@
+export const runtime = 'nodejs';
+
 import { NextRequest, NextResponse } from 'next/server';
 import * as cheerio from 'cheerio';
 
@@ -41,18 +43,8 @@ export async function GET(req: NextRequest) {
       const address = element.find('.businessCapsule--address').text().trim();
       const phone = element.find('.businessCapsule--telephone').text().trim();
       const website = element.find('a.businessCapsule--websiteLink').attr('href') || '';
-
       if (name) {
-        results.push({
-          name,
-          address,
-          phone,
-          website,
-          email: '',
-          source: 'yell',
-          town: town!,
-          status: 'not_contacted',
-        });
+        results.push({ name, address, phone, website, email: '', source: 'yell', town: town!, status: 'not_contacted' });
       }
     });
 
