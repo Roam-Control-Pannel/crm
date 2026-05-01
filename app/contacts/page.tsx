@@ -26,7 +26,7 @@ export default function ContactsPage() {
     const t=(c.attributes?.TOWN||'').toLowerCase();
     return(!q||n.includes(q)||t.includes(q)||c.email.toLowerCase().includes(q))&&(!townFilter||c.attributes?.TOWN===townFilter);
   });
-  const towns=[...new Set(contacts.map(c=>c.attributes?.TOWN).filter(Boolean))].sort() as string[];
+  const towns=Array.from(new Set(contacts.map(c=>c.attributes?.TOWN).filter(Boolean))).sort() as string[];
   async function save() {
     if(!form.email||!form.name||!form.town)return;
     setSaving(true);
