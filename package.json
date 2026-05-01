@@ -3,7 +3,6 @@
     "@getbrevo/brevo": "^5.0.4",
     "@googlemaps/google-maps-services-js": "^3.4.2",
     "axios": "^1.15.2",
-    "cheerio": "^1.1.0",
     "clsx": "^2.1.1",
     "lucide-react": "^1.14.0",
     "next": "^14.2.35",

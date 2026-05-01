@@ -1,7 +1,4 @@
-export const runtime = 'nodejs';
-
 import { NextRequest, NextResponse } from 'next/server';
-import * as cheerio from 'cheerio';
 
 export async function GET(req: NextRequest) {
   try {
@@ -18,13 +15,13 @@ export async function GET(req: NextRequest) {
 
     const res = await fetch(yellUrl, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+        'Accept': 'text/html',
       },
     });
 
     const html = await res.text();
-    const $ = cheerio.load(html);
+
     const results: Array<{
       name: string;
       address: string;
@@ -36,17 +33,29 @@ export async function GET(req: NextRequest) {
       status: 'not_contacted';
     }> = [];
 
-    $('.businessCapsule--mainRow').each((i, el) => {
-      if (i >= limit) return false;
-      const element = $(el);
-      const name = element.find('.businessCapsule--name').text().trim();
-      const address = element.find('.businessCapsule--address').text().trim();
-      const phone = element.find('.businessCapsule--telephone').text().trim();
-      const website = element.find('a.businessCapsule--websiteLink').attr('href') || '';
-      if (name) {
-        results.push({ name, address, phone, website, email: '', source: 'yell', town: town!, status: 'not_contacted' });
+    // Extract business names using regex
+    const nameMatches = html.matchAll(/class="businessCapsule--name[^"]*"[^>]*>([^<]+)</g);
+    const addressMatches = html.matchAll(/class="businessCapsule--address[^"]*"[^>]*>([^<]+)</g);
+    const phoneMatches = html.matchAll(/class="businessCapsule--telephone[^"]*"[^>]*>([^<]+)</g);
+
+    const names = Array.from(nameMatches).map(m => m[1].trim());
+    const addresses = Array.from(addressMatches).map(m => m[1].trim());
+    const phones = Array.from(phoneMatches).map(m => m[1].trim());
+
+    for (let i = 0; i < Math.min(names.length, limit); i++) {
+      if (names[i]) {
+        results.push({
+          name: names[i],
+          address: addresses[i] || '',
+          phone: phones[i] || '',
+          website: '',
+          email: '',
+          source: 'yell',
+          town: town,
+          status: 'not_contacted',
+        });
       }
-    });
+    }
 
     return NextResponse.json({ results, total: results.length });
   } catch (error: unknown) {
