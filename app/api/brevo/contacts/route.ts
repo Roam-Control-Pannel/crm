@@ -1,11 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createContact, getContacts, updateContact } from '@/lib/brevo';
 
+const BREVO_API_KEY = process.env.BREVO_API_KEY!;
+
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
-    const limit = Number(searchParams.get('limit') || 50);
+    const limit = Number(searchParams.get('limit') || 500);
     const offset = Number(searchParams.get('offset') || 0);
+    const listId = searchParams.get('listId');
+
+    if (listId) {
+      const res = await fetch(
+        `https://api.brevo.com/v3/contacts/lists/${listId}/contacts?limit=${limit}&offset=${offset}`,
+        { headers: { 'api-key': BREVO_API_KEY, 'Content-Type': 'application/json' } }
+      );
+      const data = await res.json();
+      return NextResponse.json({ contacts: data.contacts || [] });
+    }
+
     const data = await getContacts(limit, offset);
     return NextResponse.json(data);
   } catch (error: unknown) {
@@ -17,13 +30,10 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { name, email, town, region, type, source, status, website, phone, notes } = body;
+    const { name, email, town, region, type, source, status, website, phone, notes, listIds } = body;
 
     if (!email || !name || !town) {
-      return NextResponse.json(
-        { error: 'email, name and town are required' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'email, name and town are required' }, { status: 400 });
     }
 
     const nameParts = name.trim().split(' ');
@@ -31,19 +41,13 @@ export async function POST(req: NextRequest) {
     const lastName = nameParts.slice(1).join(' ') || '';
 
     const contact = await createContact({
-      email,
-      firstName,
-      lastName,
+      email, firstName, lastName,
+      listIds: listIds || [],
       attributes: {
-        BUSINESS_NAME: name,
-        TOWN: town,
-        REGION: region || '',
-        BUSINESS_TYPE: type || '',
-        SOURCE: source || 'manual',
+        BUSINESS_NAME: name, TOWN: town, REGION: region || '',
+        BUSINESS_TYPE: type || '', SOURCE: source || 'manual',
         OUTREACH_STATUS: status || 'not_contacted',
-        WEBSITE: website || '',
-        PHONE: phone || '',
-        NOTES: notes || '',
+        WEBSITE: website || '', PHONE: phone || '', NOTES: notes || '',
       },
     });
 
@@ -58,9 +62,7 @@ export async function PUT(req: NextRequest) {
   try {
     const body = await req.json();
     const { email, ...attributes } = body;
-    if (!email) {
-      return NextResponse.json({ error: 'email is required' }, { status: 400 });
-    }
+    if (!email) return NextResponse.json({ error: 'email is required' }, { status: 400 });
     await updateContact(email, attributes);
     return NextResponse.json({ success: true });
   } catch (error: unknown) {
