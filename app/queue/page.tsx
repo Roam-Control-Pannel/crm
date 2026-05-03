@@ -80,10 +80,7 @@ export default function QueuePage(){
                       {status==='done'&&'✓ Sent!'}
                       {status==='error'&&'✕ Failed'}
                     </button>
-                    {status==='idle'&&<>
-                      <button style={{fontSize:11,fontWeight:700,color:'#9e7e88',padding:'6px 12px',borderRadius:6,border:'1.5px solid #e4d8dc',background:'transparent',cursor:'pointer',fontFamily:'Nunito Sans,sans-serif'}}>✎ Edit</button>
-                      <button onClick={()=>setDismissed(d=>[...d,item.id])} style={{fontSize:11,fontWeight:700,color:'#9e7e88',padding:'6px 12px',borderRadius:6,border:'1.5px solid #e4d8dc',background:'transparent',cursor:'pointer',fontFamily:'Nunito Sans,sans-serif'}}>✕ Skip</button>
-                    </>}
+                    {status==='idle'&&<button onClick={()=>setDismissed(d=>[...d,item.id])} style={{fontSize:11,fontWeight:700,color:'#9e7e88',padding:'6px 12px',borderRadius:6,border:'1.5px solid #e4d8dc',background:'transparent',cursor:'pointer',fontFamily:'Nunito Sans,sans-serif'}}>✕ Skip</button>}
                     {status==='error'&&<button onClick={()=>setStatuses(s=>({...s,[item.id]:'idle'}))} style={{fontSize:11,fontWeight:700,color:'#8B1A3A',padding:'6px 12px',borderRadius:6,border:'1.5px solid #e4d8dc',background:'transparent',cursor:'pointer',fontFamily:'Nunito Sans,sans-serif'}}>↻ Retry</button>}
                   </div>
                 </div>

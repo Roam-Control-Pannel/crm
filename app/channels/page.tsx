@@ -53,9 +53,8 @@ export default function ChannelsPage() {
             )}
             <div style={{padding:'12px 20px',display:'flex',gap:8}}>
               {ch.status==='live'
-                ?<><button style={{padding:'7px 14px',borderRadius:'var(--r-sm)',background:'var(--maroon-700)',color:'white',fontSize:11.5,fontWeight:600,border:'none',cursor:'pointer'}}>⚙ Configure</button>
-                  <button style={{padding:'7px 14px',borderRadius:'var(--r-sm)',background:'transparent',color:'var(--ink-500)',fontSize:11.5,fontWeight:600,border:'1.5px solid var(--ink-200)',cursor:'pointer'}}>View logs</button></>
-                :<button style={{padding:'7px 14px',borderRadius:'var(--r-sm)',background:'var(--maroon-700)',color:'white',fontSize:11.5,fontWeight:600,border:'none',cursor:'pointer'}}>+ Connect {ch.name}</button>
+                ?<span style={{fontSize:11.5,color:'var(--ink-400)',fontWeight:500}}>Configure via Brevo dashboard</span>
+                :<span style={{fontSize:11.5,color:'var(--ink-400)',fontWeight:500}}>Connector coming soon</span>
               }
             </div>
           </div>

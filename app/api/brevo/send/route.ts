@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { sendTransactionalEmail } from '@/lib/brevo';
+import { requireSession } from '@/lib/auth';
 
 const SENDER_NAME = 'Roam Local Team';
 const SENDER_EMAIL = 'hello@roam-everywhere.com';
@@ -60,6 +61,8 @@ function buildEmail(step:number,businessName:string,town:string,knownFor:string)
 }
 
 export async function POST(req:NextRequest){
+  const unauthorized = await requireSession();
+  if (unauthorized) return unauthorized;
   try {
     const {email,businessName,town,knownFor,step}=await req.json();
     if(!email||!businessName||!town) return NextResponse.json({error:'missing required fields'},{status:400});

@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { getContacts } from '@/lib/brevo';
 
 async function getStats() {
@@ -53,8 +54,8 @@ export default async function Dashboard() {
           </p>
         </div>
         <div style={{display:'flex',gap:8}}>
-          <a href="/find" style={{display:'inline-flex',alignItems:'center',gap:6,padding:'8px 16px',borderRadius:8,fontSize:12.5,fontWeight:700,background:'transparent',color:'#6b4a55',border:'1.5px solid #e4d8dc',textDecoration:'none'}}>⚡ Find Businesses</a>
-          <a href="/contacts" style={{display:'inline-flex',alignItems:'center',gap:6,padding:'8px 16px',borderRadius:8,fontSize:12.5,fontWeight:700,background:'linear-gradient(135deg,#6B1230,#8B1A3A)',color:'#fff',textDecoration:'none'}}>➕ Add Business</a>
+          <Link href="/find" style={{display:'inline-flex',alignItems:'center',gap:6,padding:'8px 16px',borderRadius:8,fontSize:12.5,fontWeight:700,background:'transparent',color:'#6b4a55',border:'1.5px solid #e4d8dc',textDecoration:'none'}}>⚡ Find Businesses</Link>
+          <Link href="/contacts" style={{display:'inline-flex',alignItems:'center',gap:6,padding:'8px 16px',borderRadius:8,fontSize:12.5,fontWeight:700,background:'linear-gradient(135deg,#6B1230,#8B1A3A)',color:'#fff',textDecoration:'none'}}>➕ Add Business</Link>
         </div>
       </div>
       <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:14,marginBottom:22}}>
@@ -72,7 +73,7 @@ export default async function Dashboard() {
         <div style={{background:'#fff',border:'1px solid #e4d8dc',borderRadius:12,overflow:'hidden'}}>
           <div style={{padding:'15px 20px',borderBottom:'1px solid #e4d8dc',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
             <div style={{fontFamily:'Nunito,sans-serif',fontSize:14,fontWeight:800}}>🗺 Pipeline</div>
-            <a href="/contacts" style={{fontSize:11.5,fontWeight:700,color:'#8B1A3A',textDecoration:'none'}}>View contacts →</a>
+            <Link href="/contacts" style={{fontSize:11.5,fontWeight:700,color:'#8B1A3A',textDecoration:'none'}}>View contacts →</Link>
           </div>
           <div style={{padding:'16px 20px',display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10}}>
             {pipeline.map(s=>(

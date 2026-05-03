@@ -1,9 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createContact, getContacts, updateContact } from '@/lib/brevo';
+import { requireSession } from '@/lib/auth';
 
 const BREVO_API_KEY = process.env.BREVO_API_KEY!;
 
+const ALLOWED_PUT_ATTRIBUTES = [
+  'OUTREACH_STATUS', 'NOTES', 'BUSINESS_NAME', 'BUSINESS_TYPE',
+  'TOWN', 'REGION', 'WEBSITE', 'PHONE', 'KNOWN_FOR',
+] as const;
+
 export async function GET(req: NextRequest) {
+  const unauthorized = await requireSession();
+  if (unauthorized) return unauthorized;
   try {
     const { searchParams } = new URL(req.url);
     const limit = Number(searchParams.get('limit') || 500);
@@ -28,6 +36,8 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const unauthorized = await requireSession();
+  if (unauthorized) return unauthorized;
   try {
     const body = await req.json();
     const { name, email, town, region, type, source, status, website, phone, notes, listIds } = body;
@@ -36,12 +46,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'email, name and town are required' }, { status: 400 });
     }
 
-    const nameParts = name.trim().split(' ');
-    const firstName = nameParts[0];
-    const lastName = nameParts.slice(1).join(' ') || '';
-
     const contact = await createContact({
-      email, firstName, lastName,
+      email,
       listIds: listIds || [],
       attributes: {
         BUSINESS_NAME: name, TOWN: town, REGION: region || '',
@@ -59,10 +65,21 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PUT(req: NextRequest) {
+  const unauthorized = await requireSession();
+  if (unauthorized) return unauthorized;
   try {
     const body = await req.json();
-    const { email, ...attributes } = body;
+    const { email, ...rest } = body;
     if (!email) return NextResponse.json({ error: 'email is required' }, { status: 400 });
+
+    const attributes: Record<string, string> = {};
+    for (const key of ALLOWED_PUT_ATTRIBUTES) {
+      if (key in rest) attributes[key] = String(rest[key] ?? '');
+    }
+    if (Object.keys(attributes).length === 0) {
+      return NextResponse.json({ error: 'no permitted attributes provided' }, { status: 400 });
+    }
+
     await updateContact(email, attributes);
     return NextResponse.json({ success: true });
   } catch (error: unknown) {

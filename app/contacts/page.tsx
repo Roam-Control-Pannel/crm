@@ -1,5 +1,6 @@
 'use client';
 import {useState,useEffect,useCallback} from 'react';
+import Link from 'next/link';
 
 interface Contact {id:number;email:string;attributes:Record<string,string>;listIds?:number[];}
 interface BrevoList {id:number;name:string;uniqueSubscribers:number;}
@@ -31,6 +32,7 @@ export default function ContactsPage(){
   const [newListName,setNewListName]=useState('');
   const [creatingList,setCreatingList]=useState(false);
   const [saving,setSaving]=useState(false);
+  const [saveError,setSaveError]=useState('');
   const [form,setForm]=useState({name:'',email:'',town:'',type:'Restaurant',website:'',phone:'',source:'manual',status:'not_contacted',notes:'',listId:''});
 
   const loadContacts=useCallback((listId?:string)=>{
@@ -43,6 +45,15 @@ export default function ContactsPage(){
     loadContacts();
     fetch('/api/brevo/lists').then(r=>r.ok?r.json():Promise.resolve({lists:[]})).then(d=>setLists(d.lists||[])).catch(()=>{});
   },[loadContacts]);
+
+  useEffect(()=>{
+    if(!showModal&&!showCreateList)return;
+    const onKey=(e:KeyboardEvent)=>{
+      if(e.key==='Escape'){setShowModal(false);setShowCreateList(false);}
+    };
+    window.addEventListener('keydown',onKey);
+    return()=>window.removeEventListener('keydown',onKey);
+  },[showModal,showCreateList]);
 
   function handleListFilter(val:string){setListFilter(val);setTownFilter('');setSearch('');loadContacts(val||undefined);}
 
@@ -69,12 +80,25 @@ export default function ContactsPage(){
   const selectedList=lists.find(l=>l.id===Number(listFilter));
 
   async function save(){
-    if(!form.email||!form.name||!form.town)return;
+    setSaveError('');
+    if(!form.email||!form.name||!form.town){setSaveError('Name, email and town are required');return;}
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)){setSaveError('Please enter a valid email address');return;}
     setSaving(true);
-    const listIds=form.listId?[Number(form.listId)]:[];
-    await fetch('/api/brevo/contacts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...form,listIds})});
-    loadContacts(listFilter||undefined);setShowModal(false);setSaving(false);
-    setForm({name:'',email:'',town:'',type:'Restaurant',website:'',phone:'',source:'manual',status:'not_contacted',notes:'',listId:''});
+    try {
+      const listIds=form.listId?[Number(form.listId)]:[];
+      const res=await fetch('/api/brevo/contacts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...form,listIds})});
+      if(!res.ok){
+        const d=await res.json().catch(()=>({}));
+        throw new Error(d.error||'Failed to save contact');
+      }
+      loadContacts(listFilter||undefined);
+      setShowModal(false);
+      setForm({name:'',email:'',town:'',type:'Restaurant',website:'',phone:'',source:'manual',status:'not_contacted',notes:'',listId:''});
+    } catch(e:unknown){
+      setSaveError(e instanceof Error?e.message:'Failed to save contact');
+    } finally {
+      setSaving(false);
+    }
   }
 
   const inp:React.CSSProperties={padding:'8px 12px',border:'1.5px solid var(--ink-200)',borderRadius:'var(--r-md)',fontSize:13,fontFamily:'inherit',background:'var(--white)',color:'var(--ink-900)',outline:'none',width:'100%'};
@@ -93,7 +117,7 @@ export default function ContactsPage(){
         </div>
         <div style={{display:'flex',gap:8,marginTop:2}}>
           <button style={btnG} onClick={()=>setShowCreateList(true)}>📋 New List</button>
-          <a href="/find" style={{...btnG,textDecoration:'none'}}>⚡ Find More</a>
+          <Link href="/find" style={{...btnG,textDecoration:'none'}}>⚡ Find More</Link>
           <button style={btnP} onClick={()=>setShowModal(true)}>➕ Add Contact</button>
         </div>
       </div>
@@ -134,7 +158,7 @@ export default function ContactsPage(){
           <div style={{overflowX:'auto'}}>
             <table style={{width:'100%',borderCollapse:'collapse'}}>
               <thead>
-                <tr>{['Name / Business','Email','Town','Source','Status','Actions'].map(h=>(
+                <tr>{['Name / Business','Email','Town','Source','Status'].map(h=>(
                   <th key={h} style={{padding:'10px 16px',textAlign:'left',fontSize:9.5,fontWeight:600,letterSpacing:'0.1em',textTransform:'uppercase',color:'var(--ink-400)',borderBottom:'1.5px solid var(--ink-100)',whiteSpace:'nowrap'}}>{h}</th>
                 ))}</tr>
               </thead>
@@ -162,13 +186,6 @@ export default function ContactsPage(){
                           <span style={{width:7,height:7,borderRadius:'50%',background:sColors[st]||'var(--ink-300)',display:'inline-block',flexShrink:0}}/>
                           {sLabels[st]||st}
                         </span>
-                      </td>
-                      <td style={{padding:'11px 16px'}}>
-                        <div style={{display:'flex',gap:4}}>
-                          {['✉','✎'].map(ic=>(
-                            <div key={ic} style={{width:28,height:28,borderRadius:'var(--r-xs)',border:'1.5px solid var(--ink-200)',background:'var(--white)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,cursor:'pointer',color:'var(--ink-500)'}}>{ic}</div>
-                          ))}
-                        </div>
                       </td>
                     </tr>
                   );
@@ -256,6 +273,9 @@ export default function ContactsPage(){
                 <textarea value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})} placeholder="e.g. Spoke to owner Sarah, very interested…" rows={2} style={{...inp,resize:'vertical'}}/>
               </div>
             </div>
+            {saveError&&(
+              <div role="alert" style={{margin:'0 24px 12px',padding:'10px 12px',background:'#fbeaef',border:'1px solid #f4d8df',borderRadius:8,fontSize:12,color:'var(--alert)'}}>{saveError}</div>
+            )}
             <div style={{padding:'16px 24px',borderTop:'1px solid var(--ink-100)',display:'flex',gap:8,justifyContent:'flex-end',position:'sticky',bottom:0,background:'var(--white)'}}>
               <button onClick={()=>setShowModal(false)} style={btnG}>Cancel</button>
               <button onClick={save} disabled={saving} style={{...btnP,opacity:saving?0.6:1}}>{saving?'Saving…':'✓ Save to Brevo'}</button>

@@ -1,3 +1,5 @@
+import Link from 'next/link';
+
 export default function SocialPage() {
   return (
     <div className="page-pad">
@@ -9,7 +11,7 @@ export default function SocialPage() {
         <div style={{fontSize:40,marginBottom:16}}>📅</div>
         <div style={{fontFamily:'Nunito,sans-serif',fontSize:18,fontWeight:800,marginBottom:8}}>Social Scheduler</div>
         <div style={{fontSize:13,color:'#9e7e88',marginBottom:24,maxWidth:400,margin:'0 auto 24px'}}>Connect your Instagram and LinkedIn accounts in Channels, then come back here to schedule and approve posts for each town.</div>
-        <a href="/channels" style={{display:'inline-flex',alignItems:'center',gap:6,padding:'10px 20px',borderRadius:8,fontSize:13,fontWeight:700,background:'linear-gradient(135deg,#6B1230,#8B1A3A)',color:'#fff',textDecoration:'none',boxShadow:'0 2px 8px rgba(139,26,58,0.28)'}}>⚙ Set up Channels →</a>
+        <Link href="/channels" style={{display:'inline-flex',alignItems:'center',gap:6,padding:'10px 20px',borderRadius:8,fontSize:13,fontWeight:700,background:'linear-gradient(135deg,#6B1230,#8B1A3A)',color:'#fff',textDecoration:'none',boxShadow:'0 2px 8px rgba(139,26,58,0.28)'}}>⚙ Set up Channels →</Link>
       </div>
     </div>
   );

@@ -56,14 +56,9 @@ export default function FindPage() {
       setResults(prev=>prev.map((x,idx)=>idx===i?{...x,enriching:true}:x));
       try{
         const details=await fetch(`/api/places/enrich?placeId=${r.placeId}`).then(d=>d.json());
-        let email=r.email;
         const website=details.website||r.website;
         const phone=details.phone||r.phone;
-        if(website&&!email){
-          const scraped=await fetch(`/api/scrape/email?website=${encodeURIComponent(website)}`).then(d=>d.json());
-          if(scraped.email)email=scraped.email;
-        }
-        setResults(prev=>prev.map((x,idx)=>idx===i?{...x,phone,website,email,enriching:false,enriched:true}:x));
+        setResults(prev=>prev.map((x,idx)=>idx===i?{...x,phone,website,enriching:false,enriched:true}:x));
       }catch{setResults(prev=>prev.map((x,idx)=>idx===i?{...x,enriching:false,enriched:true}:x));}
     }
     setEnriching(false);
@@ -81,16 +76,15 @@ export default function FindPage() {
   }
 
   async function importSelected(){
-    const sel=results.filter(r=>r.selected);
+    const sel=results.filter(r=>r.selected&&r.email);
     if(!sel.length)return;
     setImporting(true);setImportCount(0);
     const listIds=selectedList?[Number(selectedList)]:[];
     let count=0;
     for(const r of sel){
       try{
-        const email=r.email||`info@${r.name.toLowerCase().replace(/[^a-z0-9]/g,'').slice(0,20)}.co.uk`;
-        await fetch('/api/brevo/contacts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:r.name,email,town:r.town,source:'google',status:'not_contacted',website:r.website||'',phone:r.phone||'',listIds})});
-        count++;setImportCount(count);
+        const res=await fetch('/api/brevo/contacts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:r.name,email:r.email,town:r.town,source:'google',status:'not_contacted',website:r.website||'',phone:r.phone||'',listIds})});
+        if(res.ok){count++;setImportCount(count);}
       }catch(e){console.error(e);}
     }
     setImporting(false);setDone(true);
@@ -195,8 +189,8 @@ export default function FindPage() {
               </select>
               <button onClick={()=>setShowCreateList(true)} style={{...btnG,fontSize:11,padding:'6px 10px',flexShrink:0}}>📋 New List</button>
               {selectedListObj&&<span style={{fontSize:11,color:'var(--ok)',fontWeight:600,flexShrink:0}}>→ {selectedListObj.name}</span>}
-              <button onClick={importSelected} disabled={importing||done||!results.some(r=>r.selected)} style={{...btnP,fontSize:11.5,padding:'7px 14px',marginLeft:'auto',opacity:importing||done||!results.some(r=>r.selected)?0.6:1}}>
-                {importing?`Importing ${importCount}…`:done?'✓ Done!':'➕ Import to Brevo'}
+              <button onClick={importSelected} disabled={importing||done||!results.some(r=>r.selected&&r.email)} style={{...btnP,fontSize:11.5,padding:'7px 14px',marginLeft:'auto',opacity:importing||done||!results.some(r=>r.selected&&r.email)?0.6:1}}>
+                {importing?`Importing ${importCount}…`:done?'✓ Done!':`➕ Import ${results.filter(r=>r.selected&&r.email).length} to Brevo`}
               </button>
             </div>
           </div>
@@ -221,8 +215,17 @@ export default function FindPage() {
                     <td style={{padding:'11px 14px',fontSize:12,color:'var(--ink-800)',fontWeight:500,minWidth:120}}>
                       {r.enriching?<span style={{color:'var(--ink-300)',fontSize:11}}>⟳ finding…</span>:r.phone||<span style={{color:'var(--ink-200)'}}>—</span>}
                     </td>
-                    <td style={{padding:'11px 14px',fontSize:12,color:'var(--info)',fontWeight:500,minWidth:180}}>
-                      {r.enriching?<span style={{color:'var(--ink-300)',fontSize:11}}>⟳ finding…</span>:r.email||<span style={{color:'var(--ink-200)'}}>—</span>}
+                    <td style={{padding:'11px 14px',fontSize:12,color:'var(--info)',fontWeight:500,minWidth:200}}>
+                      {r.enriching
+                        ?<span style={{color:'var(--ink-300)',fontSize:11}}>⟳ finding…</span>
+                        :<input
+                            type="email"
+                            value={r.email}
+                            placeholder="add email…"
+                            onChange={e=>setResults(prev=>prev.map((x,idx)=>idx===i?{...x,email:e.target.value}:x))}
+                            style={{width:'100%',padding:'4px 6px',border:'1px solid transparent',borderRadius:4,fontSize:12,color:'var(--info)',background:r.email?'transparent':'var(--paper)',outline:'none',fontFamily:'inherit'}}
+                          />
+                      }
                     </td>
                     <td style={{padding:'11px 14px',fontSize:12,fontWeight:600,color:'var(--warn)'}}>{r.rating?`${r.rating} ★`:'—'}</td>
                     <td style={{padding:'11px 14px'}}>

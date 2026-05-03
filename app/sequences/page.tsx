@@ -59,9 +59,8 @@ export default function SequencesPage(){
 
       <div style={{display:'grid',gridTemplateColumns:'1fr 340px',gap:20,alignItems:'start'}}>
         <div style={{background:'#fff',border:'1px solid #e4d8dc',borderRadius:12,overflow:'hidden'}}>
-          <div style={{padding:'15px 20px',borderBottom:'1px solid #e4d8dc',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+          <div style={{padding:'15px 20px',borderBottom:'1px solid #e4d8dc'}}>
             <div style={{fontFamily:'Nunito,sans-serif',fontSize:14,fontWeight:800}}>✉ Outreach Sequence</div>
-            <button style={{fontSize:12,fontWeight:700,color:'#8B1A3A',background:'none',border:'none',cursor:'pointer'}}>Edit templates</button>
           </div>
           <div style={{padding:'20px'}}>
             {sequence.map((s,i)=>(

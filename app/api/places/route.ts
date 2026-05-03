@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requireSession } from '@/lib/auth';
 
 const GOOGLE_API_KEY = process.env.GOOGLE_PLACES_API_KEY!;
 
 export async function GET(req: NextRequest) {
+  const unauthorized = await requireSession();
+  if (unauthorized) return unauthorized;
   try {
     const { searchParams } = new URL(req.url);
     const town = searchParams.get('town');

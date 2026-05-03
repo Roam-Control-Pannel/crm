@@ -9,9 +9,11 @@ export default function LayoutShell({ children }: { children: React.ReactNode })
     return <main style={{ minHeight: '100vh' }}>{children}</main>;
   }
   return (
-    <>
+    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
       <Sidebar />
-      <main className="app-main">{children}</main>
-    </>
+      <main style={{ flex: 1, overflowY: 'auto', background: 'var(--paper)' }}>
+        {children}
+      </main>
+    </div>
   );
 }
