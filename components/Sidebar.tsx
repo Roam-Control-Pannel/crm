@@ -2,10 +2,13 @@
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
-const nav = [
+type NavItem = { label: string; icon: string; href: string; badgeKey?: 'queue' };
+type NavGroup = { section: string; items: NavItem[] };
+
+const nav: NavGroup[] = [
   { section: 'Overview', items: [
     { label: 'Dashboard', icon: '◈', href: '/' },
-    { label: "Today's Queue", icon: '✓', href: '/queue', badge: 14 },
+    { label: "Today's Queue", icon: '✓', href: '/queue', badgeKey: 'queue' },
   ]},
   { section: 'Businesses', items: [
     { label: 'Contact Manager', icon: '🏪', href: '/contacts' },
@@ -24,6 +27,7 @@ export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [queueCount, setQueueCount] = useState<number | null>(null);
 
   useEffect(() => { setOpen(false); }, [pathname]);
 
@@ -32,6 +36,17 @@ export default function Sidebar() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/stats')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (!cancelled && d && typeof d.followUpsDue === 'number') setQueueCount(d.followUpsDue); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [pathname]);
+
+  const badgeFor = (key?: 'queue') => key === 'queue' ? queueCount : null;
 
   return (
     <>
@@ -69,6 +84,7 @@ export default function Sidebar() {
               </div>
               {group.items.map(item => {
                 const active = pathname === item.href;
+                const badge = badgeFor(item.badgeKey);
                 return (
                   <div
                     key={item.href}
@@ -80,8 +96,8 @@ export default function Sidebar() {
                     )}
                     <span style={{ width: 16, textAlign: 'center', fontSize: 14 }}>{item.icon}</span>
                     <span style={{ flex: 1 }}>{item.label}</span>
-                    {'badge' in item && (
-                      <span style={{ background: '#8B1A3A', color: '#fff', fontSize: 9.5, fontWeight: 800, padding: '1px 7px', borderRadius: 20 }}>{item.badge}</span>
+                    {badge !== null && badge > 0 && (
+                      <span style={{ background: '#8B1A3A', color: '#fff', fontSize: 9.5, fontWeight: 800, padding: '1px 7px', borderRadius: 20 }}>{badge}</span>
                     )}
                   </div>
                 );

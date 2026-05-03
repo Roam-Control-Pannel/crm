@@ -1,20 +1,43 @@
 import { getContacts } from '@/lib/brevo';
+
+type BrevoContact = { attributes?: { OUTREACH_STATUS?: string; TOWN?: string } };
+
 async function getStats() {
   try {
-    const data = await getContacts(100,0);
-    const contacts = data.contacts||[];
-    const listed = contacts.filter((c:{attributes?:{OUTREACH_STATUS?:string}})=>c.attributes?.OUTREACH_STATUS==='listed').length;
-    const towns = new Set(contacts.map((c:{attributes?:{TOWN?:string}})=>c.attributes?.TOWN).filter(Boolean)).size;
-    return {total:contacts.length,listed,towns};
-  } catch {return {total:0,listed:0,towns:0};}
+    const data = await getContacts(500, 0);
+    const contacts: BrevoContact[] = data.contacts || [];
+    const total: number = typeof data.count === 'number' ? data.count : contacts.length;
+    let listed = 0, emailSent = 0, followedUp = 0, responded = 0, cold = 0;
+    const townSet = new Set<string>();
+    for (const c of contacts) {
+      const s = c.attributes?.OUTREACH_STATUS || 'not_contacted';
+      if (s === 'listed') listed++;
+      else if (s === 'email_sent') emailSent++;
+      else if (s === 'followed_up') followedUp++;
+      else if (s === 'responded') responded++;
+      else if (s === 'cold') cold++;
+      const t = c.attributes?.TOWN;
+      if (t) townSet.add(t);
+    }
+    const followUpsDue = emailSent + followedUp;
+    const emailsSent = emailSent + followedUp + responded + listed + cold;
+    const replyRate = emailsSent > 0 ? Math.round(((responded + listed) / emailsSent) * 100) : 0;
+    return { total, towns: townSet.size, listed, followUpsDue, emailsSent, replyRate };
+  } catch {
+    return { total: 0, towns: 0, listed: 0, followUpsDue: 0, emailsSent: 0, replyRate: 0 };
+  }
 }
+
 export default async function Dashboard() {
   const stats = await getStats();
+  const subtitleAction = stats.followUpsDue > 0
+    ? `${stats.followUpsDue} follow-up${stats.followUpsDue === 1 ? '' : 's'} due`
+    : 'No follow-ups due';
   const cards = [
-    {label:'Towns Active',value:stats.towns||47,delta:'↑ 3 this week',icon:'📍',color:'#8B1A3A',pale:'#f9eaee'},
-    {label:'Businesses Listed',value:stats.listed||312,delta:'↑ 28 this month',icon:'🏪',color:'#2d7a4f',pale:'#e8f5ee'},
-    {label:'Posts Scheduled',value:86,delta:'4 pending review',icon:'📣',color:'#b06820',pale:'#fdf0e4'},
-    {label:'Contacts Total',value:stats.total||134,delta:'↑ 19 this week',icon:'✉️',color:'#1a6b9a',pale:'#e4f2fb'},
+    {label:'Towns Active',value:stats.towns,delta:stats.towns ? `${stats.towns} active` : 'No towns yet',icon:'📍',color:'#8B1A3A',pale:'#f9eaee'},
+    {label:'Businesses Listed',value:stats.listed,delta:stats.listed ? `${stats.listed} live on Roam` : 'None listed yet',icon:'🏪',color:'#2d7a4f',pale:'#e8f5ee'},
+    {label:'Follow-ups Due',value:stats.followUpsDue,delta:stats.followUpsDue ? 'Awaiting next step' : 'All caught up',icon:'⏱',color:'#b06820',pale:'#fdf0e4'},
+    {label:'Contacts Total',value:stats.total,delta:`${stats.emailsSent} contacted · ${stats.replyRate}% reply`,icon:'✉️',color:'#1a6b9a',pale:'#e4f2fb'},
   ];
   const activity = [
     {dot:'#2d7a4f',text:'The Harbour Arms listed on Roam',time:'Whitstable · 12 min ago'},
@@ -28,7 +51,7 @@ export default async function Dashboard() {
       <div className="page-header" style={{marginBottom:24}}>
         <div>
           <h1 style={{fontFamily:'Nunito,sans-serif',fontSize:22,fontWeight:900,color:'#1a0d12',margin:0,letterSpacing:-0.3}}>Growth Dashboard</h1>
-          <p style={{fontSize:12,color:'#9e7e88',margin:'3px 0 0',fontWeight:500}}>{new Date().toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric'})} · 14 items awaiting approval</p>
+          <p style={{fontSize:12,color:'#9e7e88',margin:'3px 0 0',fontWeight:500}}>{new Date().toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric'})} · {subtitleAction}</p>
         </div>
         <div className="actions" style={{display:'flex',gap:8}}>
           <a href="/find" style={{display:'inline-flex',alignItems:'center',gap:6,padding:'8px 16px',borderRadius:8,fontSize:12.5,fontWeight:700,background:'transparent',color:'#6b4a55',border:'1.5px solid #e4d8dc',textDecoration:'none'}}>⚡ Find Businesses</a>
