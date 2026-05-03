@@ -1,104 +1,105 @@
 'use client';
-import { usePathname, useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { usePathname } from 'next/navigation';
+import Link from 'next/link';
 
-const nav = [
-  { section: 'Overview', items: [
-    { label: 'Dashboard', icon: '◈', href: '/' },
-    { label: "Today's Queue", icon: '✓', href: '/queue', badge: 14 },
-  ]},
-  { section: 'Businesses', items: [
-    { label: 'Contact Manager', icon: '🏪', href: '/contacts' },
-    { label: 'Find Businesses', icon: '⚡', href: '/find' },
-    { label: 'Email Sequences', icon: '✉', href: '/sequences' },
-  ]},
-  { section: 'Content', items: [
-    { label: 'Social Posts', icon: '↑', href: '/social' },
-  ]},
-  { section: 'Settings', items: [
-    { label: 'Channels', icon: '⚙', href: '/channels' },
-  ]},
+const navSections = [
+  {
+    label: 'Overview',
+    items: [
+      { icon: '◆', label: 'Dashboard', href: '/' },
+      { icon: '✓', label: "Today's Queue", href: '/queue' },
+    ],
+  },
+  {
+    label: 'Businesses',
+    items: [
+      { icon: '🏪', label: 'Contact Manager', href: '/contacts' },
+      { icon: '⚡', label: 'Find Businesses', href: '/find' },
+      { icon: '✉', label: 'Email Sequences', href: '/sequences' },
+    ],
+  },
+  {
+    label: 'Content',
+    items: [
+      { icon: '↑', label: 'Social Posts', href: '/social' },
+      { icon: '⚙', label: 'Channels', href: '/channels' },
+    ],
+  },
 ];
 
 export default function Sidebar() {
   const pathname = usePathname();
-  const router = useRouter();
-  const [open, setOpen] = useState(false);
-
-  useEffect(() => { setOpen(false); }, [pathname]);
-
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') setOpen(false); }
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
-
   return (
-    <>
-      <button
-        type="button"
-        aria-label="Toggle navigation menu"
-        aria-expanded={open}
-        className="mobile-menu-btn"
-        onClick={() => setOpen(o => !o)}
-      >
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-          {open
-            ? <><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></>
-            : <><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></>
-          }
-        </svg>
-      </button>
-      <div className={`sidebar-backdrop${open ? ' open' : ''}`} onClick={() => setOpen(false)} aria-hidden="true" />
-      <aside className={`app-sidebar${open ? ' open' : ''}`} style={{ width: 240, background: '#1a0d12', position: 'fixed', top: 0, left: 0, bottom: 0, zIndex: 200, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        <div style={{ position: 'absolute', top: -60, left: -60, width: 220, height: 220, background: 'radial-gradient(circle, rgba(139,26,58,0.3) 0%, transparent 70%)', pointerEvents: 'none' }} />
-        <div style={{ padding: '20px 18px 18px', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ width: 36, height: 36, background: 'linear-gradient(135deg, #6B1230, #8B1A3A)', borderRadius: 9, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 17, boxShadow: '0 2px 8px rgba(139,26,58,0.4)', flexShrink: 0 }}>🦁</div>
-            <div>
-              <div style={{ fontFamily: 'Nunito, sans-serif', fontWeight: 900, fontSize: 19, color: '#fff', letterSpacing: -0.5 }}>roam</div>
-              <div style={{ fontSize: 8.5, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'rgba(255,255,255,0.28)', marginTop: 1 }}>Growth Engine</div>
-            </div>
-          </div>
+    <aside style={{
+      width: 224, background: 'var(--maroon-900)',
+      display: 'flex', flexDirection: 'column',
+      flexShrink: 0, height: '100vh', overflowY: 'auto',
+    }}>
+      {/* Logo */}
+      <div style={{
+        padding: '18px 16px', display: 'flex', alignItems: 'center', gap: 10,
+        borderBottom: '1px solid rgba(255,255,255,0.08)', marginBottom: 12,
+      }}>
+        <div style={{
+          width: 34, height: 34, background: 'var(--sun-500)',
+          borderRadius: 'var(--r-sm)', display: 'flex',
+          alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0,
+        }}>🦁</div>
+        <div>
+          <div style={{ color: '#fff', fontWeight: 800, fontSize: 15, letterSpacing: '-0.3px' }}>roam</div>
+          <div style={{ color: 'rgba(255,255,255,0.35)', fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase' }}>Growth Engine</div>
         </div>
-        <nav style={{ padding: '14px 0', flex: 1, overflowY: 'auto' }}>
-          {nav.map(group => (
-            <div key={group.section}>
-              <div style={{ padding: '10px 18px 4px', fontSize: 9, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'rgba(255,255,255,0.22)' }}>
-                {group.section}
-              </div>
-              {group.items.map(item => {
-                const active = pathname === item.href;
-                return (
-                  <div
-                    key={item.href}
-                    onClick={() => router.push(item.href)}
-                    style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 18px', margin: '1px 8px', borderRadius: 8, fontSize: 13, fontWeight: 600, color: active ? '#f5c0cc' : 'rgba(255,255,255,0.48)', background: active ? 'rgba(139,26,58,0.12)' : 'transparent', border: active ? '1px solid rgba(139,26,58,0.28)' : '1px solid transparent', cursor: 'pointer', position: 'relative' }}
-                  >
-                    {active && (
-                      <div style={{ position: 'absolute', left: -8, top: '50%', transform: 'translateY(-50%)', width: 3, height: '60%', background: '#C44060', borderRadius: '0 2px 2px 0' }} />
-                    )}
-                    <span style={{ width: 16, textAlign: 'center', fontSize: 14 }}>{item.icon}</span>
-                    <span style={{ flex: 1 }}>{item.label}</span>
-                    {'badge' in item && (
-                      <span style={{ background: '#8B1A3A', color: '#fff', fontSize: 9.5, fontWeight: 800, padding: '1px 7px', borderRadius: 20 }}>{item.badge}</span>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          ))}
-        </nav>
-        <div style={{ padding: 14, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '7px 8px' }}>
-            <div style={{ width: 30, height: 30, borderRadius: '50%', background: 'linear-gradient(135deg, #8B1A3A, #C44060)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 800, color: '#fff' }}>RL</div>
-            <div>
-              <div style={{ fontSize: 12, fontWeight: 700, color: 'rgba(255,255,255,0.7)' }}>Roam Local</div>
-              <div style={{ fontSize: 9.5, color: 'rgba(255,255,255,0.28)' }}>Admin · All towns</div>
-            </div>
+      </div>
+
+      {/* Nav */}
+      <div style={{ flex: 1, padding: '0 8px' }}>
+        {navSections.map(section => (
+          <div key={section.label} style={{ marginBottom: 20 }}>
+            <div style={{
+              fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase',
+              color: 'rgba(255,255,255,0.3)', padding: '0 8px', marginBottom: 4, fontWeight: 500,
+            }}>{section.label}</div>
+            {section.items.map(item => {
+              const active = pathname === item.href;
+              return (
+                <Link key={item.href} href={item.href} style={{
+                  display: 'flex', alignItems: 'center', gap: 9,
+                  padding: '7px 9px', borderRadius: 'var(--r-sm)',
+                  fontSize: 13, textDecoration: 'none', marginBottom: 2,
+                  background: active ? 'rgba(255,255,255,0.1)' : 'transparent',
+                  color: active ? '#fff' : 'rgba(255,255,255,0.6)',
+                  transition: 'all 0.15s',
+                }}>
+                  <div style={{
+                    width: 20, height: 20, borderRadius: 5,
+                    background: active ? 'var(--maroon-500)' : 'rgba(255,255,255,0.08)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 11, flexShrink: 0,
+                  }}>{item.icon}</div>
+                  <span style={{ flex: 1 }}>{item.label}</span>
+                </Link>
+              );
+            })}
           </div>
+        ))}
+      </div>
+
+      {/* User footer */}
+      <div style={{
+        padding: '12px 14px', borderTop: '1px solid rgba(255,255,255,0.08)',
+        display: 'flex', alignItems: 'center', gap: 9,
+      }}>
+        <div style={{
+          width: 30, height: 30, borderRadius: '50%',
+          background: 'var(--maroon-600)', display: 'flex',
+          alignItems: 'center', justifyContent: 'center',
+          fontSize: 11, fontWeight: 700, color: '#fff', flexShrink: 0,
+        }}>RL</div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ color: '#fff', fontSize: 12, fontWeight: 600 }}>Roam Local</div>
+          <div style={{ color: 'rgba(255,255,255,0.35)', fontSize: 10 }}>Admin · All towns</div>
         </div>
-      </aside>
-    </>
+      </div>
+    </aside>
   );
 }
