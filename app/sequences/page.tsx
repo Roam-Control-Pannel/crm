@@ -45,7 +45,7 @@ export default function SequencesPage() {
           </div>
           <div style={{background:'#fff',border:'1px solid #e4d8dc',borderRadius:12,padding:20}}>
             <div style={{fontFamily:'Nunito,sans-serif',fontSize:14,fontWeight:800,marginBottom:16}}>⚙ Settings</div>
-            {[{l:'Sending account',v:'hello@roamlocal.app'},{l:'Send time',v:'Tue–Thu 9–11am'},{l:'Follow-up delay',v:'2 days'},{l:'Final nudge',v:'Day 7'}].map(s=>(
+            {[{l:'Sending account',v:'hello@roam-local.co.uk'},{l:'Send time',v:'Tue–Thu 9–11am'},{l:'Follow-up delay',v:'2 days'},{l:'Final nudge',v:'Day 7'}].map(s=>(
               <div key={s.l} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'10px 0',borderBottom:'1px solid #f0e8ea'}}>
                 <span style={{fontSize:12,fontWeight:600,color:'#6b4a55'}}>{s.l}</span>
                 <span style={{fontSize:12,fontWeight:700,color:'#1a0d12'}}>{s.v}</span>
