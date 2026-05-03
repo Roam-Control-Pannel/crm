@@ -25,9 +25,9 @@ export default function LoginPage() {
   }
 
   return (
-    <div style={{ minHeight: '100vh', background: '#1a0d12', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'Nunito Sans, sans-serif' }}>
-      <div style={{ position: 'absolute', top: '20%', left: '50%', transform: 'translateX(-50%)', width: 600, height: 600, background: 'radial-gradient(circle, rgba(139,26,58,0.25) 0%, transparent 70%)', pointerEvents: 'none' }} />
-      <div style={{ width: 380, position: 'relative' }}>
+    <div style={{ minHeight: '100vh', background: '#1a0d12', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'Nunito Sans, sans-serif', padding: 16, overflow: 'hidden' }}>
+      <div style={{ position: 'absolute', top: '20%', left: '50%', transform: 'translateX(-50%)', width: 600, height: 600, maxWidth: '100vw', background: 'radial-gradient(circle, rgba(139,26,58,0.25) 0%, transparent 70%)', pointerEvents: 'none' }} />
+      <div className="login-card">
         <div style={{ textAlign: 'center', marginBottom: 36 }}>
           <div style={{ width: 56, height: 56, background: 'linear-gradient(135deg, #6B1230, #8B1A3A)', borderRadius: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 26, margin: '0 auto 16px', boxShadow: '0 4px 20px rgba(139,26,58,0.5)' }}>🦁</div>
           <div style={{ fontFamily: 'Nunito, sans-serif', fontWeight: 900, fontSize: 28, color: '#fff', letterSpacing: -1 }}>roam</div>
@@ -36,13 +36,13 @@ export default function LoginPage() {
         <form onSubmit={handleLogin} style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 16, padding: 32 }}>
           <div style={{ marginBottom: 18 }}>
             <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: 'rgba(255,255,255,0.5)', marginBottom: 8, letterSpacing: 0.5 }}>Username</label>
-            <input type="text" value={username} onChange={e => setUsername(e.target.value)} placeholder="Enter username" required
-              style={{ width: '100%', padding: '11px 14px', background: 'rgba(255,255,255,0.06)', border: '1.5px solid rgba(255,255,255,0.1)', borderRadius: 8, fontSize: 14, color: '#fff', outline: 'none', fontFamily: 'Nunito Sans, sans-serif', boxSizing: 'border-box' }}/>
+            <input type="text" value={username} onChange={e => setUsername(e.target.value)} placeholder="Enter username" required autoComplete="username" autoCapitalize="none" autoCorrect="off"
+              style={{ width: '100%', padding: '11px 14px', background: 'rgba(255,255,255,0.06)', border: '1.5px solid rgba(255,255,255,0.1)', borderRadius: 8, fontSize: 16, color: '#fff', outline: 'none', fontFamily: 'Nunito Sans, sans-serif', boxSizing: 'border-box' }}/>
           </div>
           <div style={{ marginBottom: 24 }}>
             <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: 'rgba(255,255,255,0.5)', marginBottom: 8, letterSpacing: 0.5 }}>Password</label>
-            <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Enter password" required
-              style={{ width: '100%', padding: '11px 14px', background: 'rgba(255,255,255,0.06)', border: '1.5px solid rgba(255,255,255,0.1)', borderRadius: 8, fontSize: 14, color: '#fff', outline: 'none', fontFamily: 'Nunito Sans, sans-serif', boxSizing: 'border-box' }}/>
+            <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Enter password" required autoComplete="current-password"
+              style={{ width: '100%', padding: '11px 14px', background: 'rgba(255,255,255,0.06)', border: '1.5px solid rgba(255,255,255,0.1)', borderRadius: 8, fontSize: 16, color: '#fff', outline: 'none', fontFamily: 'Nunito Sans, sans-serif', boxSizing: 'border-box' }}/>
           </div>
           {error && (
             <div style={{ background: 'rgba(139,26,58,0.2)', border: '1px solid rgba(139,26,58,0.4)', borderRadius: 8, padding: '10px 14px', fontSize: 13, color: '#f5c0cc', marginBottom: 18, textAlign: 'center' }}>{error}</div>

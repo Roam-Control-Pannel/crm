@@ -6,12 +6,12 @@ export default function SequencesPage() {
     {num:4,done:false,title:'Mark as Cold',meta:'Day 14 · Archived automatically',preview:'Business is marked cold in the pipeline. Can be re-activated after 90 days.'},
   ];
   return (
-    <div style={{padding:'22px 24px'}}>
+    <div className="page-pad">
       <div style={{marginBottom:20}}>
         <h1 style={{fontFamily:'Nunito,sans-serif',fontSize:22,fontWeight:900,color:'#1a0d12',margin:0}}>Email Sequences</h1>
         <p style={{fontSize:12,color:'#9e7e88',margin:'3px 0 0',fontWeight:500}}>Automated 3-step outreach · personalised per town using your city page data</p>
       </div>
-      <div style={{display:'grid',gridTemplateColumns:'1.4fr 1fr',gap:20}}>
+      <div className="grid-seq">
         <div style={{background:'#fff',border:'1px solid #e4d8dc',borderRadius:12,overflow:'hidden'}}>
           <div style={{padding:'15px 20px',borderBottom:'1px solid #e4d8dc',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
             <div style={{fontFamily:'Nunito,sans-serif',fontSize:14,fontWeight:800}}>✉ Outreach Sequence</div>

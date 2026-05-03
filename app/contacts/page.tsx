@@ -71,21 +71,21 @@ export default function ContactsPage() {
   }
 
   return (
-    <div style={{padding:'22px 24px'}}>
-      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:20}}>
+    <div className="page-pad">
+      <div className="page-header" style={{marginBottom:20}}>
         <div>
           <h1 style={{fontFamily:'Nunito,sans-serif',fontSize:22,fontWeight:900,color:'#1a0d12',margin:0}}>Contact Manager</h1>
           <p style={{fontSize:12,color:'#9e7e88',margin:'3px 0 0',fontWeight:500}}>
             {selectedList?`${selectedList.name} · ${contacts.length} contacts`:`${contacts.length} contacts · ${lists.length} lists`} · target 10–20 per location
           </p>
         </div>
-        <div style={{display:'flex',gap:8}}>
+        <div className="actions" style={{display:'flex',gap:8}}>
           <a href="/find" style={{...btnG,textDecoration:'none'}}>⚡ Find More</a>
           <button style={btnP} onClick={()=>setShowModal(true)}>➕ Add Contact</button>
         </div>
       </div>
 
-      <div style={{display:'flex',gap:10,marginBottom:16,flexWrap:'wrap'}}>
+      <div className="filter-bar" style={{marginBottom:16}}>
         <div style={{flex:2,minWidth:200,position:'relative'}}>
           <span style={{position:'absolute',left:10,top:'50%',transform:'translateY(-50%)',fontSize:13}}>🔍</span>
           <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search name, email, town…" style={{...inp,paddingLeft:34}}/>
@@ -103,7 +103,7 @@ export default function ContactsPage() {
       </div>
 
       <div style={{background:'#fff',border:'1px solid #e4d8dc',borderRadius:12,overflow:'hidden'}}>
-        <div style={{padding:'15px 20px',borderBottom:'1px solid #e4d8dc',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+        <div className="card-header" style={{padding:'15px 20px',borderBottom:'1px solid #e4d8dc'}}>
           <div style={{fontFamily:'Nunito,sans-serif',fontSize:14,fontWeight:800}}>
             🏪 Contacts <span style={{fontSize:12,color:'#9e7e88',fontWeight:600}}>{filtered.length} shown{listFilter?` in list`:` of ${contacts.length}`}</span>
           </div>
@@ -115,7 +115,7 @@ export default function ContactsPage() {
           ?<div style={{padding:40,textAlign:'center',color:'#9e7e88',fontSize:13}}>No contacts in this list yet</div>
           :filtered.length===0
           ?<div style={{padding:40,textAlign:'center',color:'#9e7e88',fontSize:13}}>No contacts match your filters</div>
-          :<div style={{overflowX:'auto'}}>
+          :<div className="table-wrap">
             <table style={{width:'100%',borderCollapse:'collapse'}}>
               <thead>
                 <tr>{['Name / Business','Email','Town','Source','Status','Actions'].map(h=>(
@@ -161,7 +161,7 @@ export default function ContactsPage() {
                   <input value={form[f.k as keyof typeof form]} onChange={e=>setForm({...form,[f.k]:e.target.value})} placeholder={f.p} style={inp}/>
                 </div>
               ))}
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14}}>
+              <div className="form-2col">
                 <div>
                   <label style={{display:'block',fontSize:11.5,fontWeight:700,color:'#6b4a55',marginBottom:5}}>Add to List</label>
                   <select value={form.listId} onChange={e=>setForm({...form,listId:e.target.value})} style={{...inp,cursor:'pointer'}}>
@@ -178,7 +178,7 @@ export default function ContactsPage() {
                   </select>
                 </div>
               </div>
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14}}>
+              <div className="form-2col">
                 <div>
                   <label style={{display:'block',fontSize:11.5,fontWeight:700,color:'#6b4a55',marginBottom:5}}>Source</label>
                   <select value={form.source} onChange={e=>setForm({...form,source:e.target.value})} style={{...inp,cursor:'pointer'}}>
