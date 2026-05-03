@@ -39,9 +39,9 @@ export default function ContactsPage() {
 
   const filtered=contacts.filter(c=>{
     const q=search.toLowerCase();
-    const name=(c.attributes?.BUSINESS_NAME||c.attributes?.FIRSTNAME||c.email).toLowerCase();
+    const name=(c.attributes?.BUSINESS_NAME||c.attributes?.FIRSTNAME||c.email||"").toLowerCase();
     const town=(c.attributes?.TOWN||'').toLowerCase();
-    const email=c.email.toLowerCase();
+    const email=(c.email||"").toLowerCase();
     return(!q||name.includes(q)||town.includes(q)||email.includes(q))&&(!townFilter||c.attributes?.TOWN===townFilter);
   });
 
