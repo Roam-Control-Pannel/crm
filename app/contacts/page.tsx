@@ -120,7 +120,7 @@ export default function ContactsPage(){
       <div style={{background:'var(--white)',borderRadius:'var(--r-lg)',boxShadow:'var(--shadow-sm)',overflow:'hidden'}}>
         <div style={{padding:'13px 18px',borderBottom:'1px solid var(--ink-100)',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
           <div style={{fontSize:13,fontWeight:700,color:'var(--ink-800)'}}>
-            🏪 Contacts <span style={{fontSize:11.5,color:'var(--ink-400)',fontWeight:500'}}>{filtered.length} shown{listFilter?` in list`:` of ${contacts.length}`}</span>
+            🏪 Contacts <span style={{fontSize:11.5,color:'var(--ink-400)',fontWeight:500}}>{filtered.length} shown{listFilter?` in list`:` of ${contacts.length}`}</span>
           </div>
           <span style={{fontSize:11,color:'var(--ink-400)',fontWeight:500}}>Target: 10–20 per town</span>
         </div>
