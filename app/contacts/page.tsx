@@ -7,6 +7,17 @@ const srcS:Record<string,{bg:string;color:string}>={google:{bg:'#e4f2fb',color:'
 const inp:React.CSSProperties={padding:'9px 12px',border:'1.5px solid #e4d8dc',borderRadius:8,fontSize:13,fontFamily:'Nunito Sans,sans-serif',background:'#fff',color:'#1a0d12',outline:'none',width:'100%'};
 const btnP:React.CSSProperties={display:'inline-flex',alignItems:'center',gap:6,padding:'8px 16px',borderRadius:8,fontSize:12.5,fontWeight:700,cursor:'pointer',border:'none',fontFamily:'Nunito Sans,sans-serif',background:'linear-gradient(135deg,#6B1230,#8B1A3A)',color:'#fff',boxShadow:'0 2px 8px rgba(139,26,58,0.28)'};
 const btnG:React.CSSProperties={display:'inline-flex',alignItems:'center',gap:6,padding:'8px 16px',borderRadius:8,fontSize:12.5,fontWeight:700,cursor:'pointer',fontFamily:'Nunito Sans,sans-serif',background:'transparent',color:'#6b4a55',border:'1.5px solid #e4d8dc'};
+
+function uniqueTowns(contacts: Contact[]): string[] {
+  const seen: Record<string, boolean> = {};
+  const result: string[] = [];
+  contacts.forEach(c => {
+    const t = c.attributes?.TOWN;
+    if (t && !seen[t]) { seen[t] = true; result.push(t); }
+  });
+  return result.sort();
+}
+
 export default function ContactsPage() {
   const [contacts,setContacts]=useState<Contact[]>([]);
   const [loading,setLoading]=useState(true);
@@ -15,11 +26,17 @@ export default function ContactsPage() {
   const [showModal,setShowModal]=useState(false);
   const [saving,setSaving]=useState(false);
   const [form,setForm]=useState({name:'',email:'',town:'',type:'Restaurant',website:'',phone:'',source:'manual',status:'not_contacted',notes:''});
+
   const load=useCallback(()=>{
     setLoading(true);
-    fetch('/api/brevo/contacts?limit=100').then(r=>r.json()).then(d=>{setContacts(d.contacts||[]);setLoading(false);}).catch(()=>setLoading(false));
+    fetch('/api/brevo/contacts?limit=100')
+      .then(r=>r.json())
+      .then(d=>{setContacts(d.contacts||[]);setLoading(false);})
+      .catch(()=>setLoading(false));
   },[]);
+
   useEffect(()=>{load();},[load]);
+
   const filtered=contacts.filter(c=>{
     const q=search.toLowerCase();
     const name=(c.attributes?.BUSINESS_NAME||c.attributes?.FIRSTNAME||c.email).toLowerCase();
@@ -27,7 +44,9 @@ export default function ContactsPage() {
     const email=c.email.toLowerCase();
     return(!q||name.includes(q)||town.includes(q)||email.includes(q))&&(!townFilter||c.attributes?.TOWN===townFilter);
   });
-  const towns=Array.from(new Set(contacts.map(c=>c.attributes?.TOWN).filter(Boolean))).sort() as string[];
+
+  const towns=uniqueTowns(contacts);
+
   async function save() {
     if(!form.email||!form.name||!form.town)return;
     setSaving(true);
@@ -35,6 +54,7 @@ export default function ContactsPage() {
     load();setShowModal(false);setSaving(false);
     setForm({name:'',email:'',town:'',type:'Restaurant',website:'',phone:'',source:'manual',status:'not_contacted',notes:''});
   }
+
   return (
     <div style={{padding:'22px 24px'}}>
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:20}}>
@@ -59,37 +79,47 @@ export default function ContactsPage() {
       </div>
       <div style={{background:'#fff',border:'1px solid #e4d8dc',borderRadius:12,overflow:'hidden'}}>
         <div style={{padding:'15px 20px',borderBottom:'1px solid #e4d8dc',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-          <div style={{fontFamily:'Nunito,sans-serif',fontSize:14,fontWeight:800}}>🏪 Contacts <span style={{fontSize:12,color:'#9e7e88',fontWeight:600}}>{filtered.length} shown of {contacts.length}</span></div>
+          <div style={{fontFamily:'Nunito,sans-serif',fontSize:14,fontWeight:800}}>
+            🏪 Contacts <span style={{fontSize:12,color:'#9e7e88',fontWeight:600}}>{filtered.length} shown of {contacts.length}</span>
+          </div>
           <span style={{fontSize:11,color:'#9e7e88',fontWeight:600}}>Target: 10–20 per town</span>
         </div>
-        {loading?<div style={{padding:40,textAlign:'center',color:'#9e7e88',fontSize:13}}>Loading from Brevo…</div>
-        :filtered.length===0&&contacts.length===0?<div style={{padding:40,textAlign:'center',color:'#9e7e88',fontSize:13}}>No contacts yet — add one or use Find Businesses</div>
-        :filtered.length===0?<div style={{padding:40,textAlign:'center',color:'#9e7e88',fontSize:13}}>No contacts match your search</div>
-        :<div style={{overflowX:'auto'}}>
-          <table style={{width:'100%',borderCollapse:'collapse'}}>
-            <thead><tr>{['Name / Business','Email','Town','Source','Status','Actions'].map(h=><th key={h} style={{padding:'10px 14px',textAlign:'left',fontSize:10,fontWeight:800,letterSpacing:1,textTransform:'uppercase',color:'#9e7e88',borderBottom:'2px solid #e4d8dc',whiteSpace:'nowrap'}}>{h}</th>)}</tr></thead>
-            <tbody>
-              {filtered.map(c=>{
-                const nm=c.attributes?.BUSINESS_NAME||c.attributes?.FIRSTNAME||c.email;
-                const tp=c.attributes?.BUSINESS_TYPE||'';
-                const tn=c.attributes?.TOWN||'—';
-                const src=(c.attributes?.SOURCE||'manual') as string;
-                const st=(c.attributes?.OUTREACH_STATUS||'not_contacted') as string;
-                const sc=srcS[src]||srcS.manual;
-                return (
-                  <tr key={c.id} style={{borderBottom:'1px solid #e4d8dc'}}>
-                    <td style={{padding:'12px 14px'}}><div style={{fontSize:13,fontWeight:700}}>{nm}</div><div style={{fontSize:11,color:'#9e7e88'}}>{tp}</div></td>
-                    <td style={{padding:'12px 14px',fontSize:11.5,color:'#1a6b9a',fontWeight:600}}>{c.email}</td>
-                    <td style={{padding:'12px 14px',fontSize:12.5}}>{tn}</td>
-                    <td style={{padding:'12px 14px'}}><span style={{fontSize:9,fontWeight:700,padding:'2px 8px',borderRadius:20,background:sc.bg,color:sc.color,textTransform:'capitalize'}}>{src}</span></td>
-                    <td style={{padding:'12px 14px'}}><span style={{display:'inline-flex',alignItems:'center',gap:5,fontSize:11,fontWeight:700}}><span style={{width:7,height:7,borderRadius:'50%',background:sColors[st]||'#aaa',display:'inline-block'}}/>{sLabels[st]||st}</span></td>
-                    <td style={{padding:'12px 14px'}}><div style={{display:'flex',gap:5}}>{['✉','✎'].map(ic=><div key={ic} style={{width:28,height:28,borderRadius:6,border:'1.5px solid #e4d8dc',background:'#fff',display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,cursor:'pointer'}}>{ic}</div>)}</div></td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>}
+        {loading
+          ?<div style={{padding:40,textAlign:'center',color:'#9e7e88',fontSize:13}}>Loading from Brevo…</div>
+          :contacts.length===0
+          ?<div style={{padding:40,textAlign:'center',color:'#9e7e88',fontSize:13}}>No contacts yet — add one or use Find Businesses</div>
+          :filtered.length===0
+          ?<div style={{padding:40,textAlign:'center',color:'#9e7e88',fontSize:13}}>No contacts match your search</div>
+          :<div style={{overflowX:'auto'}}>
+            <table style={{width:'100%',borderCollapse:'collapse'}}>
+              <thead>
+                <tr>{['Name / Business','Email','Town','Source','Status','Actions'].map(h=>(
+                  <th key={h} style={{padding:'10px 14px',textAlign:'left',fontSize:10,fontWeight:800,letterSpacing:1,textTransform:'uppercase',color:'#9e7e88',borderBottom:'2px solid #e4d8dc',whiteSpace:'nowrap'}}>{h}</th>
+                ))}</tr>
+              </thead>
+              <tbody>
+                {filtered.map(c=>{
+                  const nm=c.attributes?.BUSINESS_NAME||c.attributes?.FIRSTNAME||c.email;
+                  const tp=c.attributes?.BUSINESS_TYPE||'';
+                  const tn=c.attributes?.TOWN||'—';
+                  const src=(c.attributes?.SOURCE||'manual') as string;
+                  const st=(c.attributes?.OUTREACH_STATUS||'not_contacted') as string;
+                  const sc=srcS[src]||srcS.manual;
+                  return (
+                    <tr key={c.id} style={{borderBottom:'1px solid #e4d8dc'}}>
+                      <td style={{padding:'12px 14px'}}><div style={{fontSize:13,fontWeight:700}}>{nm}</div><div style={{fontSize:11,color:'#9e7e88'}}>{tp}</div></td>
+                      <td style={{padding:'12px 14px',fontSize:11.5,color:'#1a6b9a',fontWeight:600}}>{c.email}</td>
+                      <td style={{padding:'12px 14px',fontSize:12.5}}>{tn}</td>
+                      <td style={{padding:'12px 14px'}}><span style={{fontSize:9,fontWeight:700,padding:'2px 8px',borderRadius:20,background:sc.bg,color:sc.color,textTransform:'capitalize'}}>{src}</span></td>
+                      <td style={{padding:'12px 14px'}}><span style={{display:'inline-flex',alignItems:'center',gap:5,fontSize:11,fontWeight:700}}><span style={{width:7,height:7,borderRadius:'50%',background:sColors[st]||'#aaa',display:'inline-block'}}/>{sLabels[st]||st}</span></td>
+                      <td style={{padding:'12px 14px'}}><div style={{display:'flex',gap:5}}>{['✉','✎'].map(ic=><div key={ic} style={{width:28,height:28,borderRadius:6,border:'1.5px solid #e4d8dc',background:'#fff',display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,cursor:'pointer'}}>{ic}</div>)}</div></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        }
       </div>
       {showModal&&(
         <div style={{position:'fixed',inset:0,background:'rgba(26,13,18,0.5)',zIndex:500,display:'flex',alignItems:'center',justifyContent:'center',backdropFilter:'blur(3px)'}} onClick={e=>{if(e.target===e.currentTarget)setShowModal(false);}}>
