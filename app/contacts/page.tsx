@@ -22,9 +22,10 @@ export default function ContactsPage() {
   useEffect(()=>{load();},[load]);
   const filtered=contacts.filter(c=>{
     const q=search.toLowerCase();
-    const n=(c.attributes?.BUSINESS_NAME||c.email).toLowerCase();
-    const t=(c.attributes?.TOWN||'').toLowerCase();
-    return(!q||n.includes(q)||t.includes(q)||c.email.toLowerCase().includes(q))&&(!townFilter||c.attributes?.TOWN===townFilter);
+    const name=(c.attributes?.BUSINESS_NAME||c.attributes?.FIRSTNAME||c.email).toLowerCase();
+    const town=(c.attributes?.TOWN||'').toLowerCase();
+    const email=c.email.toLowerCase();
+    return(!q||name.includes(q)||town.includes(q)||email.includes(q))&&(!townFilter||c.attributes?.TOWN===townFilter);
   });
   const towns=Array.from(new Set(contacts.map(c=>c.attributes?.TOWN).filter(Boolean))).sort() as string[];
   async function save() {
@@ -39,7 +40,7 @@ export default function ContactsPage() {
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:20}}>
         <div>
           <h1 style={{fontFamily:'Nunito,sans-serif',fontSize:22,fontWeight:900,color:'#1a0d12',margin:0}}>Contact Manager</h1>
-          <p style={{fontSize:12,color:'#9e7e88',margin:'3px 0 0',fontWeight:500}}>{contacts.length} businesses · {towns.length} towns · target 10–20 per location</p>
+          <p style={{fontSize:12,color:'#9e7e88',margin:'3px 0 0',fontWeight:500}}>{contacts.length} contacts in Brevo · {towns.length} towns · target 10–20 per location</p>
         </div>
         <div style={{display:'flex',gap:8}}>
           <a href="/find" style={{...btnG,textDecoration:'none'}}>⚡ Find More</a>
@@ -49,7 +50,7 @@ export default function ContactsPage() {
       <div style={{display:'flex',gap:10,marginBottom:16,flexWrap:'wrap'}}>
         <div style={{flex:1,minWidth:200,position:'relative'}}>
           <span style={{position:'absolute',left:10,top:'50%',transform:'translateY(-50%)',fontSize:13}}>🔍</span>
-          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search businesses, towns, emails…" style={{...inp,paddingLeft:34}}/>
+          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search name, email, town…" style={{...inp,paddingLeft:34}}/>
         </div>
         <select value={townFilter} onChange={e=>setTownFilter(e.target.value)} style={{...inp,width:'auto',cursor:'pointer'}}>
           <option value="">All Towns</option>
@@ -58,17 +59,18 @@ export default function ContactsPage() {
       </div>
       <div style={{background:'#fff',border:'1px solid #e4d8dc',borderRadius:12,overflow:'hidden'}}>
         <div style={{padding:'15px 20px',borderBottom:'1px solid #e4d8dc',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-          <div style={{fontFamily:'Nunito,sans-serif',fontSize:14,fontWeight:800}}>🏪 Business Contacts <span style={{fontSize:12,color:'#9e7e88',fontWeight:600}}>{filtered.length} shown</span></div>
+          <div style={{fontFamily:'Nunito,sans-serif',fontSize:14,fontWeight:800}}>🏪 Contacts <span style={{fontSize:12,color:'#9e7e88',fontWeight:600}}>{filtered.length} shown of {contacts.length}</span></div>
           <span style={{fontSize:11,color:'#9e7e88',fontWeight:600}}>Target: 10–20 per town</span>
         </div>
-        {loading?<div style={{padding:40,textAlign:'center',color:'#9e7e88',fontSize:13}}>Loading contacts from Brevo…</div>
-        :filtered.length===0?<div style={{padding:40,textAlign:'center',color:'#9e7e88',fontSize:13}}>{contacts.length===0?'No contacts yet — add one or use Find Businesses':'No contacts match your filters'}</div>
+        {loading?<div style={{padding:40,textAlign:'center',color:'#9e7e88',fontSize:13}}>Loading from Brevo…</div>
+        :filtered.length===0&&contacts.length===0?<div style={{padding:40,textAlign:'center',color:'#9e7e88',fontSize:13}}>No contacts yet — add one or use Find Businesses</div>
+        :filtered.length===0?<div style={{padding:40,textAlign:'center',color:'#9e7e88',fontSize:13}}>No contacts match your search</div>
         :<div style={{overflowX:'auto'}}>
           <table style={{width:'100%',borderCollapse:'collapse'}}>
-            <thead><tr>{['Business','Town','Email','Source','Status','Actions'].map(h=><th key={h} style={{padding:'10px 14px',textAlign:'left',fontSize:10,fontWeight:800,letterSpacing:1,textTransform:'uppercase',color:'#9e7e88',borderBottom:'2px solid #e4d8dc',whiteSpace:'nowrap'}}>{h}</th>)}</tr></thead>
+            <thead><tr>{['Name / Business','Email','Town','Source','Status','Actions'].map(h=><th key={h} style={{padding:'10px 14px',textAlign:'left',fontSize:10,fontWeight:800,letterSpacing:1,textTransform:'uppercase',color:'#9e7e88',borderBottom:'2px solid #e4d8dc',whiteSpace:'nowrap'}}>{h}</th>)}</tr></thead>
             <tbody>
               {filtered.map(c=>{
-                const nm=c.attributes?.BUSINESS_NAME||c.email;
+                const nm=c.attributes?.BUSINESS_NAME||c.attributes?.FIRSTNAME||c.email;
                 const tp=c.attributes?.BUSINESS_TYPE||'';
                 const tn=c.attributes?.TOWN||'—';
                 const src=(c.attributes?.SOURCE||'manual') as string;
@@ -77,8 +79,8 @@ export default function ContactsPage() {
                 return (
                   <tr key={c.id} style={{borderBottom:'1px solid #e4d8dc'}}>
                     <td style={{padding:'12px 14px'}}><div style={{fontSize:13,fontWeight:700}}>{nm}</div><div style={{fontSize:11,color:'#9e7e88'}}>{tp}</div></td>
-                    <td style={{padding:'12px 14px',fontSize:12.5}}>{tn}</td>
                     <td style={{padding:'12px 14px',fontSize:11.5,color:'#1a6b9a',fontWeight:600}}>{c.email}</td>
+                    <td style={{padding:'12px 14px',fontSize:12.5}}>{tn}</td>
                     <td style={{padding:'12px 14px'}}><span style={{fontSize:9,fontWeight:700,padding:'2px 8px',borderRadius:20,background:sc.bg,color:sc.color,textTransform:'capitalize'}}>{src}</span></td>
                     <td style={{padding:'12px 14px'}}><span style={{display:'inline-flex',alignItems:'center',gap:5,fontSize:11,fontWeight:700}}><span style={{width:7,height:7,borderRadius:'50%',background:sColors[st]||'#aaa',display:'inline-block'}}/>{sLabels[st]||st}</span></td>
                     <td style={{padding:'12px 14px'}}><div style={{display:'flex',gap:5}}>{['✉','✎'].map(ic=><div key={ic} style={{width:28,height:28,borderRadius:6,border:'1.5px solid #e4d8dc',background:'#fff',display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,cursor:'pointer'}}>{ic}</div>)}</div></td>
