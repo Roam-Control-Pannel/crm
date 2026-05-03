@@ -1,6 +1,6 @@
 export default function SocialPage() {
   return (
-    <div style={{padding:'22px 24px'}}>
+    <div className="page-pad">
       <div style={{marginBottom:20}}>
         <h1 style={{fontFamily:'Nunito,sans-serif',fontSize:22,fontWeight:900,color:'#1a0d12',margin:0}}>Social Posts</h1>
         <p style={{fontSize:12,color:'#9e7e88',margin:'3px 0 0',fontWeight:500}}>Schedule and manage posts across Instagram, LinkedIn and X</p>

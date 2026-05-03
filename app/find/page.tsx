@@ -64,7 +64,7 @@ export default function FindPage() {
   const toggleAll=(v:boolean)=>setResults(p=>p.map(r=>({...r,selected:v})));
 
   return (
-    <div style={{padding:'22px 24px'}}>
+    <div className="page-pad">
       <div style={{marginBottom:20}}>
         <h1 style={{fontFamily:'Nunito,sans-serif',fontSize:22,fontWeight:900,color:'#1a0d12',margin:0}}>Find Businesses</h1>
         <p style={{fontSize:12,color:'#9e7e88',margin:'3px 0 0',fontWeight:500}}>Search Google Places for local businesses · review and import directly to Brevo</p>
@@ -73,7 +73,7 @@ export default function FindPage() {
       <div style={{background:'linear-gradient(135deg,#f9eaee,#fff5f7)',border:'1.5px solid rgba(139,26,58,0.2)',borderRadius:12,padding:'18px 20px',marginBottom:20}}>
         <div style={{fontFamily:'Nunito,sans-serif',fontSize:14,fontWeight:800,marginBottom:4}}>⚡ Business Finder</div>
         <div style={{fontSize:12,color:'#6b4a55',marginBottom:16,fontWeight:500}}>Enter a town to find local businesses via Google Places. You review results before anything is added to your contacts.</div>
-        <div style={{display:'flex',gap:12,flexWrap:'wrap',alignItems:'flex-end'}}>
+        <div className="find-form">
           <div style={{flex:2,minWidth:200}}>
             <label style={{display:'block',fontSize:11,fontWeight:700,color:'#6b4a55',marginBottom:5}}>Town *</label>
             <input value={town} onChange={e=>setTown(e.target.value)} onKeyDown={e=>e.key==='Enter'&&runSearch()} placeholder="e.g. Darlington, Whitstable, Aberfeldy" style={inp}/>
@@ -116,7 +116,7 @@ export default function FindPage() {
 
       {results.length>0&&(
         <div style={{background:'#fff',border:'1px solid #e4d8dc',borderRadius:12,overflow:'hidden'}}>
-          <div style={{padding:'15px 20px',borderBottom:'1px solid #e4d8dc',display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:10}}>
+          <div className="card-header" style={{padding:'15px 20px',borderBottom:'1px solid #e4d8dc'}}>
             <div style={{fontFamily:'Nunito,sans-serif',fontSize:14,fontWeight:800}}>
               ✓ {results.length} businesses found in {town}
               {done&&<span style={{marginLeft:8,fontSize:11,color:'#2d7a4f',fontWeight:700}}>✓ {importCount} imported to Brevo!</span>}
@@ -135,7 +135,7 @@ export default function FindPage() {
               </button>
             </div>
           </div>
-          <div style={{overflowX:'auto'}}>
+          <div className="table-wrap">
             <table style={{width:'100%',borderCollapse:'collapse'}}>
               <thead>
                 <tr>{['','Business','Address','Rating','Actions'].map(h=>(

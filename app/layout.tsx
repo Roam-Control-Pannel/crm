@@ -1,11 +1,17 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
-import Sidebar from "@/components/Sidebar";
+import LayoutShell from "@/components/LayoutShell";
 import SessionWrapper from "@/components/SessionWrapper";
 
 export const metadata: Metadata = {
   title: "Roam Growth Engine",
   description: "CRM and growth platform for Roam Local",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -16,10 +22,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body style={{ margin: 0, background: '#f7f3f4' }}>
         <SessionWrapper>
-          <Sidebar/>
-          <main style={{ marginLeft: 240, minHeight: '100vh' }}>
-            {children}
-          </main>
+          <LayoutShell>{children}</LayoutShell>
         </SessionWrapper>
       </body>
     </html>
