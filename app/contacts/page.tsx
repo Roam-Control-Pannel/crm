@@ -31,14 +31,19 @@ export default function ContactsPage() {
 
   const load=useCallback(()=>{
     setLoading(true);
-    Promise.all([
-      fetch('/api/brevo/contacts?limit=100').then(r=>r.json()),
-      fetch('/api/brevo/lists').then(r=>r.json()),
-    ]).then(([contactData,listData])=>{
-      setContacts(contactData.contacts||[]);
-      setLists(listData.lists||[]);
-      setLoading(false);
-    }).catch(()=>setLoading(false));
+    // Load contacts first — always
+    fetch('/api/brevo/contacts?limit=100')
+      .then(r=>r.json())
+      .then(d=>{
+        setContacts(d.contacts||[]);
+        setLoading(false);
+      })
+      .catch(()=>setLoading(false));
+    // Load lists separately — fail gracefully
+    fetch('/api/brevo/lists')
+      .then(r=>r.ok?r.json():Promise.resolve({lists:[]}))
+      .then(d=>setLists(d.lists||[]))
+      .catch(()=>setLists([]));
   },[]);
 
   useEffect(()=>{load();},[load]);
@@ -50,7 +55,7 @@ export default function ContactsPage() {
     const email=(c.email||'').toLowerCase();
     const matchQ=!q||name.includes(q)||town.includes(q)||email.includes(q);
     const matchTown=!townFilter||c.attributes?.TOWN===townFilter;
-    const matchList=!listFilter||c.listIds?.includes(Number(listFilter));
+    const matchList=!listFilter||(c.listIds||[]).includes(Number(listFilter));
     return matchQ&&matchTown&&matchList;
   });
 
@@ -87,10 +92,12 @@ export default function ContactsPage() {
           <span style={{position:'absolute',left:10,top:'50%',transform:'translateY(-50%)',fontSize:13}}>🔍</span>
           <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search name, email, town…" style={{...inp,paddingLeft:34}}/>
         </div>
-        <select value={listFilter} onChange={e=>setListFilter(e.target.value)} style={{...inp,width:'auto',cursor:'pointer',flex:1,minWidth:180}}>
-          <option value="">All Lists</option>
-          {lists.map(l=><option key={l.id} value={l.id}>📋 {l.name} ({l.uniqueSubscribers})</option>)}
-        </select>
+        {lists.length>0&&(
+          <select value={listFilter} onChange={e=>setListFilter(e.target.value)} style={{...inp,width:'auto',cursor:'pointer',flex:1,minWidth:180}}>
+            <option value="">All Lists</option>
+            {lists.map(l=><option key={l.id} value={l.id}>📋 {l.name} ({l.uniqueSubscribers})</option>)}
+          </select>
+        )}
         <select value={townFilter} onChange={e=>setTownFilter(e.target.value)} style={{...inp,width:'auto',cursor:'pointer',flex:1,minWidth:140}}>
           <option value="">All Towns</option>
           {towns.map(t=><option key={t}>{t}</option>)}
@@ -125,7 +132,7 @@ export default function ContactsPage() {
                   const src=(c.attributes?.SOURCE||'manual') as string;
                   const st=(c.attributes?.OUTREACH_STATUS||'not_contacted') as string;
                   const sc=srcS[src]||srcS.manual;
-                  const contactLists=lists.filter(l=>c.listIds?.includes(l.id));
+                  const contactLists=lists.filter(l=>(c.listIds||[]).includes(l.id));
                   return (
                     <tr key={c.id} style={{borderBottom:'1px solid #e4d8dc'}}>
                       <td style={{padding:'12px 14px'}}><div style={{fontSize:13,fontWeight:700}}>{nm}</div><div style={{fontSize:11,color:'#9e7e88'}}>{tp}</div></td>
