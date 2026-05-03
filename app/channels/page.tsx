@@ -1,52 +1,65 @@
 export default function ChannelsPage() {
   const channels = [
-    {icon:'📸',name:'Instagram',handle:'@roamlocal',status:'live',pct:82,color:'#8B1A3A'},
-    {icon:'💼',name:'LinkedIn',handle:'Roam Local',status:'live',pct:67,color:'#1a6b9a'},
-    {icon:'✉️',name:'Brevo Email',handle:'hello@roamlocal.app',status:'live',pct:91,color:'#2d7a4f'},
-    {icon:'𝕏',name:'X / Twitter',handle:'Not connected',status:'setup',pct:40,color:'#b06820'},
-    {icon:'📘',name:'Facebook API',handle:'Developer app pending',status:'pending',pct:20,color:'#8B1A3A'},
+    {name:'Brevo Email',handle:'hello@roam-everywhere.com',icon:'✉️',status:'live',health:97,color:'#2f7a4f',desc:'Transactional outreach emails — 3-step sequence to roam-local.co.uk',stats:[{label:'Sender',value:'hello@roam-everywhere.com'},{label:'Domain',value:'roam-everywhere.com ✓'},{label:'Links to',value:'roam-local.co.uk'},{label:'Sequence',value:'Day 1 · Day 2 · Day 7'}]},
+    {name:'Instagram',handle:'@roamlocal',icon:'📸',status:'not_connected',health:0,color:'#c96442',desc:'Post town discovery content and business spotlights',stats:[]},
+    {name:'LinkedIn',handle:'Roam Local',icon:'💼',status:'not_connected',health:0,color:'#2a5fa4',desc:'Reach local business owners and decision makers',stats:[]},
+    {name:'X / Twitter',handle:'Not connected',icon:'𝕏',status:'not_connected',health:0,color:'#1a1213',desc:'Town announcements and discovery content',stats:[]},
   ];
-  const ss:{[k:string]:{bg:string;color:string;label:string}} = {
-    live:{bg:'#e8f5ee',color:'#2d7a4f',label:'Live'},
-    setup:{bg:'#fdf0e4',color:'#b06820',label:'Setup'},
-    pending:{bg:'#f9eaee',color:'#8B1A3A',label:'Pending'},
-  };
   return (
-    <div className="page-pad">
-      <div style={{marginBottom:20}}>
-        <h1 style={{fontFamily:'Nunito,sans-serif',fontSize:22,fontWeight:900,color:'#1a0d12',margin:0}}>Channels</h1>
-        <p style={{fontSize:12,color:'#9e7e88',margin:'3px 0 0',fontWeight:500}}>Manage your connected publishing and outreach channels</p>
+    <div style={{padding:'24px 28px'}}>
+      <div style={{marginBottom:24}}>
+        <h1 style={{fontFamily:'Instrument Serif, serif',fontSize:28,fontWeight:400,color:'var(--ink-900)',lineHeight:1}}>Channels</h1>
+        <p style={{fontSize:12,color:'var(--ink-400)',marginTop:5,fontWeight:500}}>Manage your connected publishing and outreach channels</p>
       </div>
-      <div style={{background:'#fff',border:'1px solid #e4d8dc',borderRadius:12,overflow:'hidden'}}>
-        <div style={{padding:'15px 20px',borderBottom:'1px solid #e4d8dc'}}>
-          <div style={{fontFamily:'Nunito,sans-serif',fontSize:14,fontWeight:800}}>⚙ Channel Configuration</div>
-        </div>
-        <div style={{padding:'8px 0'}}>
-          {channels.map((ch,i)=>{
-            const s=ss[ch.status];
-            return (
-              <div key={i} className="channel-row" style={{borderBottom:i<channels.length-1?'1px solid #e4d8dc':'none'}}>
-                <div style={{width:42,height:42,borderRadius:10,background:'#f7f3f4',display:'flex',alignItems:'center',justifyContent:'center',fontSize:20,flexShrink:0}}>{ch.icon}</div>
-                <div className="channel-info" style={{flex:1,minWidth:0}}>
-                  <div style={{fontSize:13,fontWeight:700}}>{ch.name}</div>
-                  <div style={{fontSize:11,color:'#9e7e88',marginTop:2,wordBreak:'break-word'}}>{ch.handle}</div>
-                </div>
-                <div className="channel-health">
-                  <div style={{display:'flex',justifyContent:'space-between',fontSize:10,fontWeight:700,color:'#9e7e88',marginBottom:5}}><span>Health</span><span>{ch.pct}%</span></div>
-                  <div style={{background:'#f7f3f4',borderRadius:20,height:6,overflow:'hidden'}}>
-                    <div style={{height:6,borderRadius:20,background:ch.color,width:`${ch.pct}%`}}/>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(2,1fr)',gap:16}}>
+        {channels.map(ch=>(
+          <div key={ch.name} style={{background:'var(--white)',borderRadius:'var(--r-lg)',boxShadow:'var(--shadow-sm)',overflow:'hidden'}}>
+            <div style={{padding:'18px 20px',borderBottom:'1px solid var(--ink-100)'}}>
+              <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:12,marginBottom:10}}>
+                <div style={{display:'flex',alignItems:'center',gap:12}}>
+                  <div style={{width:44,height:44,borderRadius:'var(--r-md)',background:ch.status==='live'?'var(--maroon-50)':'var(--ink-100)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:22,flexShrink:0}}>{ch.icon}</div>
+                  <div>
+                    <div style={{fontSize:15,fontWeight:700,color:'var(--ink-900)'}}>{ch.name}</div>
+                    <div style={{fontSize:11.5,color:'var(--ink-400)',marginTop:2}}>{ch.handle}</div>
                   </div>
                 </div>
-                <div className="channel-status">
-                  <span style={{fontSize:9,fontWeight:800,padding:'3px 10px',borderRadius:20,background:s.bg,color:s.color,textTransform:'uppercase',letterSpacing:0.5}}>{s.label}</span>
-                </div>
-                <button style={{padding:'7px 16px',borderRadius:8,border:'1.5px solid #e4d8dc',background:'#fff',fontSize:12,fontWeight:700,cursor:'pointer',color:'#6b4a55',fontFamily:'Nunito Sans,sans-serif',whiteSpace:'nowrap'}}>
-                  {ch.status==='live'?'Configure':ch.status==='setup'?'Connect':'Resume'}
-                </button>
+                {ch.status==='live'
+                  ?<span style={{display:'inline-flex',alignItems:'center',gap:5,padding:'3px 10px',borderRadius:'999px',background:'#e8f5ee',color:'#2f7a4f',fontSize:11,fontWeight:600,flexShrink:0}}><span style={{width:6,height:6,borderRadius:'50%',background:'#2f7a4f',display:'inline-block'}}/>Live</span>
+                  :<span style={{display:'inline-flex',alignItems:'center',gap:5,padding:'3px 10px',borderRadius:'999px',background:'var(--ink-100)',color:'var(--ink-400)',fontSize:11,fontWeight:600,flexShrink:0}}><span style={{width:6,height:6,borderRadius:'50%',background:'var(--ink-300)',display:'inline-block'}}/>Not connected</span>
+                }
               </div>
-            );
-          })}
-        </div>
+              <div style={{fontSize:12,color:'var(--ink-500)',lineHeight:1.5}}>{ch.desc}</div>
+            </div>
+            {ch.stats.length>0&&(
+              <div style={{padding:'14px 20px',borderBottom:'1px solid var(--ink-100)',display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+                {ch.stats.map((s:{label:string;value:string})=>(
+                  <div key={s.label}>
+                    <div style={{fontSize:9.5,letterSpacing:'0.08em',textTransform:'uppercase',color:'var(--ink-400)',fontWeight:600,marginBottom:2}}>{s.label}</div>
+                    <div style={{fontSize:12,fontWeight:600,color:'var(--ink-800)'}}>{s.value}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {ch.health>0&&(
+              <div style={{padding:'12px 20px',borderBottom:'1px solid var(--ink-100)'}}>
+                <div style={{display:'flex',justifyContent:'space-between',fontSize:11,color:'var(--ink-400)',marginBottom:6}}>
+                  <span>Channel health</span>
+                  <span style={{fontWeight:700,color:ch.color}}>{ch.health}%</span>
+                </div>
+                <div style={{background:'var(--ink-100)',borderRadius:'999px',height:5,overflow:'hidden'}}>
+                  <div style={{height:'100%',width:`${ch.health}%`,borderRadius:'999px',background:ch.color}}/>
+                </div>
+              </div>
+            )}
+            <div style={{padding:'12px 20px',display:'flex',gap:8}}>
+              {ch.status==='live'
+                ?<><button style={{padding:'7px 14px',borderRadius:'var(--r-sm)',background:'var(--maroon-700)',color:'white',fontSize:11.5,fontWeight:600,border:'none',cursor:'pointer'}}>⚙ Configure</button>
+                  <button style={{padding:'7px 14px',borderRadius:'var(--r-sm)',background:'transparent',color:'var(--ink-500)',fontSize:11.5,fontWeight:600,border:'1.5px solid var(--ink-200)',cursor:'pointer'}}>View logs</button></>
+                :<button style={{padding:'7px 14px',borderRadius:'var(--r-sm)',background:'var(--maroon-700)',color:'white',fontSize:11.5,fontWeight:600,border:'none',cursor:'pointer'}}>+ Connect {ch.name}</button>
+              }
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
