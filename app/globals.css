@@ -1,119 +1,49 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap');
 
 :root {
-  --crimson: #8B1A3A;
-  --crimson-deep: #6B1230;
-  --crimson-light: #C44060;
-  --crimson-pale: #f9eaee;
-  --dark: #1a0d12;
-  --surface: #f7f3f4;
-  --border: #e4d8dc;
+  --maroon-900: #3a0e22;
+  --maroon-800: #561533;
+  --maroon-700: #702040;
+  --maroon-600: #9b2752;
+  --maroon-500: #d03050;
+  --maroon-100: #f4d8df;
+  --maroon-50:  #fbeaef;
+  --sun-500: #f5b134;
+  --sun-400: #f8c560;
+  --sun-100: #fde9c3;
+  --ink-1000: #110b0c;
+  --ink-900:  #1a1213;
+  --ink-800:  #2a1d1f;
+  --ink-700:  #4a3a3c;
+  --ink-500:  #7d6e70;
+  --ink-400:  #a89a9c;
+  --ink-300:  #c9bfc0;
+  --ink-200:  #e4dcdc;
+  --ink-100:  #f0e9e8;
+  --paper:    #faf6f3;
+  --paper-2:  #f4ede8;
+  --ok:    #2f7a4f;
+  --warn:  #c47a1a;
+  --info:  #2a5fa4;
+  --alert: #b53939;
+  --r-xs: 6px;
+  --r-sm: 10px;
+  --r-md: 14px;
+  --r-lg: 20px;
+  --r-xl: 28px;
+  --r-pill: 999px;
+  --shadow-sm: 0 1px 2px rgba(26,18,19,.04), 0 0 0 1px rgba(26,18,19,.06);
+  --shadow-md: 0 6px 20px -8px rgba(26,18,19,.18), 0 1px 2px rgba(26,18,19,.04);
+  --shadow-lg: 0 18px 50px -20px rgba(26,18,19,.30), 0 2px 6px rgba(26,18,19,.06);
+  --font-display: 'Instrument Serif', 'Times New Roman', serif;
+  --font-ui: 'Geist', 'Inter', -apple-system, system-ui, sans-serif;
 }
 
-*, *::before, *::after { box-sizing: border-box; }
-html, body { max-width: 100%; overflow-x: hidden; -webkit-text-size-adjust: 100%; }
-input, select, textarea, button { font-family: inherit; }
-/* Prevent iOS Safari from auto-zooming when focusing small-font inputs */
-@media (max-width: 700px) {
-  input, select, textarea { font-size: 16px !important; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  font-family: var(--font-ui);
+  color: var(--ink-900);
+  background: var(--paper);
+  -webkit-font-smoothing: antialiased;
 }
-
-/* Layout shell — main content offsets 240px sidebar on desktop, 0 on mobile */
-.app-main { margin-left: 240px; min-height: 100vh; }
-@media (max-width: 900px) { .app-main { margin-left: 0; padding-top: 56px; } }
-
-/* Sidebar — hidden off-canvas on mobile, slides in when open */
-.app-sidebar { transform: translateX(0); transition: transform 0.25s ease; }
-@media (max-width: 900px) {
-  .app-sidebar { transform: translateX(-100%); box-shadow: 4px 0 24px rgba(0,0,0,0.4); }
-  .app-sidebar.open { transform: translateX(0); }
-}
-
-.sidebar-backdrop { display: none; }
-@media (max-width: 900px) {
-  .sidebar-backdrop.open {
-    display: block; position: fixed; inset: 0; background: rgba(26,13,18,0.5);
-    z-index: 199; backdrop-filter: blur(2px);
-  }
-}
-
-.mobile-menu-btn { display: none; }
-@media (max-width: 900px) {
-  .mobile-menu-btn {
-    display: flex; align-items: center; justify-content: center;
-    position: fixed; top: 10px; left: 10px; z-index: 198;
-    width: 40px; height: 40px; border-radius: 8px; border: 1px solid #e4d8dc;
-    background: #fff; cursor: pointer; box-shadow: 0 2px 8px rgba(26,13,18,0.08);
-    color: #1a0d12;
-  }
-}
-
-/* Page padding shrinks on small screens */
-.page-pad { padding: 22px 24px; }
-@media (max-width: 700px) { .page-pad { padding: 16px 14px; } }
-
-/* Page header (title + actions) wraps on small screens */
-.page-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-@media (max-width: 600px) {
-  .page-header { align-items: flex-start; }
-  .page-header > div:last-child { width: 100%; }
-  .page-header .actions { width: 100%; flex-wrap: wrap; }
-  .page-header .actions > * { flex: 1 1 auto; justify-content: center; }
-}
-
-/* Stats grid: 4 → 2 → 1 */
-.grid-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
-@media (max-width: 1100px) { .grid-stats { grid-template-columns: repeat(2, 1fr); } }
-@media (max-width: 460px) { .grid-stats { grid-template-columns: 1fr; } }
-
-/* Two-column body grid: 2 → 1 */
-.grid-2col { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
-@media (max-width: 900px) { .grid-2col { grid-template-columns: 1fr; } }
-
-/* Sequence layout: 1.4fr 1fr → 1fr stacked */
-.grid-seq { display: grid; grid-template-columns: 1.4fr 1fr; gap: 20px; }
-@media (max-width: 900px) { .grid-seq { grid-template-columns: 1fr; } }
-
-/* Pipeline mini-grid: 4 → 2 */
-.grid-pipeline { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
-@media (max-width: 480px) { .grid-pipeline { grid-template-columns: repeat(2, 1fr); } }
-
-/* Channel row stacks on mobile */
-.channel-row { display: flex; align-items: center; gap: 14px; padding: 16px 20px; }
-.channel-health { flex: 2; max-width: 200px; }
-.channel-status { width: 64px; text-align: center; }
-@media (max-width: 700px) {
-  .channel-row { flex-wrap: wrap; }
-  .channel-info { flex: 1 1 100%; }
-  .channel-health { flex: 1 1 100%; max-width: none; }
-  .channel-status { width: auto; }
-}
-
-/* Queue row tweaks */
-@media (max-width: 600px) {
-  .queue-row { flex-wrap: wrap; }
-  .queue-meta { width: 100%; text-align: left !important; margin-top: 4px; }
-}
-
-/* Card section header wraps */
-.card-header { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
-
-/* Tables get a horizontal scroll affordance */
-.table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-
-/* Two-column form rows collapse */
-.form-2col { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-@media (max-width: 480px) { .form-2col { grid-template-columns: 1fr; } }
-
-/* Login card responsive */
-.login-card { width: 380px; max-width: calc(100vw - 32px); position: relative; }
-
-/* Filter bar */
-.filter-bar { display: flex; gap: 10px; flex-wrap: wrap; }
-.filter-bar > * { min-width: 0; }
-
-/* Find page form row */
-.find-form { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
-@media (max-width: 600px) { .find-form > *, .find-form button { width: 100%; } }
