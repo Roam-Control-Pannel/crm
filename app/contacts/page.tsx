@@ -1,5 +1,6 @@
 'use client';
-import {useState,useEffect,useCallback} from 'react';
+import {useState,useEffect,useCallback} from "react";
+import {addNotification} from "@/components/NotificationCentre";
 
 interface Contact {id:number;email:string;attributes:Record<string,string>;listIds?:number[];}
 interface BrevoList {id:number;name:string;uniqueSubscribers:number;}
@@ -69,6 +70,7 @@ export default function ContactsPage(){
       });
       setQueued(prev=>[...prev,c.id]);
       showToast(`${c.attributes.BUSINESS_NAME} added to Today's Queue`);
+      addNotification({type:'info',title:'Added to queue',body:`${c.attributes.BUSINESS_NAME} added to Today's Queue manually`});
     }catch(e){
       showToast('Failed to add to queue');
       console.error(e);
@@ -104,6 +106,7 @@ export default function ContactsPage(){
         body:JSON.stringify({email:c.email,OUTREACH_STATUS:newStatus}),
       });
       showToast(`✓ Email sent to ${c.attributes.BUSINESS_NAME}`);
+      addNotification({type:'email_sent',title:'Email sent',body:`Step ${step} outreach sent to ${c.attributes.BUSINESS_NAME} at ${c.email}`});
       loadContacts(listFilter||undefined);
     }catch(e){
       showToast('Failed to send email');
