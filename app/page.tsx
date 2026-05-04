@@ -60,7 +60,7 @@ export default async function Dashboard() {
           <a href="/contacts" style={{display:'inline-flex',alignItems:'center',gap:6,padding:'8px 16px',borderRadius:8,fontSize:12.5,fontWeight:700,background:'linear-gradient(135deg,#6B1230,#8B1A3A)',color:'#fff',textDecoration:'none'}}>➕ Add Business</a>
         </div>
       </div>
-      <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:14,marginBottom:22}}>
+      <div className="stat-grid">
         {cards.map((s,i)=>(
           <div key={i} style={{background:'#fff',border:'1px solid #e4d8dc',borderRadius:12,padding:18,position:'relative',overflow:'hidden'}}>
             <div style={{position:'absolute',top:0,left:0,right:0,height:3,background:`linear-gradient(90deg,${s.color}99,${s.color})`}}/>
@@ -71,13 +71,13 @@ export default async function Dashboard() {
           </div>
         ))}
       </div>
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:18}}>
+      <div className="two-col">
         <div style={{background:'#fff',border:'1px solid #e4d8dc',borderRadius:12,overflow:'hidden'}}>
           <div style={{padding:'15px 20px',borderBottom:'1px solid #e4d8dc',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
             <div style={{fontFamily:'Nunito,sans-serif',fontSize:14,fontWeight:800}}>🗺 Pipeline</div>
             <a href="/contacts" style={{fontSize:11.5,fontWeight:700,color:'#8B1A3A',textDecoration:'none'}}>View contacts →</a>
           </div>
-          <div style={{padding:'16px 20px',display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10}}>
+          <div className="pipeline-grid">
             {pipeline.map(s=>(
               <div key={s.stage} style={{textAlign:'center',padding:'12px 8px',background:'#f7f3f4',borderRadius:8}}>
                 <div style={{fontFamily:'Nunito,sans-serif',fontSize:24,fontWeight:900,color:s.color}}>{s.count}</div>
