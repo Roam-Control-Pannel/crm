@@ -31,6 +31,9 @@ export default function ContactsPage(){
   const [newListName,setNewListName]=useState('');
   const [creatingList,setCreatingList]=useState(false);
   const [saving,setSaving]=useState(false);
+  const [queueing,setQueueing]=useState<number|null>(null);
+  const [queued,setQueued]=useState<number[]>([]);
+  const [toast,setToast]=useState<string|null>(null);
   const [form,setForm]=useState({name:'',email:'',town:'',type:'Restaurant',website:'',phone:'',source:'manual',status:'not_contacted',notes:'',listId:''});
 
   const loadContacts=useCallback((listId?:string)=>{
@@ -45,6 +48,69 @@ export default function ContactsPage(){
   },[loadContacts]);
 
   function handleListFilter(val:string){setListFilter(val);setTownFilter('');setSearch('');loadContacts(val||undefined);}
+
+  function showToast(msg:string){
+    setToast(msg);
+    setTimeout(()=>setToast(null),3000);
+  }
+
+  async function addToQueue(c:Contact){
+    if(!c.email||!c.attributes?.BUSINESS_NAME){
+      showToast('Contact needs a business name and email to be queued');
+      return;
+    }
+    setQueueing(c.id);
+    try{
+      // Update contact status to trigger queue inclusion
+      await fetch('/api/brevo/contacts',{
+        method:'PUT',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({email:c.email,OUTREACH_STATUS:'not_contacted'}),
+      });
+      setQueued(prev=>[...prev,c.id]);
+      showToast(`${c.attributes.BUSINESS_NAME} added to Today's Queue`);
+    }catch(e){
+      showToast('Failed to add to queue');
+      console.error(e);
+    }
+    setQueueing(null);
+  }
+
+  async function sendEmail(c:Contact){
+    if(!c.email||!c.attributes?.BUSINESS_NAME){
+      showToast('Contact needs a business name and email');
+      return;
+    }
+    setQueueing(c.id);
+    try{
+      const step=c.attributes?.OUTREACH_STATUS==='email_sent'?2:c.attributes?.OUTREACH_STATUS==='followed_up'?3:1;
+      const res=await fetch('/api/brevo/send',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+          email:c.email,
+          businessName:c.attributes.BUSINESS_NAME,
+          town:c.attributes?.TOWN||'your area',
+          knownFor:c.attributes?.KNOWN_FOR||'its independent spirit',
+          step,
+        }),
+      });
+      if(!res.ok)throw new Error('Send failed');
+      // Update status
+      const newStatus=step===1?'email_sent':step===2?'followed_up':'cold';
+      await fetch('/api/brevo/contacts',{
+        method:'PUT',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({email:c.email,OUTREACH_STATUS:newStatus}),
+      });
+      showToast(`✓ Email sent to ${c.attributes.BUSINESS_NAME}`);
+      loadContacts(listFilter||undefined);
+    }catch(e){
+      showToast('Failed to send email');
+      console.error(e);
+    }
+    setQueueing(null);
+  }
 
   async function createList(){
     if(!newListName.trim())return;
@@ -83,6 +149,13 @@ export default function ContactsPage(){
 
   return (
     <div style={{padding:'24px 28px'}}>
+      {/* Toast */}
+      {toast&&(
+        <div style={{position:'fixed',bottom:24,right:24,background:'var(--ink-900)',color:'white',padding:'12px 20px',borderRadius:'var(--r-md)',fontSize:13,fontWeight:500,zIndex:1000,boxShadow:'var(--shadow-lg)',transition:'all 0.3s'}}>
+          {toast}
+        </div>
+      )}
+
       {/* Header */}
       <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',marginBottom:20}}>
         <div>
@@ -98,7 +171,7 @@ export default function ContactsPage(){
         </div>
       </div>
 
-      {/* Filter bar — all in one row */}
+      {/* Filter bar */}
       <div style={{display:'flex',gap:8,marginBottom:16,alignItems:'center'}}>
         <div style={{flex:2,position:'relative'}}>
           <span style={{position:'absolute',left:11,top:'50%',transform:'translateY(-50%)',fontSize:13,color:'var(--ink-400)',pointerEvents:'none'}}>🔍</span>
@@ -146,13 +219,15 @@ export default function ContactsPage(){
                   const src=(c.attributes?.SOURCE||'manual') as string;
                   const st=(c.attributes?.OUTREACH_STATUS||'not_contacted') as string;
                   const sc=srcColors[src]||srcColors.manual;
+                  const isQueueing=queueing===c.id;
+                  const isQueued=queued.includes(c.id);
                   return (
                     <tr key={c.id} style={{borderBottom:'1px solid var(--ink-100)'}}>
                       <td style={{padding:'11px 16px'}}>
                         <div style={{fontSize:13,fontWeight:600,color:'var(--ink-900)'}}>{nm}</div>
                         {tp&&<div style={{fontSize:11,color:'var(--ink-400)',marginTop:1}}>{tp}</div>}
                       </td>
-                      <td style={{padding:'11px 16px',fontSize:12,color:'var(--info)',fontWeight:500,maxWidth:220,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{c.email||'—'}</td>
+                      <td style={{padding:'11px 16px',fontSize:12,color:'var(--info)',fontWeight:500,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{c.email||'—'}</td>
                       <td style={{padding:'11px 16px',fontSize:12.5,color:'var(--ink-700)'}}>{tn}</td>
                       <td style={{padding:'11px 16px'}}>
                         <span style={{display:'inline-flex',alignItems:'center',padding:'3px 9px',borderRadius:'var(--r-pill)',fontSize:10.5,fontWeight:500,background:sc.bg,color:sc.color,textTransform:'capitalize'}}>{src}</span>
@@ -165,9 +240,45 @@ export default function ContactsPage(){
                       </td>
                       <td style={{padding:'11px 16px'}}>
                         <div style={{display:'flex',gap:4}}>
-                          {['✉','✎'].map(ic=>(
-                            <div key={ic} style={{width:28,height:28,borderRadius:'var(--r-xs)',border:'1.5px solid var(--ink-200)',background:'var(--white)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,cursor:'pointer',color:'var(--ink-500)'}}>{ic}</div>
-                          ))}
+                          {/* Send email now */}
+                          <button
+                            onClick={()=>sendEmail(c)}
+                            disabled={isQueueing}
+                            title="Send outreach email now"
+                            style={{
+                              width:30,height:30,borderRadius:'var(--r-xs)',
+                              border:'1.5px solid var(--ink-200)',
+                              background:isQueueing?'var(--ink-100)':'var(--white)',
+                              display:'flex',alignItems:'center',justifyContent:'center',
+                              fontSize:13,cursor:isQueueing?'default':'pointer',
+                              color:'var(--maroon-700)',
+                              title:'Send email now',
+                            }}
+                          >✉</button>
+                          {/* Add to queue manually */}
+                          <button
+                            onClick={()=>addToQueue(c)}
+                            disabled={isQueueing||isQueued}
+                            title="Add to Today's Queue"
+                            style={{
+                              width:30,height:30,borderRadius:'var(--r-xs)',
+                              border:'1.5px solid var(--ink-200)',
+                              background:isQueued?'#e8f5ee':isQueueing?'var(--ink-100)':'var(--white)',
+                              display:'flex',alignItems:'center',justifyContent:'center',
+                              fontSize:13,cursor:isQueueing||isQueued?'default':'pointer',
+                              color:isQueued?'var(--ok)':'var(--ink-500)',
+                            }}
+                          >{isQueued?'✓':'+'}</button>
+                          {/* Edit */}
+                          <button
+                            title="Edit contact"
+                            style={{
+                              width:30,height:30,borderRadius:'var(--r-xs)',
+                              border:'1.5px solid var(--ink-200)',background:'var(--white)',
+                              display:'flex',alignItems:'center',justifyContent:'center',
+                              fontSize:13,cursor:'pointer',color:'var(--ink-500)',
+                            }}
+                          >✎</button>
                         </div>
                       </td>
                     </tr>
@@ -188,17 +299,13 @@ export default function ContactsPage(){
               <button onClick={()=>setShowCreateList(false)} style={{width:28,height:28,borderRadius:'var(--r-xs)',border:'1.5px solid var(--ink-200)',background:'var(--white)',fontSize:16,cursor:'pointer',color:'var(--ink-500)'}}>✕</button>
             </div>
             <div style={{padding:'20px 24px'}}>
-              <div style={{fontSize:12,color:'var(--ink-400)',marginBottom:14,lineHeight:1.6}}>
-                Creates a new list in Brevo. Use names like <strong style={{color:'var(--ink-800)'}}>Whitstable — Roam Outreach</strong>
-              </div>
+              <div style={{fontSize:12,color:'var(--ink-400)',marginBottom:14,lineHeight:1.6}}>Creates a new list in Brevo. Use names like <strong style={{color:'var(--ink-800)'}}>Whitstable — Roam Outreach</strong></div>
               <label style={{display:'block',fontSize:11.5,fontWeight:600,color:'var(--ink-600)',marginBottom:6}}>List Name *</label>
               <input value={newListName} onChange={e=>setNewListName(e.target.value)} onKeyDown={e=>e.key==='Enter'&&createList()} placeholder="e.g. Whitstable — Roam Outreach" style={inp} autoFocus/>
             </div>
             <div style={{padding:'16px 24px',borderTop:'1px solid var(--ink-100)',display:'flex',gap:8,justifyContent:'flex-end'}}>
               <button onClick={()=>setShowCreateList(false)} style={btnG}>Cancel</button>
-              <button onClick={createList} disabled={creatingList||!newListName.trim()} style={{...btnP,opacity:creatingList||!newListName.trim()?0.6:1}}>
-                {creatingList?'Creating…':'✓ Create in Brevo'}
-              </button>
+              <button onClick={createList} disabled={creatingList||!newListName.trim()} style={{...btnP,opacity:creatingList||!newListName.trim()?0.6:1}}>{creatingList?'Creating…':'✓ Create in Brevo'}</button>
             </div>
           </div>
         </div>
