@@ -110,11 +110,11 @@ export default function NotificationCentre() {
       </button>
 
       {open && (
-        <div onClick={() => setOpen(false)} style={{position:'fixed',inset:0,background:'rgba(26,13,18,0.5)',zIndex:999}} />
+        <div onClick={() => setOpen(false)} style={{position:'fixed',inset:0,background:'rgba(26,13,18,0.5)',zIndex:99998}} />
       )}
       {open && (
         <div style={{
-          position:'fixed', top:0, right:0, bottom:0, left:'auto', width:'min(340px, 100vw)',
+          position:'fixed', top:0, right:0, bottom:0, left:'unset', width:'min(340px, 100vw)', zIndex:99999,
           background:'var(--white)', boxShadow:'-4px 0 24px rgba(26,18,19,0.15)',
           zIndex:1000, display:'flex', flexDirection:'column',
           animation:'slideIn 0.2s ease',
