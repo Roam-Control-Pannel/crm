@@ -45,7 +45,7 @@ export default function Sidebar() {
           width: 34, height: 34, borderRadius: 'var(--r-sm)',
           overflow: 'hidden', flexShrink: 0, background: 'var(--white)',
         }}>
-          <img src="/roam-icon.jpg" width={34} height={34} alt="Roam" style={{objectFit:'cover',display:'block'}}/>
+          <img src="/Roam-BD-CRMfav-icon.jpg" width={34} height={34} alt="Roam" style={{objectFit:'cover',display:'block'}}/>
         </div>
         <div>
           <div style={{ color: '#fff', fontWeight: 800, fontSize: 15, letterSpacing: '-0.3px' }}>roam</div>

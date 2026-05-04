@@ -7,8 +7,8 @@ export const metadata: Metadata = {
   title: 'Roam Growth Engine',
   description: 'Business outreach platform for Roam Local',
   icons: {
-    icon: '/roam-icon.jpg',
-    apple: '/roam-icon.jpg',
+    icon: '/Roam-BD-CRMfav-icon.jpg',
+    apple: '/Roam-BD-CRMfav-icon.jpg',
   },
   robots: { index: false, follow: false },
 };
