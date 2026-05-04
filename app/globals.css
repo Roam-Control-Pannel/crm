@@ -313,3 +313,15 @@ tbody tr:hover td { background: var(--paper); }
     font-size: 12px;
   }
 }
+
+/* ── Dashboard mobile fixes ── */
+@media (max-width: 640px) {
+  .stat-grid {
+    grid-template-columns: 1fr 1fr !important;
+  }
+  .stat-card::before { height: 2px; }
+  .stat-num { font-size: 24px !important; }
+  .stat-label { font-size: 8.5px; }
+  .stat-delta { font-size: 10px; }
+  .stat-card { padding: 12px; }
+}
