@@ -1,5 +1,8 @@
 import { getContacts } from '@/lib/brevo';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 async function getStats() {
   try {
     const data = await getContacts(500, 0);

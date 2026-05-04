@@ -65,8 +65,8 @@ export async function sendTransactionalEmail(data: {
     method: 'POST',
     body: JSON.stringify({
       sender: {
-        name: data.senderName || 'Roam Local',
-        email: data.senderEmail || 'hello@roamlocal.app',
+        name: data.senderName || 'Roam Local Team',
+        email: data.senderEmail || 'hello@roam-everywhere.com',
       },
       to: data.to,
       subject: data.subject,

@@ -11,6 +11,9 @@ export async function GET() {
       },
     });
     const data = await res.json();
+    if (!res.ok) {
+      return NextResponse.json({ error: data?.message || 'Brevo error', lists: [] }, { status: res.status });
+    }
     return NextResponse.json(data);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Failed to fetch lists';

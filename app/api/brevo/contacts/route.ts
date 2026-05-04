@@ -16,6 +16,9 @@ export async function GET(req: NextRequest) {
         { headers: { 'api-key': BREVO_API_KEY, 'Content-Type': 'application/json' } }
       );
       const data = await res.json();
+      if (!res.ok) {
+        return NextResponse.json({ error: data?.message || 'Brevo error', contacts: [] }, { status: res.status });
+      }
       return NextResponse.json({ contacts: data.contacts || [] });
     }
 
