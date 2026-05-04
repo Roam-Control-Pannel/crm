@@ -30,10 +30,10 @@ const navSections = [
   },
 ];
 
-function Sidebar({ onClose }: { onClose?: () => void }) {
+function Sidebar({ onClose, isOpen }: { onClose?: () => void; isOpen?: boolean }) {
   const pathname = usePathname();
   return (
-    <aside className="app-sidebar">
+    <aside className={`app-sidebar${isOpen ? ' open' : ''}`}>
       {/* Logo */}
       <div className="sidebar-logo" style={{
         padding: '16px', display: 'flex', alignItems: 'center', gap: 10,
@@ -135,9 +135,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       <div className={`sidebar-overlay${mobileOpen ? ' open' : ''}`} onClick={() => setMobileOpen(false)} style={{WebkitBackdropFilter:'none',backdropFilter:'none',willChange:'opacity'}}/>
 
       {/* Sidebar */}
-      <div className={mobileOpen ? 'open' : ''}>
-        <Sidebar onClose={() => setMobileOpen(false)}/>
-      </div>
+      <Sidebar onClose={() => setMobileOpen(false)} isOpen={mobileOpen}/>
 
       {/* Main */}
       <main className="app-main" style={{WebkitTransform:"translate3d(0,0,0)",transform:"translate3d(0,0,0)"}}>
