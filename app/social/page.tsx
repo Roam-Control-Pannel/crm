@@ -1,11 +1,11 @@
 'use client';
 import Link from 'next/link';
-import { Calendar, Instagram, Linkedin, Twitter, Settings, ArrowRight, Sparkles } from 'lucide-react';
+import { Calendar, Camera, Briefcase, MessageCircle, Settings, ArrowRight, Sparkles } from 'lucide-react';
 
 const platforms = [
-  { name: 'Instagram', icon: Instagram, color: '#c96442', status: 'not_connected', desc: 'Town discovery content and business spotlights' },
-  { name: 'LinkedIn', icon: Linkedin, color: '#2a5fa4', status: 'not_connected', desc: 'Reach local business owners and decision makers' },
-  { name: 'X / Twitter', icon: Twitter, color: '#1a1213', status: 'not_connected', desc: 'Town announcements and discovery content' },
+  { name: 'Instagram', icon: Camera, color: '#c96442', status: 'not_connected', desc: 'Town discovery content and business spotlights' },
+  { name: 'LinkedIn', icon: Briefcase, color: '#2a5fa4', status: 'not_connected', desc: 'Reach local business owners and decision makers' },
+  { name: 'X / Twitter', icon: MessageCircle, color: '#1a1213', status: 'not_connected', desc: 'Town announcements and discovery content' },
 ];
 
 const ideas = [
@@ -20,7 +20,7 @@ export default function SocialPage() {
       <div className="page-header">
         <div>
           <h1 className="page-title">Social Posts</h1>
-          <p className="page-sub">Schedule and manage posts across Instagram, LinkedIn and X</p>
+          <p className="page-sub">Schedule and manage posts across Camera, LinkedIn and X</p>
         </div>
       </div>
 

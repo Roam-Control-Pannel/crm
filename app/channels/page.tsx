@@ -1,5 +1,5 @@
 'use client';
-import { Mail, Instagram, Linkedin, Twitter, Settings, FileText, Zap } from 'lucide-react';
+import { Mail, Camera, Briefcase, MessageCircle, Settings, FileText, Zap } from 'lucide-react';
 
 const channels = [
   {
@@ -15,17 +15,17 @@ const channels = [
   },
   {
     name: 'Instagram', handle: '@roamlocal',
-    Icon: Instagram, status: 'not_connected', health: 0, iconBg: '#fdf0e8', iconColor: '#c96442',
+    Icon: Camera, status: 'not_connected', health: 0, iconBg: '#fdf0e8', iconColor: '#c96442',
     desc: 'Post town discovery content and business spotlights', stats: [],
   },
   {
     name: 'LinkedIn', handle: 'Roam Local',
-    Icon: Linkedin, status: 'not_connected', health: 0, iconBg: '#e8f0fb', iconColor: '#2a5fa4',
+    Icon: Briefcase, status: 'not_connected', health: 0, iconBg: '#e8f0fb', iconColor: '#2a5fa4',
     desc: 'Reach local business owners and decision makers', stats: [],
   },
   {
     name: 'X / Twitter', handle: 'Not connected',
-    Icon: Twitter, status: 'not_connected', health: 0, iconBg: 'var(--ink-100)', iconColor: 'var(--ink-700)',
+    Icon: MessageCircle, status: 'not_connected', health: 0, iconBg: 'var(--ink-100)', iconColor: 'var(--ink-700)',
     desc: 'Town announcements and discovery content', stats: [],
   },
 ];
