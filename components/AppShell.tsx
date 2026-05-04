@@ -132,7 +132,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="app-layout">
       {/* Mobile overlay */}
-      <div className={`sidebar-overlay${mobileOpen ? ' open' : ''}`} onClick={() => setMobileOpen(false)}/>
+      <div className={`sidebar-overlay${mobileOpen ? ' open' : ''}`} onClick={() => setMobileOpen(false)} style={{WebkitBackdropFilter:'none',backdropFilter:'none',willChange:'opacity'}}/>
 
       {/* Sidebar */}
       <div className={mobileOpen ? 'open' : ''}>
