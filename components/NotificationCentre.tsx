@@ -114,7 +114,7 @@ export default function NotificationCentre() {
       )}
       {open && (
         <div style={{
-          position:'fixed', top:0, right:0, bottom:0, width:340,
+          position:'fixed', top:0, right:0, bottom:0, width:'min(340px, 100vw)',
           background:'var(--white)', boxShadow:'-4px 0 24px rgba(26,18,19,0.15)',
           zIndex:1000, display:'flex', flexDirection:'column',
           animation:'slideIn 0.2s ease',
