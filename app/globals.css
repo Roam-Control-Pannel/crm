@@ -112,7 +112,7 @@ button, input, select, textarea { font-family: var(--font-ui); }
   inset: 0;
   background: rgba(26,13,18,0.6);
   z-index: 99;
-  backdrop-filter: blur(4px);
+  
 }
 
 /* ── Responsive breakpoints ── */
@@ -277,3 +277,39 @@ tbody tr:hover td { background: var(--paper); }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--ink-200); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--ink-300); }
+
+/* ── Mobile fixes ── */
+@media (max-width: 640px) {
+  .stat-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 10px;
+  }
+  .stat-card { padding: 14px; }
+  .stat-num { font-size: 26px; }
+  .two-col {
+    grid-template-columns: 1fr !important;
+    gap: 12px;
+  }
+  .pipeline-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+  .page-title { font-size: 22px; }
+  .page-header .btn-row {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+  .page-header .btn-row .btn-ghost,
+  .page-header .btn-row .btn-primary {
+    font-size: 11px;
+    padding: 7px 12px;
+    flex-shrink: 0;
+  }
+  .filter-bar {
+    gap: 6px;
+  }
+  .filter-bar select,
+  .filter-bar input {
+    font-size: 12px;
+  }
+}
