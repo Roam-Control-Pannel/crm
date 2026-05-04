@@ -154,7 +154,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               {currentItem?.label || 'Roam'}
             </span>
           </div>
-          <NotificationCentre/>
         </div>
         {children}
       </main>
