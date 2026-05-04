@@ -59,7 +59,7 @@ export default function LoginPage() {
             border: '2px solid rgba(255,255,255,0.1)',
           }}>
             <img
-              src="/Roam-BD-CRMfav-icon.jpg"
+              src="/logo-lionFav-icon.png"
               width={68} height={68}
               alt="Roam"
               style={{ display: 'block', objectFit: 'cover' }}

@@ -5,7 +5,7 @@ import AppShell from '@/components/AppShell';
 export const metadata: Metadata = {
   title: 'Roam Growth Engine',
   description: 'Business outreach platform for Roam Local',
-  icons: { icon: '/Roam-BD-CRMfav-icon.jpg', apple: '/Roam-BD-CRMfav-icon.jpg' },
+  icons: { icon: '/logo-lionFav-icon.png', apple: '/logo-lionFav-icon.png' },
 };
 
 export const viewport = {

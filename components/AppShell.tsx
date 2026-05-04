@@ -40,7 +40,7 @@ function Sidebar({ onClose, isOpen }: { onClose?: () => void; isOpen?: boolean }
         borderBottom: '1px solid rgba(255,255,255,0.08)', marginBottom: 12, flexShrink: 0,
       }}>
         <div style={{ width: 34, height: 34, borderRadius: 'var(--r-sm)', overflow: 'hidden', flexShrink: 0, background: 'var(--white)' }}>
-          <img src="/Roam-BD-CRMfav-icon.jpg" width={34} height={34} alt="Roam" style={{ objectFit: 'cover', display: 'block' }}/>
+          <img src="/logo-lionFav-icon.png" width={34} height={34} alt="Roam" style={{ objectFit: 'cover', display: 'block' }}/>
         </div>
         <div className="sidebar-logo-text" style={{ flex: 1 }}>
           <div style={{ color: '#fff', fontWeight: 800, fontSize: 15, letterSpacing: '-0.3px' }}>roam</div>
@@ -146,7 +146,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           </button>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
             <div style={{ width: 24, height: 24, borderRadius: 6, overflow: 'hidden', background: 'var(--white)' }}>
-              <img src="/Roam-BD-CRMfav-icon.jpg" width={24} height={24} alt="Roam" style={{ objectFit: 'cover', display: 'block' }}/>
+              <img src="/logo-lionFav-icon.png" width={24} height={24} alt="Roam" style={{ objectFit: 'cover', display: 'block' }}/>
             </div>
             <span style={{ color: '#fff', fontSize: 14, fontWeight: 700 }}>
               {currentItem?.label || 'Roam'}
