@@ -4,14 +4,15 @@ import Sidebar from './Sidebar';
 
 export default function LayoutShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const isAuthPage = pathname === '/login';
-  if (isAuthPage) {
-    return <main style={{ minHeight: '100vh' }}>{children}</main>;
+  if (pathname === '/login') {
+    return <main style={{ flex: 1, minHeight: '100vh', overflowY: 'auto' }}>{children}</main>;
   }
   return (
     <>
       <Sidebar />
-      <main className="app-main">{children}</main>
+      <main style={{ flex: 1, overflowY: 'auto', background: 'var(--paper)' }}>
+        {children}
+      </main>
     </>
   );
 }

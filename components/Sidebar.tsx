@@ -1,6 +1,7 @@
 'use client';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
+import { signOut } from 'next-auth/react';
 
 const navSections = [
   {
@@ -100,6 +101,21 @@ export default function Sidebar() {
           <div style={{ color: '#fff', fontSize: 12, fontWeight: 600 }}>Roam Local</div>
           <div style={{ color: 'rgba(255,255,255,0.35)', fontSize: 10 }}>Admin · All towns</div>
         </div>
+        <button
+          type="button"
+          onClick={() => signOut({ callbackUrl: '/login' })}
+          aria-label="Sign out"
+          title="Sign out"
+          style={{
+            background: 'rgba(255,255,255,0.06)',
+            border: '1px solid rgba(255,255,255,0.1)',
+            color: 'rgba(255,255,255,0.6)',
+            width: 28, height: 28, borderRadius: 'var(--r-xs)',
+            cursor: 'pointer', flexShrink: 0,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 13, fontFamily: 'inherit',
+          }}
+        >⎋</button>
       </div>
     </aside>
   );

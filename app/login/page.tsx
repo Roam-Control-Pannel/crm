@@ -35,13 +35,13 @@ export default function LoginPage() {
         </div>
         <form onSubmit={handleLogin} style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 16, padding: 32 }}>
           <div style={{ marginBottom: 18 }}>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: 'rgba(255,255,255,0.5)', marginBottom: 8, letterSpacing: 0.5 }}>Username</label>
-            <input type="text" value={username} onChange={e => setUsername(e.target.value)} placeholder="Enter username" required autoComplete="username" autoCapitalize="none" autoCorrect="off"
+            <label htmlFor="login-username" style={{ display: 'block', fontSize: 12, fontWeight: 700, color: 'rgba(255,255,255,0.5)', marginBottom: 8, letterSpacing: 0.5 }}>Username</label>
+            <input id="login-username" name="username" type="text" value={username} onChange={e => setUsername(e.target.value)} placeholder="Enter username" required autoComplete="username" autoCapitalize="none" autoCorrect="off"
               style={{ width: '100%', padding: '11px 14px', background: 'rgba(255,255,255,0.06)', border: '1.5px solid rgba(255,255,255,0.1)', borderRadius: 8, fontSize: 16, color: '#fff', outline: 'none', fontFamily: 'Nunito Sans, sans-serif', boxSizing: 'border-box' }}/>
           </div>
           <div style={{ marginBottom: 24 }}>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: 'rgba(255,255,255,0.5)', marginBottom: 8, letterSpacing: 0.5 }}>Password</label>
-            <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Enter password" required autoComplete="current-password"
+            <label htmlFor="login-password" style={{ display: 'block', fontSize: 12, fontWeight: 700, color: 'rgba(255,255,255,0.5)', marginBottom: 8, letterSpacing: 0.5 }}>Password</label>
+            <input id="login-password" name="password" type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Enter password" required autoComplete="current-password"
               style={{ width: '100%', padding: '11px 14px', background: 'rgba(255,255,255,0.06)', border: '1.5px solid rgba(255,255,255,0.1)', borderRadius: 8, fontSize: 16, color: '#fff', outline: 'none', fontFamily: 'Nunito Sans, sans-serif', boxSizing: 'border-box' }}/>
           </div>
           {error && (
