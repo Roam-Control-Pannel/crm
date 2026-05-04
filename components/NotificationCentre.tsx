@@ -1,5 +1,6 @@
 'use client';
 import {useState,useEffect,useRef} from 'react';
+import { Bell, X, Mail, XCircle, Plus, List, Check, AlertTriangle, Sparkles, Info } from 'lucide-react';
 
 export interface Notification {
   id: string;
@@ -8,19 +9,15 @@ export interface Notification {
   body: string;
   time: Date;
   read: boolean;
-  link?: string;
 }
 
-// Global notification store
 const listeners = new Set<(n: Notification[]) => void>();
 let notifications: Notification[] = [];
 
 export function addNotification(n: Omit<Notification,'id'|'time'|'read'>) {
   const notif: Notification = {
-    ...n,
-    id: Math.random().toString(36).slice(2),
-    time: new Date(),
-    read: false,
+    ...n, id: Math.random().toString(36).slice(2),
+    time: new Date(), read: false,
   };
   notifications = [notif, ...notifications].slice(0, 50);
   listeners.forEach(l => l([...notifications]));
@@ -35,26 +32,25 @@ export function useNotifications() {
   return state;
 }
 
-const typeIcon: Record<string,string> = {
-  email_sent: '✉',
-  email_failed: '✕',
-  contact_imported: '➕',
-  list_created: '📋',
-  listed: '✓',
-  overdue: '⚠',
-  enriched: '✦',
-  info: 'ℹ',
+const typeIcon = (type: string, color: string) => {
+  const props = { size: 14, color };
+  switch(type) {
+    case 'email_sent': return <Mail {...props}/>;
+    case 'email_failed': return <XCircle {...props}/>;
+    case 'contact_imported': return <Plus {...props}/>;
+    case 'list_created': return <List {...props}/>;
+    case 'listed': return <Check {...props}/>;
+    case 'overdue': return <AlertTriangle {...props}/>;
+    case 'enriched': return <Sparkles {...props}/>;
+    default: return <Info {...props}/>;
+  }
 };
 
 const typeColor: Record<string,string> = {
-  email_sent: 'var(--ok)',
-  email_failed: 'var(--alert)',
-  contact_imported: 'var(--info)',
-  list_created: 'var(--maroon-600)',
-  listed: 'var(--ok)',
-  overdue: 'var(--warn)',
-  enriched: 'var(--ok)',
-  info: 'var(--ink-400)',
+  email_sent: 'var(--ok)', email_failed: 'var(--alert)',
+  contact_imported: 'var(--info)', list_created: 'var(--maroon-600)',
+  listed: 'var(--ok)', overdue: 'var(--warn)',
+  enriched: 'var(--ok)', info: 'var(--ink-400)',
 };
 
 function timeAgo(d: Date): string {
@@ -73,9 +69,7 @@ export default function NotificationCentre() {
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     }
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
@@ -93,7 +87,6 @@ export default function NotificationCentre() {
 
   return (
     <div ref={ref} style={{position:'relative'}}>
-      {/* Bell button */}
       <button
         onClick={() => { setOpen(o => !o); if (!open) markAllRead(); }}
         style={{
@@ -101,11 +94,10 @@ export default function NotificationCentre() {
           background: open ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.08)',
           border:'none', cursor:'pointer',
           display:'flex', alignItems:'center', justifyContent:'center',
-          fontSize:15, color:'rgba(255,255,255,0.7)',
-          position:'relative', transition:'all 0.15s',
+          color:'rgba(255,255,255,0.7)', position:'relative', transition:'all 0.15s',
         }}
       >
-        🔔
+        <Bell size={15}/>
         {unread > 0 && (
           <span style={{
             position:'absolute', top:-4, right:-4,
@@ -117,18 +109,14 @@ export default function NotificationCentre() {
         )}
       </button>
 
-      {/* Panel */}
       {open && (
         <div style={{
-          position:'fixed', top:0, right:0, bottom:0,
-          width:340, background:'var(--white)',
-          boxShadow:'-4px 0 24px rgba(26,18,19,0.15)',
+          position:'fixed', top:0, right:0, bottom:0, width:340,
+          background:'var(--white)', boxShadow:'-4px 0 24px rgba(26,18,19,0.15)',
           zIndex:1000, display:'flex', flexDirection:'column',
           animation:'slideIn 0.2s ease',
         }}>
           <style>{`@keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }`}</style>
-
-          {/* Header */}
           <div style={{padding:'18px 20px',borderBottom:'1px solid var(--ink-100)',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
             <div>
               <div style={{fontFamily:'var(--font-display)',fontSize:18,color:'var(--ink-900)'}}>Notifications</div>
@@ -138,17 +126,20 @@ export default function NotificationCentre() {
               {notifs.length > 0 && (
                 <button onClick={clearAll} style={{fontSize:11,fontWeight:600,color:'var(--ink-400)',background:'none',border:'none',cursor:'pointer'}}>Clear all</button>
               )}
-              <button onClick={() => setOpen(false)} style={{width:28,height:28,borderRadius:'var(--r-xs)',border:'1.5px solid var(--ink-200)',background:'var(--white)',fontSize:16,cursor:'pointer',color:'var(--ink-500)',display:'flex',alignItems:'center',justifyContent:'center'}}>✕</button>
+              <button onClick={() => setOpen(false)} style={{width:28,height:28,borderRadius:'var(--r-xs)',border:'1.5px solid var(--ink-200)',background:'var(--white)',cursor:'pointer',color:'var(--ink-500)',display:'flex',alignItems:'center',justifyContent:'center'}}>
+                <X size={14}/>
+              </button>
             </div>
           </div>
 
-          {/* Notifications list */}
           <div style={{flex:1,overflowY:'auto'}}>
             {notifs.length === 0 ? (
               <div style={{padding:48,textAlign:'center'}}>
-                <div style={{fontSize:32,marginBottom:12}}>🔔</div>
+                <div style={{display:'flex',justifyContent:'center',marginBottom:12,opacity:0.3}}>
+                  <Bell size={36} color="var(--ink-400)"/>
+                </div>
                 <div style={{fontFamily:'var(--font-display)',fontSize:16,color:'var(--ink-700)',marginBottom:6}}>All caught up</div>
-                <div style={{fontSize:12,color:'var(--ink-400)'}}>Notifications will appear here as you work — emails sent, contacts imported, lists created and more.</div>
+                <div style={{fontSize:12,color:'var(--ink-400)',lineHeight:1.5}}>Notifications will appear here as you work — emails sent, contacts imported, lists created and more.</div>
               </div>
             ) : (
               notifs.map(n => (
@@ -156,14 +147,13 @@ export default function NotificationCentre() {
                   display:'flex', gap:12, padding:'14px 20px',
                   borderBottom:'1px solid var(--ink-100)',
                   background: n.read ? 'var(--white)' : 'var(--maroon-50)',
-                  transition:'background 0.2s',
                 }}>
                   <div style={{
                     width:32, height:32, borderRadius:'var(--r-sm)',
                     background: n.read ? 'var(--ink-100)' : 'var(--maroon-100)',
                     display:'flex', alignItems:'center', justifyContent:'center',
-                    fontSize:14, flexShrink:0, color:typeColor[n.type],
-                  }}>{typeIcon[n.type]}</div>
+                    flexShrink:0,
+                  }}>{typeIcon(n.type, typeColor[n.type])}</div>
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{fontSize:13,fontWeight:600,color:'var(--ink-900)',marginBottom:2}}>{n.title}</div>
                     <div style={{fontSize:11.5,color:'var(--ink-500)',lineHeight:1.4}}>{n.body}</div>

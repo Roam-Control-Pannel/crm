@@ -1,29 +1,33 @@
 'use client';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
+import {
+  LayoutDashboard, CheckSquare, Users, Search,
+  Mail, ArrowUp, Settings, Bell, X
+} from 'lucide-react';
 import NotificationCentre from './NotificationCentre';
 
 const navSections = [
   {
     label: 'Overview',
     items: [
-      { icon: '◆', label: 'Dashboard', href: '/' },
-      { icon: '✓', label: "Today's Queue", href: '/queue' },
+      { icon: LayoutDashboard, label: 'Dashboard', href: '/' },
+      { icon: CheckSquare, label: "Today's Queue", href: '/queue' },
     ],
   },
   {
     label: 'Businesses',
     items: [
-      { icon: '🏪', label: 'Contact Manager', href: '/contacts' },
-      { icon: '⚡', label: 'Find Businesses', href: '/find' },
-      { icon: '✉', label: 'Email Sequences', href: '/sequences' },
+      { icon: Users, label: 'Contact Manager', href: '/contacts' },
+      { icon: Search, label: 'Find Businesses', href: '/find' },
+      { icon: Mail, label: 'Email Sequences', href: '/sequences' },
     ],
   },
   {
     label: 'Content',
     items: [
-      { icon: '↑', label: 'Social Posts', href: '/social' },
-      { icon: '⚙', label: 'Channels', href: '/channels' },
+      { icon: ArrowUp, label: 'Social Posts', href: '/social' },
+      { icon: Settings, label: 'Channels', href: '/channels' },
     ],
   },
 ];
@@ -64,6 +68,7 @@ export default function Sidebar() {
             }}>{section.label}</div>
             {section.items.map(item => {
               const active = pathname === item.href;
+              const Icon = item.icon;
               return (
                 <Link key={item.href} href={item.href} style={{
                   display: 'flex', alignItems: 'center', gap: 9,
@@ -74,11 +79,13 @@ export default function Sidebar() {
                   transition: 'all 0.15s',
                 }}>
                   <div style={{
-                    width: 20, height: 20, borderRadius: 5,
+                    width: 22, height: 22, borderRadius: 5,
                     background: active ? 'var(--maroon-500)' : 'rgba(255,255,255,0.08)',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: 11, flexShrink: 0,
-                  }}>{item.icon}</div>
+                    flexShrink: 0,
+                  }}>
+                    <Icon size={13} />
+                  </div>
                   <span style={{ flex: 1 }}>{item.label}</span>
                 </Link>
               );
