@@ -37,14 +37,15 @@ export default function Sidebar() {
     }}>
       {/* Logo */}
       <div style={{
-        padding: '18px 16px', display: 'flex', alignItems: 'center', gap: 10,
+        padding: '16px', display: 'flex', alignItems: 'center', gap: 10,
         borderBottom: '1px solid rgba(255,255,255,0.08)', marginBottom: 12,
       }}>
         <div style={{
-          width: 34, height: 34, background: 'var(--sun-500)',
-          borderRadius: 'var(--r-sm)', display: 'flex',
-          alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0,
-        }}>🦁</div>
+          width: 34, height: 34, borderRadius: 'var(--r-sm)',
+          overflow: 'hidden', flexShrink: 0, background: 'var(--white)',
+        }}>
+          <img src="/roam-icon.jpg" width={34} height={34} alt="Roam" style={{objectFit:'cover',display:'block'}}/>
+        </div>
         <div>
           <div style={{ color: '#fff', fontWeight: 800, fontSize: 15, letterSpacing: '-0.3px' }}>roam</div>
           <div style={{ color: 'rgba(255,255,255,0.35)', fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase' }}>Growth Engine</div>
