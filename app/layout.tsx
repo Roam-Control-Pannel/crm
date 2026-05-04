@@ -3,7 +3,8 @@ import './globals.css';
 import Sidebar from '@/components/Sidebar';
 
 export const metadata: Metadata = {
-  title: 'Roam Growth Engine',
+  title: "Roam Growth Engine",
+  icons: { icon: "/roam-icon.jpg", apple: "/roam-icon.jpg" },,
   description: 'Business outreach platform for Roam Local',
 };
 
