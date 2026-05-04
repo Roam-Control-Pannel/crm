@@ -252,7 +252,6 @@ export default function ContactsPage(){
                               display:'flex',alignItems:'center',justifyContent:'center',
                               fontSize:13,cursor:isQueueing?'default':'pointer',
                               color:'var(--maroon-700)',
-                              title:'Send email now',
                             }}
                           >✉</button>
                           {/* Add to queue manually */}
