@@ -113,3 +113,19 @@ tbody tr:hover td { background: var(--paper); }
   -webkit-overflow-scrolling: touch;
   will-change: transform;
 }
+
+/* iOS Safari compositing fix - prevents native blur on fixed elements */
+.app-sidebar {
+  -webkit-transform: translateZ(0);
+  transform: translateZ(0);
+  isolation: isolate;
+}
+.sidebar-overlay {
+  -webkit-transform: translateZ(0);
+  transform: translateZ(0);
+  isolation: isolate;
+}
+.app-main {
+  -webkit-transform: translateZ(0);
+  transform: translateZ(0);
+}
