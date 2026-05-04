@@ -104,3 +104,5 @@ tbody tr:hover td { background: var(--paper); }
 }
 
 
+
+@keyframes slideInRight { from { transform: translateX(100%); } to { transform: translateX(0); } }

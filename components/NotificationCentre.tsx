@@ -117,9 +117,9 @@ export default function NotificationCentre() {
           position:'fixed', top:0, right:0, bottom:0, left:'unset', width:'min(340px, 100vw)', zIndex:99999,
           background:'var(--white)', boxShadow:'-4px 0 24px rgba(26,18,19,0.15)',
           display:'flex', flexDirection:'column',
-          animation:'slideIn 0.2s ease',
+          animation:'slideInRight 0.25s cubic-bezier(0.4,0,0.2,1)',
         }}>
-          <style>{`@keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }`}</style>
+
           <div style={{padding:'18px 20px',borderBottom:'1px solid var(--ink-100)',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
             <div>
               <div style={{fontFamily:'var(--font-display)',fontSize:18,color:'var(--ink-900)'}}>Notifications</div>
