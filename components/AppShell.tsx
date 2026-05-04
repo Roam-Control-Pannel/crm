@@ -140,7 +140,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       </div>
 
       {/* Main */}
-      <main className="app-main">
+      <main className="app-main" style={{WebkitTransform:"translate3d(0,0,0)",transform:"translate3d(0,0,0)"}}>
         {/* Mobile top bar */}
         <div className="mobile-header">
           <button className="mobile-menu-btn" onClick={() => setMobileOpen(true)}>
