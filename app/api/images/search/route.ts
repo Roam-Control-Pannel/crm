@@ -22,9 +22,9 @@ export async function GET(req: NextRequest) {
       { headers: { Authorization: `Client-ID ${accessKey}` } }
     );
     const data = await res.json();
-    const images = (data.results || []).map((img: {urls:{regular:string;thumb:string};user:{name:string;links:{html:string}}}) => ({
+    const images = (data.results || []).map((img: {urls:{regular:string;small:string;thumb:string};user:{name:string;links:{html:string}}}) => ({
       url: img.urls.regular,
-      thumb: img.urls.thumb,
+      thumb: img.urls.small || img.urls.thumb || img.urls.regular,
       credit: img.user.name,
       creditUrl: img.user.links.html,
     }));
