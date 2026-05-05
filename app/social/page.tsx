@@ -87,7 +87,18 @@ export default function SocialPage(){
       const res=await fetch('/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
         maxTokens:2000,
         systemPrompt:'You are a social media content generator for Roam Local. Return ONLY a valid JSON array. No markdown, no code blocks, no explanation. Start your response with [ and end with ].',
-        messages:[{role:'user',content:'Create '+genForm.postsPerChannel+' social media posts per channel for '+genForm.town+', UK for these channels: '+chs.join(', ')+'. Return a JSON array only. Each item must have exactly these fields: channel (instagram/facebook/linkedin), caption (the post text), scheduledDay (1-7). Example format: [{"channel":"instagram","caption":"Discover the charm of '+genForm.town+'...","scheduledDay":1}]. Write authentic, engaging captions. Instagram needs hashtags. LinkedIn is professional. Facebook is community-focused.'}],
+        messages:[{role:'user',content:`Generate exactly ${genForm.postsPerChannel} posts for EACH of these channels: ${chs.join(', ')}. Total posts = ${genForm.postsPerChannel * chs.length}. Town: ${genForm.town}, UK.
+
+Return ONLY a JSON array. Each item must have: channel, caption, scheduledDay (1-7).
+
+Rules:
+- instagram posts: warm, visual, end with 3-5 hashtags
+- linkedin posts: professional, business-focused, no hashtags  
+- facebook posts: friendly, community feel
+
+Example: [{"channel":"instagram","caption":"Discover ${genForm.town}... #HashTag","scheduledDay":1},{"channel":"linkedin","caption":"${genForm.town} is growing...","scheduledDay":2},{"channel":"facebook","caption":"Love ${genForm.town}!","scheduledDay":3}]
+
+Generate ${genForm.postsPerChannel} posts per channel now:`}],
       })});
       const d=await res.json();
       // Parse AI response directly
