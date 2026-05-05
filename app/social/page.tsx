@@ -85,11 +85,23 @@ export default function SocialPage(){
     const chs=Object.entries(genForm.channels).filter(([,v])=>v).map(([k])=>k);
     try{
       const res=await fetch('/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-        systemPrompt:'You are a social media content generator for Roam Local. Return ONLY valid JSON array, no markdown or code blocks.',
+        maxTokens:2000,
+        systemPrompt:'You are a social media content generator for Roam Local. Return ONLY a valid JSON array. No markdown, no code blocks, no explanation. Start your response with [ and end with ].',
         messages:[{role:'user',content:'Generate '+genForm.postsPerChannel+' posts per channel for '+genForm.town+' for channels: '+chs.join(', ')+'. Return JSON array: [{"channel":"instagram","caption":"text","scheduledDay":1}]. Instagram: warm+visual+hashtags. LinkedIn: professional. Facebook: community. Make posts feel local and authentic for '+genForm.town+' UK.'}],
       })});
       const d=await res.json();
-      const raw=(d.content||'[]').replace(/```json|```/g,'').trim();
+      // Robust JSON extraction - handle truncated or wrapped responses
+      let raw = d.content || '[]';
+      // Strip markdown code blocks
+      raw = raw.replace(/```json/g,'').replace(/```/g,'').trim();
+      // Find the JSON array - extract just the array part
+      const arrStart = raw.indexOf('[');
+      const arrEnd = raw.lastIndexOf(']');
+      if(arrStart !== -1 && arrEnd !== -1){
+        raw = raw.slice(arrStart, arrEnd+1);
+      } else {
+        raw = '[]';
+      }
       const gen=JSON.parse(raw);
       const start=new Date(genForm.weekStart);
       const newPosts:SocialPost[]=gen.map((g:{channel:string;caption:string;scheduledDay?:number},i:number)=>{
