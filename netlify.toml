@@ -2,8 +2,13 @@
   command = "next build"
   publish = ".next"
 
+[build.environment]
+  NODE_VERSION = "18"
+
 [[plugins]]
   package = "@netlify/plugin-nextjs"
 
-[build.environment]
-  NODE_VERSION = "18"
+# Scheduled function - runs daily at 9am UTC
+# Triggers auto follow-up sequences via /api/sequences
+[functions]
+  directory = "netlify/functions"

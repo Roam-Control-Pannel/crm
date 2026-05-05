@@ -13,6 +13,20 @@ const sequence=[
 
 export default function SequencesPage(){
   const [stats,setStats]=useState<Stats>({total:0,emailSent:0,followUpDue:0});
+  const [running,setRunning]=useState(false);
+  const [lastRun,setLastRun]=useState<string|null>(null);
+  const [runResult,setRunResult]=useState<string|null>(null);
+
+  async function runSequences(){
+    setRunning(true);setRunResult(null);
+    try{
+      const res=await fetch('/api/sequences?secret=roam-cron-2026');
+      const data=await res.json();
+      setLastRun(new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}));
+      setRunResult(data.message||'Complete');
+    }catch(e){setRunResult('Error running sequences');}
+    setRunning(false);
+  }
   const [expanded,setExpanded]=useState<number|null>(1);
 
   useEffect(()=>{
@@ -33,6 +47,9 @@ export default function SequencesPage(){
         </div>
         <div className="btn-row">
           <button className="btn-ghost" style={{fontSize:12}}>Edit templates</button>
+          <button onClick={runSequences} disabled={running} className="btn-primary" style={{fontSize:12,opacity:running?0.6:1}}>
+            {running?'Running…':'▶ Run sequences now'}
+          </button>
         </div>
       </div>
 
