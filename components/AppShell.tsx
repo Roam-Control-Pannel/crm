@@ -2,13 +2,14 @@
 import { useState, useEffect } from 'react';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
-import { LayoutDashboard, CheckSquare, Users, Search, Mail, ArrowUpCircle, Settings, Menu, X } from 'lucide-react';
+import { LayoutDashboard, CheckSquare, Users, Search, Mail, ArrowUpCircle, Settings, Menu, X, Brain } from 'lucide-react';
 import NotificationCentre from './NotificationCentre';
 
 const navSections = [
   {
     label: 'Overview',
     items: [
+      { icon: Brain, label: 'Growth Hub', href: '/hub' },
       { icon: LayoutDashboard, label: 'Dashboard', href: '/' },
       { icon: CheckSquare, label: "Today's Queue", href: '/queue' },
     ],
