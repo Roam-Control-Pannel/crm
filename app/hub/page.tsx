@@ -78,7 +78,7 @@ CONFIRM:{"type":"action","label":"Brief action label","detail":"Full detail of w
     let confirmAction;let text=raw;
     if(confirmMatch){
       try{confirmAction=JSON.parse(confirmMatch[1]);}catch(e){}
-      text=raw.replace(/CONFIRM:{.*?}\s*$/s,'').trim();
+      text=raw.split('CONFIRM:')[0].trim();
     }
     return{text,confirmAction};
   }catch(e){
