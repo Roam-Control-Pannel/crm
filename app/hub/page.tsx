@@ -284,6 +284,48 @@ export default function HubPage(){
                 </div>
               )}
             </div>
+              <div style={{width:'100%',maxWidth:480,marginTop:8}}>
+                {!showDocs?(
+                  <button onClick={()=>setShowDocs(true)} style={{width:'100%',padding:'14px 18px',borderRadius:'var(--r-lg)',border:'1.5px dashed var(--ink-200)',background:'var(--white)',cursor:'pointer',display:'flex',alignItems:'center',gap:12,fontFamily:'inherit'}}>
+                    <div style={{width:36,height:36,borderRadius:'var(--r-sm)',background:'#e8f0fb',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}><FileText size={16} color="var(--info)"/></div>
+                    <div style={{textAlign:'left',flex:1}}>
+                      <div style={{fontSize:13,fontWeight:600,color:'var(--ink-900)'}}>View documents</div>
+                      <div style={{fontSize:11,color:'var(--ink-400)',marginTop:2}}>{docs.length>0?`${docs.length} document${docs.length===1?'':'s'} in knowledge base`:'No documents yet'}</div>
+                    </div>
+                    <div style={{fontSize:18,color:'var(--ink-300)'}}>›</div>
+                  </button>
+                ):(
+                  <div style={{background:'var(--white)',borderRadius:'var(--r-lg)',border:'1px solid var(--ink-100)',boxShadow:'var(--shadow-sm)',overflow:'hidden'}}>
+                    <div style={{padding:'12px 16px',borderBottom:'1px solid var(--ink-100)',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+                      <div style={{display:'flex',alignItems:'center',gap:8}}><FileText size={14} color="var(--info)"/><span style={{fontSize:13,fontWeight:600,color:'var(--ink-900)'}}>Knowledge base</span></div>
+                      <div style={{display:'flex',gap:8,alignItems:'center'}}>
+                        <button onClick={()=>fileInputRef.current?.click()} style={{fontSize:11,padding:'4px 10px',borderRadius:'var(--r-sm)',background:'var(--maroon-700)',color:'white',border:'none',cursor:'pointer',display:'flex',alignItems:'center',gap:5,fontFamily:'inherit'}}><Paperclip size={11}/> Upload</button>
+                        <button onClick={()=>setShowDocs(false)} style={{background:'none',border:'none',cursor:'pointer',color:'var(--ink-400)',display:'flex'}}><X size={14}/></button>
+                      </div>
+                    </div>
+                    {docs.length===0?(
+                      <div style={{padding:'24px',textAlign:'center'}}>
+                        <FileText size={28} color="var(--ink-300)" style={{margin:'0 auto 8px',display:'block'}}/>
+                        <div style={{fontSize:12,color:'var(--ink-400)',lineHeight:1.6}}>No documents yet. Upload files for Roam-io to learn from.</div>
+                        <button onClick={()=>fileInputRef.current?.click()} style={{marginTop:12,fontSize:12,padding:'7px 16px',borderRadius:'var(--r-md)',background:'var(--maroon-700)',color:'white',border:'none',cursor:'pointer',fontFamily:'inherit',display:'inline-flex',alignItems:'center',gap:6}}><Paperclip size={12}/> Upload a document</button>
+                      </div>
+                    ):(
+                      <div style={{maxHeight:220,overflowY:'auto'}}>
+                        {docs.map(doc=>(
+                          <div key={doc.id} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 16px',borderBottom:'1px solid var(--ink-100)'}}>
+                            <div style={{width:32,height:32,borderRadius:'var(--r-sm)',background:'#e8f0fb',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}><FileText size={14} color="var(--info)"/></div>
+                            <div style={{flex:1,minWidth:0}}>
+                              <div style={{fontSize:12,fontWeight:500,color:'var(--ink-900)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{doc.name}</div>
+                              <div style={{fontSize:10,color:'var(--ink-400)',marginTop:1}}>{fmtSize(doc.size)} · {new Date(doc.uploadedAt).toLocaleDateString('en-GB',{day:'numeric',month:'short'})}</div>
+                            </div>
+                            <button onClick={()=>handleDeleteDoc(doc.id)} style={{width:28,height:28,borderRadius:'var(--r-xs)',border:'1.5px solid var(--ink-200)',background:'var(--white)',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',color:'var(--alert)',flexShrink:0}}><Trash2 size={12}/></button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             <div style={{fontSize:11,color:'var(--ink-400)'}}>Or type anything below to start a conversation</div>
           </div>
         ):(
