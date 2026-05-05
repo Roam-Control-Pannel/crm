@@ -69,18 +69,17 @@ RULES:
 CONFIRM:{"type":"action","label":"Brief action label","detail":"Full detail of what will happen"}`;
 
   const docCtx=docs&&docs.length>0?docs.map(d=>`[DOC: ${d.name}]\n${d.content}`).join("\n\n"):"";  try{
-    const res=await fetch('https://api.anthropic.com/v1/messages',{
+    const res=await fetch('/api/ai/chat',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
-        model:'claude-sonnet-4-20250514',
-        max_tokens:1000,
-        system:system+(docCtx?"\n\nKNOWLEDGE BASE:\n"+docCtx:""),
+        systemPrompt:system+(docCtx?"\n\nKNOWLEDGE BASE:\n"+docCtx:""),
         messages:messages.map(m=>({role:m.role,content:m.content})),
       }),
     });
     const data=await res.json();
-    const raw=data.content?.[0]?.text||'Sorry, I could not process that. Please try again.';
+    if(data.error){return{text:'I am having trouble right now: '+data.error};}
+    const raw=data.content||'Sorry, I could not process that. Please try again.';
     const confirmMatch=raw.match(/CONFIRM:({[^}]+})/);
     let confirmAction;let text=raw;
     if(confirmMatch){
