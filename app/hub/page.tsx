@@ -74,7 +74,7 @@ CONFIRM:{"type":"action","label":"Brief action label","detail":"Full detail of w
     });
     const data=await res.json();
     const raw=data.content?.[0]?.text||'Sorry, I could not process that. Please try again.';
-    const confirmMatch=raw.match(/CONFIRM:({.*?})\s*$/s);
+    const confirmMatch=raw.match(/CONFIRM:({[^}]+})/);
     let confirmAction;let text=raw;
     if(confirmMatch){
       try{confirmAction=JSON.parse(confirmMatch[1]);}catch(e){}
