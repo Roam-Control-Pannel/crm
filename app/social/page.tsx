@@ -107,7 +107,7 @@ export default function SocialPage(){
       const newPosts:SocialPost[]=gen.map((g:{channel:string;caption:string;scheduledDay?:number},i:number)=>{
         const dt=new Date(start);dt.setDate(dt.getDate()+(g.scheduledDay||i));dt.setHours(10,0,0,0);
         const ch=(g.channel||'instagram') as SocialPost['channel'];
-        return{id:(Date.now()+i).toString(),channel:ch,strategy:strategies.find(s=>s.channel===ch)?.id||'ig1',town:genForm.town,caption:g.caption,scheduledAt:dt.toISOString(),status:'draft' as const,createdAt:new Date().toISOString(),imageUrl:'',imageCredit:''};
+        const caption=g.caption||g.text||g.content||g.post||'';return{id:(Date.now()+i).toString(),channel:ch,strategy:strategies.find(s=>s.channel===ch)?.id||'ig1',town:genForm.town,caption,scheduledAt:dt.toISOString(),status:'draft' as const,createdAt:new Date().toISOString(),imageUrl:'',imageCredit:''};
       });
       saveAndSet([...newPosts,...posts]);
       addNotification({type:'info',title:'Content generated',body:newPosts.length+' posts created for '+genForm.town});
