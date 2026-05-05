@@ -90,18 +90,9 @@ export default function SocialPage(){
         messages:[{role:'user',content:'Create '+genForm.postsPerChannel+' social media posts per channel for '+genForm.town+', UK for these channels: '+chs.join(', ')+'. Return a JSON array only. Each item must have exactly these fields: channel (instagram/facebook/linkedin), caption (the post text), scheduledDay (1-7). Example format: [{"channel":"instagram","caption":"Discover the charm of '+genForm.town+'...","scheduledDay":1}]. Write authentic, engaging captions. Instagram needs hashtags. LinkedIn is professional. Facebook is community-focused.'}],
       })});
       const d=await res.json();
-      // Robust JSON extraction - handle truncated or wrapped responses
+      // Parse AI response directly
       let raw = d.content || '[]';
-      // Strip markdown code blocks
       raw = raw.replace(/```json/g,'').replace(/```/g,'').trim();
-      // Find the JSON array - extract just the array part
-      const arrStart = raw.indexOf('[');
-      const arrEnd = raw.lastIndexOf(']');
-      if(arrStart !== -1 && arrEnd !== -1){
-        raw = raw.slice(arrStart, arrEnd+1);
-      } else {
-        raw = '[]';
-      }
       const gen=JSON.parse(raw);
       const start=new Date(genForm.weekStart);
       const newPosts:SocialPost[]=gen.map((g:Record<string,unknown>,i:number)=>{
