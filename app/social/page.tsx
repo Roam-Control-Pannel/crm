@@ -104,10 +104,13 @@ export default function SocialPage(){
       }
       const gen=JSON.parse(raw);
       const start=new Date(genForm.weekStart);
-      const newPosts:SocialPost[]=gen.map((g:Record<string,string|number|undefined>,i:number)=>{
-        const dt=new Date(start);dt.setDate(dt.getDate()+(g.scheduledDay||i));dt.setHours(10,0,0,0);
-        const ch=(g.channel||'instagram') as SocialPost['channel'];
-        const caption=g.caption||g.text||g.content||g.post||'';return{id:(Date.now()+i).toString(),channel:ch,strategy:strategies.find(s=>s.channel===ch)?.id||'ig1',town:genForm.town,caption,scheduledAt:dt.toISOString(),status:'draft' as const,createdAt:new Date().toISOString(),imageUrl:'',imageCredit:''};
+      const newPosts:SocialPost[]=gen.map((g:Record<string,unknown>,i:number)=>{
+        const dt=new Date(start);
+        const dayOffset=typeof g.scheduledDay==='number'?g.scheduledDay:i;
+        dt.setDate(dt.getDate()+dayOffset);dt.setHours(10,0,0,0);
+        const ch=((g.channel as string)||'instagram') as SocialPost['channel'];
+        const caption=(g.caption||g.text||g.content||g.post||'') as string;
+        return{id:(Date.now()+i).toString(),channel:ch,strategy:strategies.find(s=>s.channel===ch)?.id||'ig1',town:genForm.town,caption,scheduledAt:dt.toISOString(),status:'draft' as const,createdAt:new Date().toISOString(),imageUrl:'',imageCredit:''};
       });
       saveAndSet([...newPosts,...posts]);
       addNotification({type:'info',title:'Content generated',body:newPosts.length+' posts created for '+genForm.town});
