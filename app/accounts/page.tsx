@@ -1,6 +1,6 @@
 'use client';
 import {useState,useEffect} from 'react';
-import {Plus,X,Edit3,Trash2,Instagram,Linkedin,Facebook,Check,Sparkles} from 'lucide-react';
+import {Plus,X,Edit3,Trash2,Check} from 'lucide-react';
 
 interface SocialAccount {
   id:string;
