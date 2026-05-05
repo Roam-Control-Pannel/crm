@@ -136,7 +136,7 @@ Generate ${genForm.postsPerChannel} posts per channel now:`}],
   function postsForDay(day:number){return filtered.filter(p=>{const d=new Date(p.scheduledAt);return d.getFullYear()===calY&&d.getMonth()===calM&&d.getDate()===day;});}
 
   const PostPill=({post}:{post:SocialPost})=>{const c=CC[post.channel];return(
-    <div onClick={()=>openComposer(post)} style={{background:c.pill,borderLeft:'2px solid '+c.border,borderRadius:3,padding:'2px 5px',marginBottom:2,cursor:'pointer',overflow:'hidden'}}>
+    <div onClick={(e)=>{e.stopPropagation();openComposer(post);}} style={{background:c.pill,borderLeft:'2px solid '+c.border,borderRadius:3,padding:'2px 5px',marginBottom:2,cursor:'pointer',overflow:'hidden'}}>
       <div style={{display:'flex',alignItems:'center',gap:3}}><span style={{color:c.text,display:'flex'}}>{CI[post.channel]}</span><span style={{fontSize:9,color:c.text,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:70,opacity:post.status==='draft'?0.6:1}}>{post.town}</span></div>
     </div>);};
 
