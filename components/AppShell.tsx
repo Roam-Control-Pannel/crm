@@ -9,9 +9,9 @@ const navSections = [
   {
     label: 'Overview',
     items: [
+      { icon: LayoutDashboard, label: 'Dashboard', href: '/' },
       { icon: Brain, label: 'Growth Hub', href: '/hub' },
       { icon: ListTodo, label: 'Tasks', href: '/tasks' },
-      { icon: LayoutDashboard, label: 'Dashboard', href: '/' },
       { icon: CheckSquare, label: "Today's Queue", href: '/queue' },
     ],
   },
