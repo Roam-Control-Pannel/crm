@@ -10,5 +10,3 @@
 
 # Scheduled function - runs daily at 9am UTC
 # Triggers auto follow-up sequences via /api/sequences
-[functions]
-  directory = "netlify/functions"
