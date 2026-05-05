@@ -93,7 +93,9 @@ CONFIRM:{"type":"action","label":"Brief action label","detail":"Full detail of w
 }
 
 export default function HubPage(){
-  const [chats,setChats]=useState<Chat[]>([]);
+  const [chats,setChats]=useState<Chat[]>(()=>{
+    try{return JSON.parse(localStorage.getItem('roam_chats')||'[]').map((c:Chat)=>({...c,createdAt:new Date(c.createdAt),updatedAt:new Date(c.updatedAt),messages:c.messages.map((m:Message)=>({...m,timestamp:new Date(m.timestamp)}))}))}catch{return[];}
+  });
   const [activeChat,setActiveChat]=useState<Chat|null>(null);
   const [input,setInput]=useState('');
   const [loading,setLoading]=useState(false);
@@ -115,10 +117,21 @@ export default function HubPage(){
 
   useEffect(()=>{messagesEndRef.current?.scrollIntoView({behavior:'smooth'});},[activeChat?.messages]);
 
+  function deleteChat(id:string,e:React.MouseEvent){
+    e.stopPropagation();
+    const updated=chats.filter(c=>c.id!==id);
+    setChats(updated);
+    if(activeChat?.id===id)setActiveChat(updated[0]||null);
+  }
+
   function newChat(){
     const chat:Chat={id:Date.now().toString(),title:'New conversation',messages:[],createdAt:new Date(),updatedAt:new Date()};
     setChats(prev=>[chat,...prev]);setActiveChat(chat);setShowChannels(false);setShowSuggestions(false);
   }
+
+  useEffect(()=>{
+    try{localStorage.setItem('roam_chats',JSON.stringify(chats));}catch(e){}
+  },[chats]);
 
   function updateChat(chatId:string,messages:Message[],title?:string){
     const upd=(c:Chat)=>c.id===chatId?{...c,messages,title:title||c.title,updatedAt:new Date()}:c;
@@ -209,10 +222,15 @@ export default function HubPage(){
           <div key={g.label} style={{marginBottom:12}}>
             <div style={{fontSize:9,letterSpacing:'0.12em',textTransform:'uppercase',color:'rgba(255,255,255,0.25)',padding:'4px 8px',fontWeight:500}}>{g.label}</div>
             {g.chats.map(c=>(
-              <button key={c.id} onClick={()=>{setActiveChat(c);setShowChannels(false);}} style={{width:'100%',textAlign:'left',padding:'8px 10px',borderRadius:'var(--r-sm)',background:activeChat?.id===c.id?'rgba(255,255,255,0.12)':'transparent',border:'none',cursor:'pointer',marginBottom:2,display:'block'}}>
-                <div style={{fontSize:12,color:activeChat?.id===c.id?'#fff':'rgba(255,255,255,0.65)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{c.title}</div>
-                <div style={{fontSize:10,color:'rgba(255,255,255,0.3)',marginTop:2,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{c.messages.length>0?c.messages[c.messages.length-1].content.slice(0,35)+'…':'Empty'}</div>
-              </button>
+              <div key={c.id} style={{position:'relative',marginBottom:2}} className="chat-item">
+                <button onClick={()=>{setActiveChat(c);setShowChannels(false);}} style={{width:'100%',textAlign:'left',padding:'8px 10px',paddingRight:28,borderRadius:'var(--r-sm)',background:activeChat?.id===c.id?'rgba(255,255,255,0.12)':'transparent',border:'none',cursor:'pointer',display:'block'}}>
+                  <div style={{fontSize:12,color:activeChat?.id===c.id?'#fff':'rgba(255,255,255,0.65)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{c.title}</div>
+                  <div style={{fontSize:10,color:'rgba(255,255,255,0.3)',marginTop:2,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{c.messages.length>0?c.messages[c.messages.length-1].content.slice(0,35)+'…':'Empty'}</div>
+                </button>
+                <button onClick={(e)=>deleteChat(c.id,e)} title="Delete conversation" style={{position:'absolute',right:4,top:'50%',transform:'translateY(-50%)',background:'none',border:'none',cursor:'pointer',color:'rgba(255,255,255,0.25)',padding:3,display:'flex',alignItems:'center',borderRadius:3,opacity:0}} className="delete-btn">
+                  <Trash2 size={11}/>
+                </button>
+              </div>
             ))}
           </div>
         ))}
@@ -227,7 +245,7 @@ export default function HubPage(){
 
   return(
     <div style={{display:'flex',height:'100%',overflow:'hidden',background:'var(--paper)'}}>
-      <style>{`@keyframes bounce{0%,60%,100%{transform:translateY(0)}30%{transform:translateY(-5px)}}`}</style>
+      <style>{`@keyframes bounce{0%,60%,100%{transform:translateY(0)}30%{transform:translateY(-5px)}} .chat-item:hover .delete-btn{opacity:1!important;} .delete-btn:hover{color:rgba(255,100,100,0.8)!important;background:rgba(255,255,255,0.08)!important;}`}</style>
 
       {!isMobile&&<ChannelList/>}
 
