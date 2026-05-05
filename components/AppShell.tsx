@@ -21,13 +21,13 @@ const navSections = [
       { icon: Users, label: 'Contact Manager', href: '/contacts' },
       { icon: Search, label: 'Find Businesses', href: '/find' },
       { icon: Mail, label: 'Email Sequences', href: '/sequences' },
-      { icon: BookUser, label: 'Social Accounts', href: '/accounts' },
     ],
   },
   {
     label: 'Content',
     items: [
       { icon: ArrowUpCircle, label: 'Social Posts', href: '/social' },
+      { icon: BookUser, label: 'Social Accounts', href: '/accounts' },
       { icon: Settings, label: 'Channels', href: '/channels' },
     ],
   },
