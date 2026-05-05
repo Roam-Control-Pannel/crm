@@ -1,6 +1,6 @@
 'use client';
 import {useState,useEffect,useRef} from 'react';
-import {Plus,Send,Sparkles,X,Check,AlertTriangle,MessageSquare,Brain} from 'lucide-react';
+import {Plus,Send,Sparkles,X,Check,AlertTriangle,MessageSquare,Brain,Paperclip,Trash2,FileText} from 'lucide-react';
 
 interface Message {
   id:string;
@@ -29,6 +29,13 @@ const SUGGESTIONS=[
   {icon:'📋',label:'Create a new list',prompt:'Help me create a new outreach list and find businesses to add to it'},
 ];
 
+
+interface RoamDoc{id:string;name:string;size:number;content:string;uploadedAt:string;}
+function getDocs():RoamDoc[]{try{return JSON.parse(localStorage.getItem("roam_docs")||"[]");}catch{return[];}}
+function saveDoc(d:RoamDoc){try{const docs=getDocs();localStorage.setItem("roam_docs",JSON.stringify([d,...docs].slice(0,20)));}catch(e){}}
+function rmDoc(id:string){try{localStorage.setItem("roam_docs",JSON.stringify(getDocs().filter(d=>d.id!==id)));}catch(e){}}
+function fmtSize(b:number):string{if(b<1024)return b+"B";if(b<1048576)return Math.round(b/1024)+"KB";return Math.round(b/1048576)+"MB";}
+
 function groupChats(chats:Chat[]):{label:string;chats:Chat[]}[]{
   const now=new Date();
   const today:Chat[]=[],yesterday:Chat[]=[],week:Chat[]=[],older:Chat[]=[];
@@ -47,7 +54,7 @@ function groupChats(chats:Chat[]):{label:string;chats:Chat[]}[]{
   return g;
 }
 
-async function callRoamio(messages:{role:string;content:string}[]):Promise<{text:string;confirmAction?:{type:string;label:string;detail:string;}}>{
+async function callRoamio(messages:{role:string;content:string}[],docs?:RoamDoc[]):Promise<{text:string;confirmAction?:{type:string;label:string;detail:string;}}>{
   const system=`You are Roam-io, the AI growth assistant for Roam Local — a free local business discovery app. You help the Roam team run their business outreach CRM.
 
 Your personality: warm, encouraging and conversational — like a smart, enthusiastic colleague. But also precise, efficient and action-oriented.
@@ -61,14 +68,14 @@ RULES:
 4. When suggesting an action that needs confirmation, end your message with exactly this on a new line:
 CONFIRM:{"type":"action","label":"Brief action label","detail":"Full detail of what will happen"}`;
 
-  try{
+  const docCtx=docs&&docs.length>0?docs.map(d=>`[DOC: ${d.name}]\n${d.content}`).join("\n\n"):"";  try{
     const res=await fetch('https://api.anthropic.com/v1/messages',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
         model:'claude-sonnet-4-20250514',
         max_tokens:1000,
-        system,
+        system:system+(docCtx?"\n\nKNOWLEDGE BASE:\n"+docCtx:""),
         messages:messages.map(m=>({role:m.role,content:m.content})),
       }),
     });
@@ -94,10 +101,14 @@ export default function HubPage(){
   const [showChannels,setShowChannels]=useState(false);
   const [isMobile,setIsMobile]=useState(false);
   const [showSuggestions,setShowSuggestions]=useState(false);
+  const [showDocs,setShowDocs]=useState(false);
+  const [docs,setDocs]=useState<RoamDoc[]>([]);
+  const fileInputRef=useRef<HTMLInputElement>(null);
   const messagesEndRef=useRef<HTMLDivElement>(null);
   const inputRef=useRef<HTMLTextAreaElement>(null);
 
   useEffect(()=>{
+    setDocs(getDocs());
     const check=()=>setIsMobile(window.innerWidth<640);
     check();window.addEventListener('resize',check);
     return()=>window.removeEventListener('resize',check);
@@ -133,7 +144,7 @@ export default function HubPage(){
     const newMsgs=[...chat.messages,userMsg];
     updateChat(chat.id,newMsgs,title);
 
-    const{text:aiText,confirmAction}=await callRoamio(newMsgs.map(m=>({role:m.role,content:m.content})));
+    const{text:aiText,confirmAction}=await callRoamio(newMsgs.map(m=>({role:m.role,content:m.content})),getDocs());
     const aiMsg:Message={id:(Date.now()+1).toString(),role:'assistant',content:aiText,timestamp:new Date(),confirmAction};
     updateChat(chat.id,[...newMsgs,aiMsg],title);
     setLoading(false);
@@ -147,7 +158,7 @@ export default function HubPage(){
     updateChat(chatId,updated);
     setLoading(true);
     const history=[...updated.map(m=>({role:m.role,content:m.content})),{role:'user' as const,content:`Confirmed — please proceed with: ${action.label}`}];
-    const{text}=await callRoamio(history);
+    const{text}=await callRoamio(history,getDocs());
     const confirmMsg:Message={id:Date.now().toString(),role:'user',content:`Confirmed: ${action.label}`,timestamp:new Date()};
     const responseMsg:Message={id:(Date.now()+1).toString(),role:'assistant',content:text,timestamp:new Date()};
     updateChat(chatId,[...updated,confirmMsg,responseMsg]);
@@ -161,6 +172,23 @@ export default function HubPage(){
   }
 
   const groups=groupChats(chats);
+
+
+  async function handleUpload(e:React.ChangeEvent<HTMLInputElement>){
+    const file=e.target.files?.[0];if(!file)return;
+    const reader=new FileReader();
+    reader.onload=(ev)=>{
+      const content=(ev.target?.result as string||"").slice(0,10000);
+      const doc:RoamDoc={id:Date.now().toString(),name:file.name,size:file.size,content,uploadedAt:new Date().toISOString()};
+      saveDoc(doc);setDocs(getDocs());
+      const aiMsg:Message={id:(Date.now()+1).toString(),role:"assistant",content:`I have added **${file.name}** (${fmtSize(file.size)}) to your knowledge base. I will use this in our conversations when relevant. You can view and manage documents from the home screen.`,timestamp:new Date()};
+      if(activeChat){updateChat(activeChat.id,[...activeChat.messages,aiMsg]);}
+    };
+    reader.readAsText(file);
+    e.target.value="";
+  }
+
+  function handleDeleteDoc(id:string){rmDoc(id);setDocs(getDocs());}
 
   const ChannelList=()=>(
     <div style={{width:isMobile?'100%':220,background:'var(--maroon-900)',display:'flex',flexDirection:'column',flexShrink:0,height:'100%'}}>
@@ -302,7 +330,9 @@ export default function HubPage(){
             </div>
           )}
           <div style={{display:'flex',gap:8,alignItems:'flex-end'}}>
+            <input ref={fileInputRef} type="file" accept=".txt,.pdf,.csv,.md" onChange={handleUpload} style={{display:"none"}}/>
             <textarea ref={inputRef} value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}}} placeholder={activeChat?'Continue the conversation… (Enter to send)':'Ask Roam-io anything…'} rows={2} disabled={loading} style={{flex:1,fontSize:13,padding:'9px 12px',border:'1.5px solid var(--ink-200)',borderRadius:'var(--r-md)',fontFamily:'inherit',color:'var(--ink-900)',background:'var(--white)',resize:'none',outline:'none'}}/>
+            <button onClick={()=>fileInputRef.current?.click()} title="Upload to knowledge base" style={{width:40,height:40,borderRadius:"var(--r-md)",background:"var(--ink-100)",border:"none",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}><Paperclip size={15} color="var(--ink-500)"/></button>
             <button onClick={()=>send()} disabled={!input.trim()||loading} style={{width:40,height:40,borderRadius:'var(--r-md)',background:input.trim()&&!loading?'var(--maroon-700)':'var(--ink-200)',border:'none',cursor:input.trim()&&!loading?'pointer':'default',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'background 0.15s'}}>
               <Send size={15} color="white"/>
             </button>
