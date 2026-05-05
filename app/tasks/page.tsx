@@ -167,7 +167,7 @@ export default function TasksPage(){
       {/* Header */}
       <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',marginBottom:20}} className="page-header">
         <div>
-          <h1 style={{fontFamily:'var(--font-display)',fontSize:28,fontWeight:400,color:'var(--ink-900)',lineHeight:1}}>Tasks</h1>
+          <h1 style={{fontFamily:'var(--font-display)',fontSize:28,fontWeight:700,color:'var(--ink-900)',lineHeight:1}}>Tasks</h1>
           <p style={{fontSize:12,color:'var(--ink-400)',marginTop:5,fontWeight:500}}>{open.length} open · {dueToday.length} due today · {overdue.length} overdue</p>
         </div>
         <div style={{display:'flex',gap:8}} className="btn-row">
