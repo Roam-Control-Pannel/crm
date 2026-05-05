@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
-import { LayoutDashboard, CheckSquare, Users, Search, Mail, ArrowUpCircle, Settings, Menu, X, Brain, ListTodo } from 'lucide-react';
+import { LayoutDashboard, CheckSquare, Users, Search, Mail, ArrowUpCircle, Settings, Menu, X, Brain, ListTodo, BookUser } from 'lucide-react';
 import NotificationCentre from './NotificationCentre';
 
 const navSections = [
