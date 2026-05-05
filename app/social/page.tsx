@@ -87,7 +87,7 @@ export default function SocialPage(){
       const res=await fetch('/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
         maxTokens:2000,
         systemPrompt:'You are a social media content generator for Roam Local. Return ONLY a valid JSON array. No markdown, no code blocks, no explanation. Start your response with [ and end with ].',
-        messages:[{role:'user',content:'Generate '+genForm.postsPerChannel+' posts per channel for '+genForm.town+' for channels: '+chs.join(', ')+'. Return JSON array: [{"channel":"instagram","caption":"text","scheduledDay":1}]. Instagram: warm+visual+hashtags. LinkedIn: professional. Facebook: community. Make posts feel local and authentic for '+genForm.town+' UK.'}],
+        messages:[{role:'user',content:'Create '+genForm.postsPerChannel+' social media posts per channel for '+genForm.town+', UK for these channels: '+chs.join(', ')+'. Return a JSON array only. Each item must have exactly these fields: channel (instagram/facebook/linkedin), caption (the post text), scheduledDay (1-7). Example format: [{"channel":"instagram","caption":"Discover the charm of '+genForm.town+'...","scheduledDay":1}]. Write authentic, engaging captions. Instagram needs hashtags. LinkedIn is professional. Facebook is community-focused.'}],
       })});
       const d=await res.json();
       // Robust JSON extraction - handle truncated or wrapped responses
