@@ -2,9 +2,10 @@
 import {useState,useEffect} from 'react';
 import {Plus,Calendar,List,X,Image,Sparkles,ChevronLeft,ChevronRight,Check,Clock,Edit3,Trash2} from 'lucide-react';
 import {addNotification} from '@/components/NotificationCentre';
+import { Brief, getBriefs, getBrief } from '@/lib/briefs';
 
 interface PostResult{status:'pending'|'publishing'|'published'|'failed';postId?:string;postUrl?:string;error?:string;publishedAt?:string;}
-interface SocialPost{id:string;accountIds:string[];town:string;caption:string;imageUrl?:string;imageCredit?:string;scheduledAt:string;status:'draft'|'scheduled'|'publishing'|'published'|'partial'|'failed';createdAt:string;results?:Record<string,PostResult>;}
+interface SocialPost{id:string;briefId?:string;accountIds:string[];town:string;caption:string;imageUrl?:string;imageCredit?:string;scheduledAt:string;status:'draft'|'scheduled'|'publishing'|'published'|'partial'|'failed';createdAt:string;results?:Record<string,PostResult>;}
 interface SocialAccount{id:string;handle:string;platform:'instagram'|'facebook'|'linkedin'|'x';region?:string;audience:string;tone:string;contentBrief:string;hashtags:string;color:string;active:boolean;}
 
 const PLATFORM_COLORS:Record<string,{bg:string;border:string;text:string}>={
@@ -27,10 +28,10 @@ const TOWNS=['Whitstable','Darlington','Aberfeldy','London','Edinburgh','Bristol
 
 function getPosts():SocialPost[]{try{
   const v=localStorage.getItem('roam_social_posts_v');
-  if(v!=='3'){
+  if(v!=='4'){
     // v2 migration: wipe (per user request: start fresh)
     localStorage.setItem('roam_social_posts','[]');
-    localStorage.setItem('roam_social_posts_v','3');
+    localStorage.setItem('roam_social_posts_v','4');
     return [];
   }
   const raw=JSON.parse(localStorage.getItem('roam_social_posts')||'[]');
@@ -58,6 +59,7 @@ export default function SocialPage(){
   const [tab,setTab]=useState<'calendar'|'list'>('calendar');
   const [posts,setPosts]=useState<SocialPost[]>([]);
   const [accounts,setAccounts]=useState<SocialAccount[]>([]);
+  const [briefs,setBriefs]=useState<Brief[]>([]);
   const [acctFilter,setAcctFilter]=useState('all');
   const [platFilter,setPlatFilter]=useState('all');
   const [showComposer,setShowComposer]=useState(false);
@@ -71,15 +73,16 @@ export default function SocialPage(){
   const [calM,setCalM]=useState(today.getMonth());
 
   
-  const blankForm=()=>({accountIds:accounts.filter(a=>a.active).map(a=>a.id),town:'Whitstable',caption:'',imageUrl:'',imageCredit:'',scheduledDate:today.toISOString().split('T')[0],scheduledTime:'10:00',status:'draft' as SocialPost['status']});
+  const blankForm=()=>({briefId:'',accountIds:[] as string[],town:'',caption:'',imageUrl:'',imageCredit:'',scheduledDate:today.toISOString().split('T')[0],scheduledTime:'10:00',status:'draft' as SocialPost['status']});
   const [form,setForm]=useState(blankForm());
-  const [genForm,setGenForm]=useState({town:'Whitstable',accountIds:[] as string[],postsPerAccount:3,weekStart:today.toISOString().split('T')[0]});
+  const [genForm,setGenForm]=useState<{briefId:string;accountIds:string[];postsPerAccount:number;weekStart:string;town:string}>({briefId:'',accountIds:[],postsPerAccount:3,weekStart:today.toISOString().split('T')[0],town:''});
 
   useEffect(()=>{
+    setBriefs(getBriefs());
     const accs=getAccounts();
     setAccounts(accs);
     setPosts(getPosts());
-    setGenForm(f=>({...f,accountIds:accs.filter(a=>a.active).map(a=>a.id)}));
+    // genForm now pre-fills based on selected brief, not all accounts
   },[]);
 
   function saveAndSet(p:SocialPost[]){setPosts(p);savePosts(p);}
@@ -90,7 +93,7 @@ export default function SocialPage(){
     if(post){
       setEditPost(post);
       const dt=new Date(post.scheduledAt);
-      setForm({accountIds:(post as any).accountIds||((post as any).accountId?[(post as any).accountId]:[]),town:post.town,caption:post.caption,imageUrl:post.imageUrl||'',imageCredit:post.imageCredit||'',scheduledDate:dt.toISOString().split('T')[0],scheduledTime:dt.toTimeString().slice(0,5),status:post.status});
+      setForm({briefId:(post as any).briefId||'',accountIds:(post as any).accountIds||((post as any).accountId?[(post as any).accountId]:[]),town:post.town||'',caption:post.caption,imageUrl:post.imageUrl||'',imageCredit:post.imageCredit||'',scheduledDate:dt.toISOString().split('T')[0],scheduledTime:dt.toTimeString().slice(0,5),status:post.status});
     }else{setEditPost(null);setForm(blankForm());}
     setUnsplash([]);setShowComposer(true);
   }
@@ -439,24 +442,68 @@ Return JSON array: [{"caption":"post text here","scheduledDay":1},{"caption":"po
               <div>
                 <label style={{display:'block',fontSize:11,fontWeight:600,color:'var(--ink-600)',marginBottom:8,textTransform:'uppercase',letterSpacing:'0.06em'}}>Account</label>
                 <div style={{display:'flex',flexDirection:'column',gap:6}}>
-                  {accounts.filter(a=>a.active).map(a=>{
-                  const selected=form.accountIds?.includes(a.id);
-                  return (
-                    <button key={a.id} type="button" onClick={()=>{
-                      const ids=form.accountIds||[];
-                      setForm({...form,accountIds:selected?ids.filter(x=>x!==a.id):[...ids,a.id]});
-                    }} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 12px',borderRadius:'var(--r-md)',border:`1.5px solid ${selected?a.color:'var(--ink-200)'}`,background:selected?a.color+'15':'var(--white)',cursor:'pointer',textAlign:'left',fontFamily:'inherit',position:'relative'}}>
-                      <div style={{width:24,height:24,borderRadius:'50%',background:a.color,display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',flexShrink:0}}>
-                        <PlatformIcon platform={a.platform} size={12} color="#fff"/>
+                  {(()=>{
+                const sel=briefs.find(b=>b.id===form.briefId);
+                const linked=sel?accounts.filter(a=>a.active&&(a as any).briefId===sel.id):[];
+                return (
+                  <div style={{display:'flex',flexDirection:'column',gap:14}}>
+                    {/* Brief picker */}
+                    <div>
+                      <div style={{fontSize:11,fontWeight:600,color:'var(--ink-500)',textTransform:'uppercase',letterSpacing:'0.06em',marginBottom:6}}>1. Choose brief</div>
+                      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill, minmax(180px, 1fr))',gap:8}}>
+                        {briefs.filter(b=>b.active).map(b=>{
+                          const isSel=form.briefId===b.id;
+                          return (
+                            <button key={b.id} type="button" onClick={()=>setForm({...form,briefId:b.id,accountIds:[]})} style={{textAlign:'left',padding:'10px 12px',borderRadius:'var(--r-md)',border:`1.5px solid ${isSel?b.color:'var(--ink-200)'}`,background:isSel?b.color+'15':'var(--white)',cursor:'pointer',fontFamily:'inherit',position:'relative'}}>
+                              <div style={{display:'flex',alignItems:'center',gap:8}}>
+                                <div style={{width:10,height:10,borderRadius:'50%',background:b.color,flexShrink:0}}/>
+                                <div style={{fontSize:12,fontWeight:600,color:isSel?b.color:'var(--ink-900)'}}>{b.name}</div>
+                                {isSel && <Check size={13} color={b.color} style={{marginLeft:'auto'}}/>}
+                              </div>
+                              <div style={{fontSize:10,color:'var(--ink-500)',marginTop:2,lineHeight:1.3}}>{b.description}</div>
+                            </button>
+                          );
+                        })}
                       </div>
-                      <div style={{flex:1,minWidth:0}}>
-                        <div style={{fontSize:12,fontWeight:600,color:selected?a.color:'var(--ink-900)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{a.handle}</div>
-                        <div style={{fontSize:10,color:'var(--ink-400)',textTransform:'capitalize'}}>{a.platform}{a.region?` · ${a.region}`:''}</div>
+                    </div>
+
+                    {/* Platforms within brief */}
+                    {sel && (
+                      <div>
+                        <div style={{display:'flex',alignItems:'center',marginBottom:6}}>
+                          <div style={{fontSize:11,fontWeight:600,color:'var(--ink-500)',textTransform:'uppercase',letterSpacing:'0.06em'}}>2. Choose platforms</div>
+                          <button type="button" onClick={()=>setForm({...form,accountIds:linked.map(a=>a.id)})} style={{marginLeft:'auto',background:'none',border:'none',fontSize:11,color:'var(--maroon-700)',cursor:'pointer',fontWeight:500,padding:0}}>Select all</button>
+                          <button type="button" onClick={()=>setForm({...form,accountIds:[]})} style={{background:'none',border:'none',fontSize:11,color:'var(--ink-500)',cursor:'pointer',fontWeight:500,padding:0,marginLeft:8}}>Clear</button>
+                          <span style={{marginLeft:8,fontSize:11,color:'var(--ink-400)'}}>{form.accountIds?.length||0} selected</span>
+                        </div>
+                        {linked.length===0
+                          ? <div style={{padding:'16px',background:'var(--paper)',borderRadius:'var(--r-md)',fontSize:12,color:'var(--ink-500)',textAlign:'center'}}>No accounts linked to this brief yet. Go to <strong>Social Accounts</strong> and assign accounts to <strong>{sel.name}</strong>.</div>
+                          : <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill, minmax(220px, 1fr))',gap:8}}>
+                              {linked.map(a=>{
+                                const selected=form.accountIds?.includes(a.id);
+                                return (
+                                  <button key={a.id} type="button" onClick={()=>{
+                                    const ids=form.accountIds||[];
+                                    setForm({...form,accountIds:selected?ids.filter(x=>x!==a.id):[...ids,a.id]});
+                                  }} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 12px',borderRadius:'var(--r-md)',border:`1.5px solid ${selected?a.color:'var(--ink-200)'}`,background:selected?a.color+'15':'var(--white)',cursor:'pointer',textAlign:'left',fontFamily:'inherit'}}>
+                                    <div style={{width:24,height:24,borderRadius:'50%',background:a.color,display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',flexShrink:0}}>
+                                      <PlatformIcon platform={a.platform} size={12} color="#fff"/>
+                                    </div>
+                                    <div style={{flex:1,minWidth:0}}>
+                                      <div style={{fontSize:12,fontWeight:600,color:selected?a.color:'var(--ink-900)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{a.handle}</div>
+                                      <div style={{fontSize:10,color:'var(--ink-400)',textTransform:'capitalize'}}>{a.platform}{a.region?` · ${a.region}`:''}</div>
+                                    </div>
+                                    {selected && <Check size={13} color={a.color}/>}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                        }
                       </div>
-                      {selected && <div style={{width:18,height:18,borderRadius:'50%',background:a.color,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}><Check size={11} color="#fff"/></div>}
-                    </button>
-                  );
-                })}
+                    )}
+                  </div>
+                );
+              })()}
                 </div>
                 {selectedAcc&&<div style={{marginTop:8,padding:'8px 12px',background:'var(--paper)',borderRadius:'var(--r-sm)',fontSize:11,color:'var(--ink-500)',lineHeight:1.5}}><strong style={{color:'var(--ink-700)'}}>Tone:</strong> {selectedAcc.tone}</div>}
               </div>
@@ -523,7 +570,7 @@ Return JSON array: [{"caption":"post text here","scheduledDay":1},{"caption":"po
                   setShowComposer(false);
                   setConfirmPublish(np);
                 }
-              }} disabled={!form.caption.trim()||!form.accountIds?.length} style={{...btnP,background:'#0A66C2',opacity:(!form.caption.trim()||!form.accountIds?.length)?0.5:1,marginRight:8}}>Publish Now</button><button onClick={savePost} disabled={!form.caption.trim()||!form.accountIds?.length} style={{...btnP,opacity:!form.caption.trim()?0.5:1}}><Check size={13}/>{editPost?'Save changes':'Create post'}</button>
+              }} disabled={!form.caption.trim()||!form.accountIds?.length||!form.briefId} style={{...btnP,background:'#0A66C2',opacity:(!form.caption.trim()||!form.accountIds?.length||!form.briefId)?0.5:1,marginRight:8}}>Publish Now</button><button onClick={savePost} disabled={!form.caption.trim()||!form.accountIds?.length||!form.briefId} style={{...btnP,opacity:!form.caption.trim()?0.5:1}}><Check size={13}/>{editPost?'Save changes':'Create post'}</button>
             </div>
           </div>
         </div>
@@ -543,9 +590,22 @@ Return JSON array: [{"caption":"post text here","scheduledDay":1},{"caption":"po
                 <datalist id="gtl">{TOWNS.map(t=><option key={t} value={t}/>)}</datalist>
               </div>
               <div>
-                <label style={{display:'block',fontSize:11,fontWeight:600,color:'var(--ink-600)',marginBottom:8,textTransform:'uppercase',letterSpacing:'0.06em'}}>Generate for accounts</label>
+                <div style={{marginBottom:16}}>
+              <label style={{fontSize:11,fontWeight:600,color:'var(--ink-500)',textTransform:'uppercase',letterSpacing:'0.06em',display:'block',marginBottom:6}}>Choose brief</label>
+              <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill, minmax(160px, 1fr))',gap:6}}>
+                {briefs.filter(b=>b.active).map(b=>{
+                  const isSel=genForm.briefId===b.id;
+                  return (
+                    <button key={b.id} type="button" onClick={()=>setGenForm({...genForm,briefId:b.id,accountIds:[]})} style={{padding:'8px 10px',borderRadius:'var(--r-sm)',border:`1.5px solid ${isSel?b.color:'var(--ink-200)'}`,background:isSel?b.color+'15':'var(--white)',cursor:'pointer',fontSize:12,fontWeight:600,color:isSel?b.color:'var(--ink-900)',fontFamily:'inherit',textAlign:'left',display:'flex',alignItems:'center',gap:6}}>
+                      <div style={{width:8,height:8,borderRadius:'50%',background:b.color}}/>{b.name}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <label style={{display:'block',fontSize:11,fontWeight:600,color:'var(--ink-600)',marginBottom:8,textTransform:'uppercase',letterSpacing:'0.06em'}}>Generate for accounts</label>
                 <div style={{display:'flex',flexDirection:'column',gap:6}}>
-                  {accounts.filter(a=>a.active).map(a=>{
+                  {accounts.filter(a=>a.active&&(a as any).briefId===genForm.briefId).map(a=>{
                     const pc=PLATFORM_COLORS[a.platform];
                     const checked=genForm.accountIds.includes(a.id);
                     return(
@@ -579,7 +639,7 @@ Return JSON array: [{"caption":"post text here","scheduledDay":1},{"caption":"po
             </div>
             <div style={{padding:'14px 22px',borderTop:'1px solid var(--ink-100)',display:'flex',gap:8,justifyContent:'flex-end'}}>
               <button onClick={()=>setShowGen(false)} style={btnG}>Cancel</button>
-              <button onClick={generate} disabled={generating||!genForm.town.trim()||!genForm.accountIds.length} style={{...btnP,opacity:generating||!genForm.town.trim()||!genForm.accountIds.length?0.6:1}}>
+              <button onClick={generate} disabled={generating||!genForm.briefId||!genForm.accountIds.length} style={{...btnP,opacity:generating||!genForm.briefId||!genForm.accountIds.length?0.6:1}}>
                 <Sparkles size={13}/>{generating?'Generating...':'Generate for '+genForm.accountIds.length+' account'+(genForm.accountIds.length===1?'':'s')}
               </button>
             </div>
