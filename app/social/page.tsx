@@ -37,7 +37,7 @@ function getPosts():SocialPost[]{try{
   // Defensive migration: convert any lingering accountId entries to accountIds
   return raw.map((p:any)=>{
     if(p.accountIds) return p;
-    if(p.accountId) return {...p,accountIds:[p.accountId]};
+    if(p.accountIds?.[0]) return {...p,accountIds:[p.accountIds?.[0]]};
     return {...p,accountIds:[]};
   });
 }catch{return[];}}
@@ -234,8 +234,8 @@ Return JSON array: [{"caption":"post text here","scheduledDay":1},{"caption":"po
   }
 
   const filtered=posts.filter(p=>{
-    const acc=getAccount(p.accountId);
-    if(acctFilter!=='all'&&p.accountId!==acctFilter)return false;
+    const acc=getAccount(p.accountIds?.[0]);
+    if(acctFilter!=='all'&&!p.accountIds?.includes(acctFilter))return false;
     if(platFilter!=='all'&&acc?.platform!==platFilter)return false;
     return true;
   });
@@ -297,7 +297,7 @@ Return JSON array: [{"caption":"post text here","scheduledDay":1},{"caption":"po
     );
   };
 
-  const selectedAcc=getAccount(form.accountId);
+  const selectedAcc=getAccount(form.accountIds?.[0]);
   const platforms=['all','instagram','facebook','linkedin'];
   const pNames:Record<string,string>={all:'All',instagram:'Instagram',facebook:'Facebook',linkedin:'LinkedIn'};
 
