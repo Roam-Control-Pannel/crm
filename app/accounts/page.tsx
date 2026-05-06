@@ -50,7 +50,7 @@ function PlatformIcon({platform,size=14,color}:{platform:string;size?:number;col
   return<svg width={size} height={size} viewBox="0 0 24 24" fill="none"><path d="M22 4L12 14.01l-3-3" stroke={c} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>;
 }
 
-const blank={handle:'',platform:'instagram' as SocialAccount['platform'],region:'',audience:'',tone:'',contentBrief:'',hashtags:'',color:ACCOUNT_COLORS[0],active:true};
+const blank={handle:'',platform:'instagram' as SocialAccount['platform'],region:'',briefId:'',audience:'',tone:'',contentBrief:'',hashtags:'',color:ACCOUNT_COLORS[0],active:true};
 
 export default function AccountsPage(){
   const [accounts,setAccounts]=useState<SocialAccount[]>([]);
@@ -66,7 +66,7 @@ export default function AccountsPage(){
   function saveAndSet(a:SocialAccount[]){setAccounts(a);saveAccounts(a);}
 
   function openAdd(){setEditAcc(null);setForm(blank);setShowForm(true);}
-  function openEdit(a:SocialAccount){setEditAcc(a);setForm({handle:a.handle,platform:a.platform,region:a.region||'',audience:a.audience,tone:a.tone,contentBrief:a.contentBrief,hashtags:a.hashtags,color:a.color,active:a.active});setShowForm(true);}
+  function openEdit(a:SocialAccount){setEditAcc(a);setForm({handle:a.handle,platform:a.platform,region:a.region||'',briefId:a.briefId||'',audience:a.audience,tone:a.tone,contentBrief:a.contentBrief,hashtags:a.hashtags,color:a.color,active:a.active});setShowForm(true);}
 
   function save(){
     if(!form.handle.trim())return;
@@ -191,6 +191,11 @@ export default function AccountsPage(){
               <div>
                 <label style={{display:'block',fontSize:11,fontWeight:600,color:'var(--ink-600)',marginBottom:5,textTransform:'uppercase',letterSpacing:'0.06em'}}>Region / Focus (optional)</label>
                 <input value={form.region} onChange={e=>setForm({...form,region:e.target.value})} placeholder="e.g. Northern Ireland, Scotland, UK-wide" style={inp}/>
+                <label style={{display:'block',fontSize:11,fontWeight:600,color:'var(--ink-600)',marginTop:14,marginBottom:5,textTransform:'uppercase',letterSpacing:'0.06em'}}>Brief <span style={{fontWeight:400,color:'var(--ink-400)',textTransform:'none',letterSpacing:0}}>(strategic content track)</span></label>
+                <select value={form.briefId||''} onChange={e=>setForm({...form,briefId:e.target.value})} style={{...inp,background:'var(--white)',cursor:'pointer'}}>
+                  <option value="">— Unassigned —</option>
+                  {briefs.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}
+                </select>
               </div>
               <div>
                 <label style={{display:'block',fontSize:11,fontWeight:600,color:'var(--ink-600)',marginBottom:5,textTransform:'uppercase',letterSpacing:'0.06em'}}>Audience</label>
