@@ -99,12 +99,20 @@ export default function SocialPage(){
     if(!form.caption.trim())return;
     const scheduledAt=new Date(form.scheduledDate+'T'+form.scheduledTime).toISOString();
     if(editPost){saveAndSet(posts.map(p=>p.id===editPost.id?{...p,...form,scheduledAt}
+:p));}
+    else{
+      const np:SocialPost={id:Date.now().toString(),...form,scheduledAt,createdAt:new Date().toISOString()};
+      saveAndSet([np,...posts]);
+      const acc=getAccount(form.accountId);
+      addNotification({type:'info',title:'Post created',body:(acc?.handle||'Post')+' scheduled for '+form.scheduledDate});
+    }
+    setShowComposer(false);
+  }
 
   // ============== Publishing ==============
-  const [publishing,setPublishing]=useState<string|null>(null); // post id currently publishing
+  const [publishing,setPublishing]=useState<string|null>(null);
   const [confirmPublish,setConfirmPublish]=useState<SocialPost|null>(null);
 
-  // Order: LinkedIn first, then Facebook, then Instagram (sequential per user choice)
   function platformOrder(platform:string):number{
     if(platform==='linkedin') return 0;
     if(platform==='facebook') return 1;
@@ -120,13 +128,10 @@ export default function SocialPage(){
     const results:Record<string,any>={...(post.results||{})};
     accs.forEach(a=>{ if(!results[a.id]) results[a.id]={status:'pending'}; });
 
-    // Get meta page id from connected meta tokens (need to fetch status to know pages)
     let metaPagesByPlatform:Record<string,string>={};
     try{
       const sRes=await fetch('/api/accounts/status');
       const sData=await sRes.json();
-      // For each FB account in our local accounts that's connected, find the matching Meta page
-      // For now: take the first connected page as default for facebook AND instagram accounts
       const pages=sData.meta?.pages||[];
       if(pages.length>0){
         metaPagesByPlatform.facebook=pages[0].id;
@@ -165,7 +170,6 @@ export default function SocialPage(){
       saveAndSet(posts.map(p=>p.id===post.id?{...p,results:{...results}}:p));
     }
 
-    // Compute summary status
     const all=Object.values(results);
     const succeeded=all.filter((r:any)=>r.status==='published').length;
     const failed=all.filter((r:any)=>r.status==='failed').length;
@@ -177,15 +181,7 @@ export default function SocialPage(){
     setPublishing(null);
     setConfirmPublish(null);
   }
-:p));}
-    else{
-      const np:SocialPost={id:Date.now().toString(),...form,scheduledAt,createdAt:new Date().toISOString()};
-      saveAndSet([np,...posts]);
-      const acc=getAccount(form.accountId);
-      addNotification({type:'info',title:'Post created',body:(acc?.handle||'Post')+' scheduled for '+form.scheduledDate});
-    }
-    setShowComposer(false);
-  }
+
 
   async function searchUnsplash(){
     setSearchingImgs(true);setUnsplash([]);
