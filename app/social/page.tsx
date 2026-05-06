@@ -205,6 +205,7 @@ function savePost(){
       setUnsplash(d.images||[]);
     }catch{setUnsplash([]);}
     finally{setSearchingImgs(false);}
+  }
 
   async function generate(){
     setGenerating(true);
