@@ -587,16 +587,6 @@ Return JSON array: [{"caption":"post text here","scheduledDay":1},{"caption":"po
             </div>
             <div style={{padding:'18px 22px',display:'flex',flexDirection:'column',gap:14}}>
               <div>
-                <label style={{display:'block',fontSize:11,fontWeight:600,color:'var(--ink-600)',marginBottom:5,textTransform:'uppercase',letterSpacing:'0.06em'}}>What's this about? <span style={{color:'var(--alert)'}}>*</span></label>
-                <input value={genForm.theme} onChange={e=>setGenForm({...genForm,theme:e.target.value})} placeholder="e.g. summer harbour markets in Whitstable" style={inp}/>
-                <label style={{display:'block',fontSize:11,fontWeight:600,color:'var(--ink-600)',marginTop:14,marginBottom:5,textTransform:'uppercase',letterSpacing:'0.06em'}}>Goal <span style={{fontWeight:400,color:'var(--ink-400)',textTransform:'none',letterSpacing:0}}>(optional)</span></label>
-                <select value={genForm.goal} onChange={e=>setGenForm({...genForm,goal:e.target.value})} style={{...inp,background:'var(--white)',cursor:'pointer'}}>
-                  <option value="">— Choose a goal —</option>
-                  {GOAL_OPTIONS.map(g=><option key={g.id} value={g.id}>{g.label} — {g.description}</option>)}
-                </select>
-              </div>
-              <div>
-                <div style={{marginBottom:16}}>
               <label style={{fontSize:11,fontWeight:600,color:'var(--ink-500)',textTransform:'uppercase',letterSpacing:'0.06em',display:'block',marginBottom:6}}>Choose brief</label>
               <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill, minmax(160px, 1fr))',gap:6}}>
                 {briefs.filter(b=>b.active).map(b=>{
@@ -609,6 +599,16 @@ Return JSON array: [{"caption":"post text here","scheduledDay":1},{"caption":"po
                 })}
               </div>
             </div>
+              </div>
+              <div>
+                <div style={{marginBottom:16}}>
+                <label style={{display:'block',fontSize:11,fontWeight:600,color:'var(--ink-600)',marginBottom:5,textTransform:'uppercase',letterSpacing:'0.06em'}}>What's this about? <span style={{color:'var(--alert)'}}>*</span></label>
+                <input value={genForm.theme} onChange={e=>setGenForm({...genForm,theme:e.target.value})} placeholder="e.g. summer harbour markets in Whitstable" style={inp}/>
+                <label style={{display:'block',fontSize:11,fontWeight:600,color:'var(--ink-600)',marginTop:14,marginBottom:5,textTransform:'uppercase',letterSpacing:'0.06em'}}>Goal <span style={{fontWeight:400,color:'var(--ink-400)',textTransform:'none',letterSpacing:0}}>(optional)</span></label>
+                <select value={genForm.goal} onChange={e=>setGenForm({...genForm,goal:e.target.value})} style={{...inp,background:'var(--white)',cursor:'pointer'}}>
+                  <option value="">— Choose a goal —</option>
+                  {GOAL_OPTIONS.map(g=><option key={g.id} value={g.id}>{g.label} — {g.description}</option>)}
+                </select>
             <label style={{display:'block',fontSize:11,fontWeight:600,color:'var(--ink-600)',marginBottom:8,textTransform:'uppercase',letterSpacing:'0.06em'}}>Generate for accounts</label>
                 <div style={{display:'flex',flexDirection:'column',gap:6}}>
                   {accounts.filter(a=>a.active&&(a as any).briefId===genForm.briefId).map(a=>{
