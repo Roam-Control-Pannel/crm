@@ -10,7 +10,24 @@ export default function ChannelsPage(){
   const [metaError,setMetaError]=useState<string|null>(null);
   const [metaConnected,setMetaConnected]=useState(false);
   const [liConnected,setLiConnected]=useState(false);
-  const [liAccount,setLiAccount]=useState<{name:string;email:string;picture:string;accessToken:string}|null>(null);
+  const [liAccount,setLiAccount] = useState<{
+    name: string;
+    email: string;
+    picture: string;
+    accessToken: string;
+    sub?: string;
+    memberUrn?: string;
+    expiresIn?: number;
+    scopes?: string[];
+    capabilities?: {
+      signIn?: boolean;
+      postPersonal?: boolean;
+      postCompany?: boolean;
+      listOrganisations?: boolean;
+    };
+    organisations?: Array<{ id: string; name: string; urn: string }>;
+    connectedAt?: string;
+  }|null>(null);
   const [liError,setLiError]=useState<string|null>(null);
 
   useEffect(()=>{
