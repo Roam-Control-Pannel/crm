@@ -158,14 +158,14 @@ export default function SocialPage(){
         const data=await res.json();
         if(data.ok){
           results[a.id]={status:'published',postId:data.postId,postUrl:data.postUrl,publishedAt:new Date().toISOString()};
-          addNotification({type:'success',title:`Published to ${a.handle}`,description:a.platform});
+          addNotification({type:'info',title:`Published to ${a.handle}`,body:a.platform});
         }else{
           results[a.id]={status:'failed',error:data.error||'Unknown error'};
-          addNotification({type:'error',title:`Failed: ${a.handle}`,description:data.error||'Unknown'});
+          addNotification({type:'email_failed',title:`Failed: ${a.handle}`,body:data.error||'Unknown'});
         }
       }catch(err:any){
         results[a.id]={status:'failed',error:err?.message||'Network error'};
-        addNotification({type:'error',title:`Failed: ${a.handle}`,description:err?.message||'Network error'});
+        addNotification({type:'email_failed',title:`Failed: ${a.handle}`,body:err?.message||'Network error'});
       }
       saveAndSet(posts.map(p=>p.id===post.id?{...p,results:{...results}}:p));
     }
