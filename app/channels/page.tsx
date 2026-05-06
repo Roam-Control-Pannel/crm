@@ -1,119 +1,140 @@
 'use client';
-import { Mail, Camera, Briefcase, MessageCircle, Settings, FileText, Zap } from 'lucide-react';
+import {useState,useEffect} from 'react';
+import {CheckCircle,XCircle,ExternalLink,RefreshCw} from 'lucide-react';
 
-const channels = [
-  {
-    name: 'Brevo Email', handle: 'hello@roam-everywhere.com',
-    Icon: Mail, status: 'live', health: 97, iconBg: 'var(--maroon-50)', iconColor: 'var(--maroon-600)',
-    desc: 'Transactional outreach emails — 3-step sequence to roam-local.co.uk',
-    stats: [
-      { label: 'Sender', value: 'hello@roam-everywhere.com' },
-      { label: 'Domain', value: 'roam-everywhere.com ✓' },
-      { label: 'Links to', value: 'roam-local.co.uk' },
-      { label: 'Sequence', value: 'Day 1 · Day 2 · Day 7' },
-    ],
-  },
-  {
-    name: 'Instagram', handle: '@roamlocal',
-    Icon: Camera, status: 'not_connected', health: 0, iconBg: '#fdf0e8', iconColor: '#c96442',
-    desc: 'Post town discovery content and business spotlights', stats: [],
-  },
-  {
-    name: 'LinkedIn', handle: 'Roam Local',
-    Icon: Briefcase, status: 'not_connected', health: 0, iconBg: '#e8f0fb', iconColor: '#2a5fa4',
-    desc: 'Reach local business owners and decision makers', stats: [],
-  },
-  {
-    name: 'X / Twitter', handle: 'Not connected',
-    Icon: MessageCircle, status: 'not_connected', health: 0, iconBg: 'var(--ink-100)', iconColor: 'var(--ink-700)',
-    desc: 'Town announcements and discovery content', stats: [],
-  },
-];
+interface ConnectedPage{pageId:string;pageName:string;pageToken:string;instagramId:string|null;}
 
-export default function ChannelsPage() {
-  return (
-    <div className="page-wrap">
-      <div className="page-header">
-        <div>
-          <h1 className="page-title">Channels</h1>
-          <p className="page-sub">Manage your connected publishing and outreach channels</p>
-        </div>
+export default function ChannelsPage(){
+  const [brevoOk,setBrevoOk]=useState<boolean|null>(null);
+  const [metaPages,setMetaPages]=useState<ConnectedPage[]>([]);
+  const [metaError,setMetaError]=useState<string|null>(null);
+  const [metaConnected,setMetaConnected]=useState(false);
+
+  useEffect(()=>{
+    fetch('/api/brevo/contacts?limit=1').then(r=>setBrevoOk(r.ok)).catch(()=>setBrevoOk(false));
+    const params=new URLSearchParams(window.location.search);
+    if(params.get('meta_connected')==='true'){
+      const pages=params.get('pages');
+      if(pages){try{const p=JSON.parse(decodeURIComponent(pages));setMetaPages(p);setMetaConnected(true);localStorage.setItem('roam_meta_pages',JSON.stringify(p));}catch{}}
+      window.history.replaceState({},'','/channels');
+    }
+    if(params.get('meta_error')){setMetaError(params.get('meta_error'));window.history.replaceState({},'','/channels');}
+    try{const stored=localStorage.getItem('roam_meta_pages');if(stored){const p=JSON.parse(stored);setMetaPages(p);setMetaConnected(p.length>0);}}catch{}
+  },[]);
+
+  function connectMeta(){
+    const appId='1319334890088363';
+    const redirect=encodeURIComponent('https://roam-crm-platform.netlify.app/api/auth/meta/callback');
+    const scope='pages_manage_posts,pages_read_engagement,instagram_basic,instagram_content_publish,pages_show_list';
+    window.location.href=`https://www.facebook.com/v19.0/dialog/oauth?client_id=${appId}&redirect_uri=${redirect}&scope=${scope}&response_type=code`;
+  }
+
+  function disconnectMeta(){localStorage.removeItem('roam_meta_pages');setMetaPages([]);setMetaConnected(false);}
+
+  const btnP:React.CSSProperties={display:'inline-flex',alignItems:'center',gap:6,padding:'8px 16px',borderRadius:'var(--r-md)',background:'var(--maroon-700)',color:'white',fontSize:12.5,fontWeight:600,border:'none',cursor:'pointer'};
+  const btnG:React.CSSProperties={display:'inline-flex',alignItems:'center',gap:6,padding:'8px 14px',borderRadius:'var(--r-md)',background:'var(--white)',color:'var(--ink-700)',fontSize:12.5,fontWeight:600,border:'1.5px solid var(--ink-200)',cursor:'pointer'};
+  const btnFB:React.CSSProperties={display:'inline-flex',alignItems:'center',gap:8,padding:'12px 22px',borderRadius:'var(--r-md)',background:'#1877F2',color:'white',fontSize:14,fontWeight:600,border:'none',cursor:'pointer'};
+
+  return(
+    <div style={{padding:'24px 28px'}}>
+      <div style={{marginBottom:24}}>
+        <h1 style={{fontFamily:'var(--font-display)',fontSize:28,fontWeight:700,color:'var(--ink-900)',lineHeight:1,marginBottom:6}}>Channels</h1>
+        <p style={{fontSize:12,color:'var(--ink-400)',fontWeight:500}}>Connect your social media accounts to publish directly from the Social Calendar</p>
       </div>
 
-      {/* Single column on mobile, 2-col on tablet+ */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 340px), 1fr))', gap: 16 }}>
-        {channels.map(ch => {
-          const Icon = ch.Icon;
-          return (
-            <div key={ch.name} className="card">
-              {/* Header */}
-              <div style={{ padding: '18px 20px', borderBottom: '1px solid var(--ink-100)' }}>
-                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 10 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                    <div style={{ width: 44, height: 44, borderRadius: 'var(--r-md)', background: ch.iconBg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                      <Icon size={20} color={ch.iconColor} />
-                    </div>
-                    <div>
-                      <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink-900)' }}>{ch.name}</div>
-                      <div style={{ fontSize: 11.5, color: 'var(--ink-400)', marginTop: 2 }}>{ch.handle}</div>
-                    </div>
-                  </div>
-                  {ch.status === 'live'
-                    ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 10px', borderRadius: 'var(--r-pill)', background: '#e8f5ee', color: 'var(--ok)', fontSize: 11, fontWeight: 600, flexShrink: 0, whiteSpace: 'nowrap' }}>
-                        <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--ok)', display: 'inline-block' }} />Live
-                      </span>
-                    : <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 10px', borderRadius: 'var(--r-pill)', background: 'var(--ink-100)', color: 'var(--ink-400)', fontSize: 11, fontWeight: 600, flexShrink: 0, whiteSpace: 'nowrap' }}>
-                        <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--ink-300)', display: 'inline-block' }} />Not connected
-                      </span>
-                  }
-                </div>
-                <div style={{ fontSize: 12, color: 'var(--ink-500)', lineHeight: 1.5 }}>{ch.desc}</div>
-              </div>
+      {metaError&&<div style={{background:'#fcebeb',border:'1px solid #f5c2c7',borderRadius:'var(--r-md)',padding:'12px 16px',marginBottom:16,fontSize:13,color:'var(--alert)'}}>Connection failed: {metaError}. Please try again.</div>}
 
-              {/* Stats grid */}
-              {ch.stats.length > 0 && (
-                <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--ink-100)', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                  {ch.stats.map((s: { label: string; value: string }) => (
-                    <div key={s.label}>
-                      <div style={{ fontSize: 9.5, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ink-400)', fontWeight: 600, marginBottom: 3 }}>{s.label}</div>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink-800)', wordBreak: 'break-word' }}>{s.value}</div>
-                    </div>
-                  ))}
-                </div>
-              )}
+      <div style={{display:'flex',flexDirection:'column',gap:12}}>
 
-              {/* Health bar */}
-              {ch.health > 0 && (
-                <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--ink-100)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--ink-400)', marginBottom: 6 }}>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><Zap size={11} /> Channel health</span>
-                    <span style={{ fontWeight: 700, color: 'var(--ok)' }}>{ch.health}%</span>
-                  </div>
-                  <div style={{ background: 'var(--ink-100)', borderRadius: 'var(--r-pill)', height: 5, overflow: 'hidden' }}>
-                    <div style={{ height: '100%', width: ch.health + '%', borderRadius: 'var(--r-pill)', background: 'var(--ok)', transition: 'width 0.5s ease' }} />
-                  </div>
-                </div>
-              )}
+        {/* Brevo */}
+        <div style={{background:'var(--white)',border:'1px solid var(--ink-100)',borderRadius:'var(--r-lg)',padding:'18px 20px',display:'flex',alignItems:'center',gap:14}}>
+          <div style={{width:42,height:42,borderRadius:'var(--r-md)',background:'#e8f5ee',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M4 4h16M4 9h16M4 14h16M4 19h16" stroke="#2f7a4f" strokeWidth="1.5" strokeLinecap="round"/></svg>
+          </div>
+          <div style={{flex:1}}>
+            <div style={{fontSize:14,fontWeight:600,color:'var(--ink-900)'}}>Brevo Email</div>
+            <div style={{fontSize:12,color:'var(--ink-500)',marginTop:2}}>Transactional email · hello@roam-everywhere.com · 500 contacts</div>
+          </div>
+          {brevoOk===null?<span style={{fontSize:12,color:'var(--ink-400)'}}>Checking...</span>:brevoOk?<span style={{display:'flex',alignItems:'center',gap:5,fontSize:12,color:'var(--ok)',fontWeight:500}}><CheckCircle size={14}/>Connected</span>:<span style={{display:'flex',alignItems:'center',gap:5,fontSize:12,color:'var(--alert)',fontWeight:500}}><XCircle size={14}/>Error</span>}
+        </div>
 
-              {/* Actions */}
-              <div style={{ padding: '12px 20px', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                {ch.status === 'live'
-                  ? <>
-                      <button className="btn-primary" style={{ fontSize: 11.5, padding: '7px 14px', display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <Settings size={12} /> Configure
-                      </button>
-                      <button className="btn-ghost" style={{ fontSize: 11.5, padding: '7px 14px', display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <FileText size={12} /> View logs
-                      </button>
-                    </>
-                  : <button className="btn-primary" style={{ fontSize: 11.5, padding: '7px 14px' }}>
-                      + Connect {ch.name}
-                    </button>
-                }
+        {/* Facebook + Instagram */}
+        <div style={{background:'var(--white)',border:'1px solid var(--ink-100)',borderRadius:'var(--r-lg)',overflow:'hidden'}}>
+          <div style={{padding:'18px 20px',display:'flex',alignItems:'center',gap:14}}>
+            <div style={{width:42,height:42,borderRadius:'var(--r-md)',background:'#dde9f7',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M18 2h-3a5 5 0 00-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 011-1h3z" stroke="#1877F2" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            </div>
+            <div style={{flex:1}}>
+              <div style={{fontSize:14,fontWeight:600,color:'var(--ink-900)'}}>Facebook Pages + Instagram</div>
+              <div style={{fontSize:12,color:'var(--ink-500)',marginTop:2}}>
+                {metaConnected?`${metaPages.length} page${metaPages.length===1?'':'s'} connected · ${metaPages.filter(p=>p.instagramId).length} with Instagram`:'Connect your Facebook account to link all Pages and Instagram accounts in one click'}
               </div>
             </div>
-          );
-        })}
+            <div style={{display:'flex',gap:8,flexShrink:0}}>
+              {metaConnected?(
+                <>
+                  <span style={{display:'flex',alignItems:'center',gap:5,fontSize:12,color:'var(--ok)',fontWeight:500,marginRight:4}}><CheckCircle size={14}/>Connected</span>
+                  <button onClick={connectMeta} style={{...btnG,fontSize:11,padding:'6px 12px'}}><RefreshCw size={12}/>Reconnect</button>
+                  <button onClick={disconnectMeta} style={{...btnG,fontSize:11,padding:'6px 12px',color:'var(--alert)',borderColor:'#f5c2c7'}}>Disconnect</button>
+                </>
+              ):(
+                <button onClick={connectMeta} style={btnFB}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="white"><path d="M18 2h-3a5 5 0 00-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 011-1h3z"/></svg>
+                  Connect with Facebook
+                </button>
+              )}
+            </div>
+          </div>
+
+          {metaConnected&&metaPages.length>0&&(
+            <div style={{borderTop:'1px solid var(--ink-100)'}}>
+              {metaPages.map(page=>(
+                <div key={page.pageId} style={{padding:'12px 20px',borderBottom:'1px solid var(--ink-100)',display:'flex',alignItems:'center',gap:12}}>
+                  <div style={{width:32,height:32,borderRadius:'50%',background:'#dde9f7',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,fontSize:13,fontWeight:700,color:'#1877F2'}}>{page.pageName.charAt(0)}</div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:13,fontWeight:500,color:'var(--ink-900)'}}>{page.pageName}</div>
+                    <div style={{display:'flex',gap:6,marginTop:3,flexWrap:'wrap'}}>
+                      <span style={{fontSize:10,padding:'2px 7px',borderRadius:'var(--r-pill)',background:'#dde9f7',color:'#1877F2',fontWeight:500}}>Facebook Page</span>
+                      {page.instagramId&&<span style={{fontSize:10,padding:'2px 7px',borderRadius:'var(--r-pill)',background:'#fbeaef',color:'var(--maroon-600)',fontWeight:500}}>Instagram</span>}
+                    </div>
+                  </div>
+                  <CheckCircle size={16} color="var(--ok)"/>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {!metaConnected&&(
+            <div style={{padding:'16px 20px',borderTop:'1px solid var(--ink-100)',background:'var(--paper)',fontSize:11,color:'var(--ink-400)',lineHeight:1.6}}>
+              Clicking "Connect with Facebook" will open Facebook login. Select which Pages and Instagram accounts to grant access to. You'll be redirected back here automatically.
+            </div>
+          )}
+        </div>
+
+        {/* LinkedIn */}
+        <div style={{background:'var(--white)',border:'1px solid var(--ink-100)',borderRadius:'var(--r-lg)',padding:'18px 20px',display:'flex',alignItems:'center',gap:14}}>
+          <div style={{width:42,height:42,borderRadius:'var(--r-md)',background:'#e8f0fb',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M16 8a6 6 0 016 6v7h-4v-7a2 2 0 00-2-2 2 2 0 00-2 2v7h-4v-7a6 6 0 016-6z" stroke="#185FA5" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><rect x="2" y="9" width="4" height="12" stroke="#185FA5" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><circle cx="4" cy="4" r="2" stroke="#185FA5" strokeWidth="1.5"/></svg>
+          </div>
+          <div style={{flex:1}}>
+            <div style={{fontSize:14,fontWeight:600,color:'var(--ink-900)'}}>LinkedIn</div>
+            <div style={{fontSize:12,color:'var(--ink-500)',marginTop:2}}>Apply for API access — approval takes 3-7 days</div>
+          </div>
+          <a href="https://linkedin.com/developers" target="_blank" rel="noopener noreferrer" style={{...btnG,fontSize:11,padding:'6px 12px',textDecoration:'none'}}><ExternalLink size={12}/>Apply for access</a>
+        </div>
+
+        {/* X/Twitter */}
+        <div style={{background:'var(--white)',border:'1px solid var(--ink-100)',borderRadius:'var(--r-lg)',padding:'18px 20px',display:'flex',alignItems:'center',gap:14}}>
+          <div style={{width:42,height:42,borderRadius:'var(--r-md)',background:'#f0f0f0',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M4 4l16 16M4 20L20 4" stroke="#333" strokeWidth="1.5" strokeLinecap="round"/></svg>
+          </div>
+          <div style={{flex:1}}>
+            <div style={{fontSize:14,fontWeight:600,color:'var(--ink-900)'}}>X / Twitter</div>
+            <div style={{fontSize:12,color:'var(--ink-500)',marginTop:2}}>Apply for developer access at developer.twitter.com</div>
+          </div>
+          <a href="https://developer.twitter.com" target="_blank" rel="noopener noreferrer" style={{...btnG,fontSize:11,padding:'6px 12px',textDecoration:'none'}}><ExternalLink size={12}/>Apply for access</a>
+        </div>
+
       </div>
     </div>
   );
