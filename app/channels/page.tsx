@@ -9,6 +9,9 @@ export default function ChannelsPage(){
   const [metaPages,setMetaPages]=useState<ConnectedPage[]>([]);
   const [metaError,setMetaError]=useState<string|null>(null);
   const [metaConnected,setMetaConnected]=useState(false);
+  const [liConnected,setLiConnected]=useState(false);
+  const [liAccount,setLiAccount]=useState<{name:string;email:string;picture:string;accessToken:string}|null>(null);
+  const [liError,setLiError]=useState<string|null>(null);
 
   useEffect(()=>{
     fetch('/api/brevo/contacts?limit=1').then(r=>setBrevoOk(r.ok)).catch(()=>setBrevoOk(false));
@@ -20,6 +23,15 @@ export default function ChannelsPage(){
     }
     if(params.get('meta_error')){setMetaError(params.get('meta_error'));window.history.replaceState({},'','/channels');}
     try{const stored=localStorage.getItem('roam_meta_pages');if(stored){const p=JSON.parse(stored);setMetaPages(p);setMetaConnected(p.length>0);}}catch{}
+
+    // LinkedIn callback
+    if(params.get('li_connected')==='true'){
+      const acc=params.get('li_account');
+      if(acc){try{const a=JSON.parse(decodeURIComponent(acc));setLiAccount(a);setLiConnected(true);localStorage.setItem('roam_li_account',JSON.stringify(a));}catch{}}
+      window.history.replaceState({},'','/channels');
+    }
+    if(params.get('li_error')){setLiError(params.get('li_error'));window.history.replaceState({},'','/channels');}
+    try{const s=localStorage.getItem('roam_li_account');if(s){const a=JSON.parse(s);setLiAccount(a);setLiConnected(true);}}catch{}
   },[]);
 
   function connectMeta(){
@@ -30,6 +42,15 @@ export default function ChannelsPage(){
   }
 
   function disconnectMeta(){localStorage.removeItem('roam_meta_pages');setMetaPages([]);setMetaConnected(false);}
+
+  function connectLinkedIn(){
+    const clientId='86ek07ppuumcbf';
+    const redirect=encodeURIComponent('https://roam-crm-platform.netlify.app/api/auth/linkedin/callback');
+    const scope='openid%20profile%20email%20w_member_social';
+    window.location.href=`https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id=${clientId}&redirect_uri=${redirect}&scope=${scope}`;
+  }
+
+  function disconnectLinkedIn(){localStorage.removeItem('roam_li_account');setLiAccount(null);setLiConnected(false);}
 
   const btnP:React.CSSProperties={display:'inline-flex',alignItems:'center',gap:6,padding:'8px 16px',borderRadius:'var(--r-md)',background:'var(--maroon-700)',color:'white',fontSize:12.5,fontWeight:600,border:'none',cursor:'pointer'};
   const btnG:React.CSSProperties={display:'inline-flex',alignItems:'center',gap:6,padding:'8px 14px',borderRadius:'var(--r-md)',background:'var(--white)',color:'var(--ink-700)',fontSize:12.5,fontWeight:600,border:'1.5px solid var(--ink-200)',cursor:'pointer'};
@@ -121,6 +142,44 @@ export default function ChannelsPage(){
             <div style={{fontSize:12,color:'var(--ink-500)',marginTop:2}}>Apply for API access — approval takes 3-7 days</div>
           </div>
           <a href="https://linkedin.com/developers" target="_blank" rel="noopener noreferrer" style={{...btnG,fontSize:11,padding:'6px 12px',textDecoration:'none'}}><ExternalLink size={12}/>Apply for access</a>
+        </div>
+
+        {/* LinkedIn */}
+        <div style={{background:'var(--white)',border:'1px solid var(--ink-100)',borderRadius:'var(--r-lg)',overflow:'hidden'}}>
+          <div style={{padding:'18px 20px',display:'flex',alignItems:'center',gap:14}}>
+            <div style={{width:42,height:42,borderRadius:'var(--r-md)',background:'#e8f0fb',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M16 8a6 6 0 016 6v7h-4v-7a2 2 0 00-2-2 2 2 0 00-2 2v7h-4v-7a6 6 0 016-6z" stroke="#185FA5" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><rect x="2" y="9" width="4" height="12" stroke="#185FA5" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><circle cx="4" cy="4" r="2" stroke="#185FA5" strokeWidth="1.5"/></svg>
+            </div>
+            <div style={{flex:1}}>
+              <div style={{fontSize:14,fontWeight:600,color:'var(--ink-900)'}}>LinkedIn</div>
+              <div style={{fontSize:12,color:'var(--ink-500)',marginTop:2}}>{liConnected?`Connected as ${liAccount?.name}`:'Connect your LinkedIn account to post from the Social Calendar'}</div>
+            </div>
+            <div style={{display:'flex',gap:8,flexShrink:0,alignItems:'center'}}>
+              {liConnected?(
+                <>
+                  <span style={{display:'flex',alignItems:'center',gap:5,fontSize:12,color:'var(--ok)',fontWeight:500}}><CheckCircle size={14}/>Connected</span>
+                  <button onClick={connectLinkedIn} style={{...btnG,fontSize:11,padding:'6px 12px'}}><RefreshCw size={12}/>Reconnect</button>
+                  <button onClick={disconnectLinkedIn} style={{...btnG,fontSize:11,padding:'6px 12px',color:'var(--alert)',borderColor:'#f5c2c7'}}>Disconnect</button>
+                </>
+              ):(
+                <button onClick={connectLinkedIn} style={{...btnP,background:'#0A66C2',display:'inline-flex',alignItems:'center',gap:8}}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="white"><path d="M16 8a6 6 0 016 6v7h-4v-7a2 2 0 00-2-2 2 2 0 00-2 2v7h-4v-7a6 6 0 016-6z"/><rect x="2" y="9" width="4" height="12" fill="white"/><circle cx="4" cy="4" r="2" fill="white"/></svg>
+                  Connect LinkedIn
+                </button>
+              )}
+            </div>
+          </div>
+          {liConnected&&liAccount&&(
+            <div style={{borderTop:'1px solid var(--ink-100)',padding:'12px 20px',display:'flex',alignItems:'center',gap:10}}>
+              {liAccount.picture&&<img src={liAccount.picture} style={{width:32,height:32,borderRadius:'50%',flexShrink:0}} alt=""/>}
+              <div>
+                <div style={{fontSize:13,fontWeight:500,color:'var(--ink-900)'}}>{liAccount.name}</div>
+                <div style={{fontSize:11,color:'var(--ink-400)'}}>{liAccount.email}</div>
+              </div>
+              <CheckCircle size={16} color="var(--ok)" style={{marginLeft:'auto'}}/>
+            </div>
+          )}
+          {liError&&<div style={{padding:'10px 20px',borderTop:'1px solid var(--ink-100)',fontSize:12,color:'var(--alert)'}}>Connection failed: {liError}. Please try again.</div>}
         </div>
 
         {/* X/Twitter */}
