@@ -25,7 +25,7 @@ export default function ChannelsPage(){
   function connectMeta(){
     const appId='1319334890088363';
     const redirect=encodeURIComponent('https://roam-crm-platform.netlify.app/api/auth/meta/callback');
-    const scope='pages_manage_posts,pages_read_engagement,instagram_basic,instagram_content_publish,pages_show_list';
+    const scope='pages_show_list,pages_read_engagement,public_profile,email';
     window.location.href=`https://www.facebook.com/v19.0/dialog/oauth?client_id=${appId}&redirect_uri=${redirect}&scope=${scope}&response_type=code`;
   }
 
