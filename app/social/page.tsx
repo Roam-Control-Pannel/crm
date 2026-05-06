@@ -27,10 +27,10 @@ const TOWNS=['Whitstable','Darlington','Aberfeldy','London','Edinburgh','Bristol
 
 function getPosts():SocialPost[]{try{
   const v=localStorage.getItem('roam_social_posts_v');
-  if(v!=='2'){
+  if(v!=='3'){
     // v2 migration: wipe (per user request: start fresh)
     localStorage.setItem('roam_social_posts','[]');
-    localStorage.setItem('roam_social_posts_v','2');
+    localStorage.setItem('roam_social_posts_v','3');
     return [];
   }
   const raw=JSON.parse(localStorage.getItem('roam_social_posts')||'[]');
@@ -148,7 +148,7 @@ export default function SocialPage(){
           method:'POST',
           headers:{'Content-Type':'application/json'},
           body:JSON.stringify({
-            accountId:a.id,
+            accountIds:[a.id],
             platform:a.platform,
             caption:post.caption,
             imageUrl:post.imageUrl||undefined,
@@ -222,7 +222,7 @@ Return JSON array: [{"caption":"post text here","scheduledDay":1},{"caption":"po
           const dt=new Date(start);
           const day=typeof g.scheduledDay==='number'?g.scheduledDay:i;
           dt.setDate(dt.getDate()+day);dt.setHours(10,0,0,0);
-          return{id:(Date.now()+Math.random()*1000).toString(),accountId:acc.id,town:genForm.town,caption:(g.caption as string)||'',scheduledAt:dt.toISOString(),status:'draft' as const,createdAt:new Date().toISOString(),imageUrl:'',imageCredit:''};
+          return{id:(Date.now()+Math.random()*1000).toString(),accountIds:[acc.id],town:genForm.town,caption:(g.caption as string)||'',scheduledAt:dt.toISOString(),status:'draft' as const,createdAt:new Date().toISOString(),imageUrl:'',imageCredit:''};
         });
         saveAndSet([...newPosts,...getPosts()]);
       }
