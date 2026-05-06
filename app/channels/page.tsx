@@ -101,7 +101,7 @@ export default function ChannelsPage(){
   function connectLinkedIn(){
     const clientId='86ek07ppuumcbf';
     const redirect=encodeURIComponent('https://roam-crm-platform.netlify.app/api/auth/linkedin/callback');
-    const scope='openid profile email w_member_social r_organization_admin w_organization_social';
+    const scope='openid profile email w_member_social';
     window.location.href=`https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id=${clientId}&redirect_uri=${redirect}&scope=${scope}`;
   }
 
