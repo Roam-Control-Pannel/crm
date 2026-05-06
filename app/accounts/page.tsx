@@ -1,12 +1,14 @@
 'use client';
 import {useState,useEffect} from 'react';
 import {Plus,X,Edit3,Trash2,Check} from 'lucide-react';
+import { Brief, getBriefs } from '@/lib/briefs';
 
 interface SocialAccount {
   id:string;
   handle:string;
   platform:'instagram'|'facebook'|'linkedin'|'x';
   region?:string;
+  briefId?:string;
   audience:string;
   tone:string;
   contentBrief:string;
@@ -52,12 +54,14 @@ const blank={handle:'',platform:'instagram' as SocialAccount['platform'],region:
 
 export default function AccountsPage(){
   const [accounts,setAccounts]=useState<SocialAccount[]>([]);
+  const [briefs,setBriefs]=useState<Brief[]>([]);
   const [showForm,setShowForm]=useState(false);
   const [editAcc,setEditAcc]=useState<SocialAccount|null>(null);
   const [form,setForm]=useState(blank);
   const [filter,setFilter]=useState('all');
 
-  useEffect(()=>{setAccounts(getAccounts());},[]);
+  useEffect(()=>{
+    setBriefs(getBriefs());setAccounts(getAccounts());},[]);
 
   function saveAndSet(a:SocialAccount[]){setAccounts(a);saveAccounts(a);}
 
@@ -86,6 +90,14 @@ export default function AccountsPage(){
 
   const platforms=['all','instagram','facebook','linkedin'];
   const pNames:Record<string,string>={all:'All platforms',instagram:'Instagram',facebook:'Facebook',linkedin:'LinkedIn'};
+
+  
+
+  function setAccountBrief(accId:string, briefId:string){
+    const updated=accounts.map(x=>x.id===accId?{...x,briefId:briefId||undefined}:x);
+    setAccounts(updated);
+    try{localStorage.setItem('roam_accounts',JSON.stringify(updated));}catch{}
+  }
 
   return(
     <div style={{padding:'24px 28px'}}>
