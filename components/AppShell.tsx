@@ -26,7 +26,7 @@ const navSections = [
   {
     label: 'Content',
     items: [
-      { icon: ArrowUpCircle, label: 'Social Posts', href: '/social' },
+      { icon: ArrowUpCircle, label: 'Social Calendar', href: '/social' },
       { icon: BookUser, label: 'Social Accounts', href: '/accounts' },
       { icon: Settings, label: 'Channels', href: '/channels' },
     ],

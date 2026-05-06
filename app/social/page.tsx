@@ -1,43 +1,51 @@
 'use client';
 import {useState,useEffect} from 'react';
-import {Plus,Calendar,List,Briefcase,MessageCircle,X,Image,Sparkles,ChevronLeft,ChevronRight,Check,Clock,Edit3,Trash2,Camera} from 'lucide-react';
+import {Plus,Calendar,List,X,Image,Sparkles,ChevronLeft,ChevronRight,Check,Clock,Edit3,Trash2} from 'lucide-react';
 import {addNotification} from '@/components/NotificationCentre';
 
-interface SocialPost{id:string;channel:'instagram'|'facebook'|'linkedin';strategy:string;town:string;caption:string;imageUrl?:string;imageCredit?:string;scheduledAt:string;status:'draft'|'scheduled'|'published'|'failed';createdAt:string;}
-interface Strategy{id:string;channel:'instagram'|'facebook'|'linkedin';name:string;persona:string;tone:string;contentType:string;}
+interface SocialPost{id:string;accountId:string;town:string;caption:string;imageUrl?:string;imageCredit?:string;scheduledAt:string;status:'draft'|'scheduled'|'published'|'failed';createdAt:string;}
+interface SocialAccount{id:string;handle:string;platform:'instagram'|'facebook'|'linkedin'|'x';region?:string;audience:string;tone:string;contentBrief:string;hashtags:string;color:string;active:boolean;}
 
-const DEFAULT_STRATEGIES:Strategy[]=[
-  {id:'ig1',channel:'instagram',name:'Local Explorer',persona:'Warm, visual discovery',tone:'Warm, inspiring, community-first',contentType:'Town features, food photos, hidden gems'},
-  {id:'ig2',channel:'instagram',name:'Business Spotlight',persona:'Celebrating independents',tone:'Celebratory, personal, story-driven',contentType:'Business owner stories, behind the scenes'},
-  {id:'fb1',channel:'facebook',name:'Community Voice',persona:'Friendly, community-focused',tone:'Conversational, inclusive, local pride',contentType:'Events, local news, community stories'},
-  {id:'li1',channel:'linkedin',name:'Business Connector',persona:'Professional growth narrative',tone:'Professional, growth-focused, insightful',contentType:'Business spotlights, founder stories, stats'},
-  {id:'li2',channel:'linkedin',name:'Town Economy',persona:'Economic and business focus',tone:'Data-driven, authoritative, forward-looking',contentType:'Economic insights, business growth, market data'},
+const PLATFORM_COLORS:Record<string,{bg:string;border:string;text:string}>={
+  instagram:{bg:'#fbeaef',border:'#9b2752',text:'#6B1230'},
+  facebook:{bg:'#dde9f7',border:'#3b5998',text:'#1a3a6b'},
+  linkedin:{bg:'#e8f0fb',border:'#185FA5',text:'#0C447C'},
+  x:{bg:'#f0f0f0',border:'#333',text:'#111'},
+};
+
+const DEFAULT_ACCOUNTS:SocialAccount[]=[
+  {id:'acc1',handle:'@roamlocalapp',platform:'instagram',region:'UK',audience:'Local explorers, town visitors, food lovers',tone:'Warm, visual, discovery-led, inspiring',contentBrief:'Town features, hidden gems, food scenes, independent businesses',hashtags:'#RoamLocal #HiddenGems #IndependentBusiness #LocalLove',color:'#9b2752',active:true},
+  {id:'acc2',handle:'@roam_ni',platform:'instagram',region:'Northern Ireland',audience:'Northern Ireland locals, NI visitors, NI business owners',tone:'Local pride, community warmth, NI personality',contentBrief:'NI towns, local businesses, NI food and culture, community stories',hashtags:'#RoamNI #NorthernIreland #LoveNI #NIBusiness',color:'#c47a1a',active:true},
+  {id:'acc3',handle:'Roam Local',platform:'facebook',region:'UK',audience:'Local community, families, town residents',tone:'Friendly, community-first, conversational',contentBrief:'Local events, community news, business spotlights, town life',hashtags:'#LocalLife #CommunityFirst #ShopLocal',color:'#3b5998',active:true},
+  {id:'acc4',handle:'Roam NI',platform:'facebook',region:'Northern Ireland',audience:'NI community, local families, NI residents',tone:'Warm NI voice, community pride, inclusive',contentBrief:'NI community news, local events, business features',hashtags:'#RoamNI #NICommunity #LoveNI',color:'#2f7a4f',active:true},
+  {id:'acc5',handle:'@roamforbusiness',platform:'linkedin',region:'UK',audience:'Local business owners, entrepreneurs, SME decision makers',tone:'Professional, growth-focused, empowering',contentBrief:'Business spotlights, listing benefits, growth stats, founder stories',hashtags:'#LocalBusiness #IndependentBusiness #SmallBusiness',color:'#185FA5',active:true},
 ];
 
-const CC:Record<string,{bg:string;border:string;text:string;pill:string}>={
-  instagram:{bg:'#fbeaef',border:'#9b2752',text:'#6B1230',pill:'#f4d8df'},
-  facebook:{bg:'#dde9f7',border:'#3b5998',text:'#1a3a6b',pill:'#c8dcf5'},
-  linkedin:{bg:'#e8f0fb',border:'#185FA5',text:'#0C447C',pill:'#b5d4f4'},
-};
-const CN:Record<string,string>={instagram:'Instagram',facebook:'Facebook',linkedin:'LinkedIn'};
-const CI:Record<string,React.ReactNode>={instagram:<Camera size={12}/>,facebook:<MessageCircle size={12}/>,linkedin:<Briefcase size={12}/>};
-const TOWNS=['Whitstable','Darlington','Aberfeldy','London','Edinburgh','Bristol','Manchester','Leeds'];
 const MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
+const TOWNS=['Whitstable','Darlington','Aberfeldy','London','Edinburgh','Bristol','Manchester','Leeds','Belfast','Derry'];
 
 function getPosts():SocialPost[]{try{return JSON.parse(localStorage.getItem('roam_social_posts')||'[]');}catch{return[];}}
 function savePosts(p:SocialPost[]){try{localStorage.setItem('roam_social_posts',JSON.stringify(p));}catch{}}
-function getStrats():Strategy[]{try{const s=localStorage.getItem('roam_strategies');return s?JSON.parse(s):DEFAULT_STRATEGIES;}catch{return DEFAULT_STRATEGIES;}}
+function getAccounts():SocialAccount[]{try{const s=localStorage.getItem('roam_accounts');return s?JSON.parse(s):DEFAULT_ACCOUNTS;}catch{return DEFAULT_ACCOUNTS;}}
 function getDays(y:number,m:number):number{return new Date(y,m+1,0).getDate();}
 function getFirst(y:number,m:number):number{const d=new Date(y,m,1).getDay();return d===0?6:d-1;}
+
+function PlatformIcon({platform,size=12,color}:{platform:string;size?:number;color?:string}){
+  const c=color||PLATFORM_COLORS[platform]?.text||'currentColor';
+  if(platform==='instagram')return<svg width={size} height={size} viewBox="0 0 24 24" fill="none"><rect x="2" y="2" width="20" height="20" rx="5" stroke={c} strokeWidth="1.5"/><circle cx="12" cy="12" r="4" stroke={c} strokeWidth="1.5"/><circle cx="17.5" cy="6.5" r="1" fill={c}/></svg>;
+  if(platform==='facebook')return<svg width={size} height={size} viewBox="0 0 24 24" fill="none"><path d="M18 2h-3a5 5 0 00-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 011-1h3z" stroke={c} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>;
+  if(platform==='linkedin')return<svg width={size} height={size} viewBox="0 0 24 24" fill="none"><path d="M16 8a6 6 0 016 6v7h-4v-7a2 2 0 00-2-2 2 2 0 00-2 2v7h-4v-7a6 6 0 016-6z" stroke={c} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><rect x="2" y="9" width="4" height="12" stroke={c} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><circle cx="4" cy="4" r="2" stroke={c} strokeWidth="1.5"/></svg>;
+  return<svg width={size} height={size} viewBox="0 0 24 24" fill="none"><path d="M4 4l16 16M4 20L20 4" stroke={c} strokeWidth="1.5" strokeLinecap="round"/></svg>;
+}
 
 export default function SocialPage(){
   const [tab,setTab]=useState<'calendar'|'list'>('calendar');
   const [posts,setPosts]=useState<SocialPost[]>([]);
-  const [strategies]=useState<Strategy[]>(getStrats());
-  const [chFilter,setChFilter]=useState('all');
+  const [accounts,setAccounts]=useState<SocialAccount[]>([]);
+  const [acctFilter,setAcctFilter]=useState('all');
+  const [platFilter,setPlatFilter]=useState('all');
   const [showComposer,setShowComposer]=useState(false);
   const [showGen,setShowGen]=useState(false);
-  const [showStrats,setShowStrats]=useState(false);
   const [editPost,setEditPost]=useState<SocialPost|null>(null);
   const [generating,setGenerating]=useState(false);
   const [searchingImgs,setSearchingImgs]=useState(false);
@@ -46,19 +54,28 @@ export default function SocialPage(){
   const [calY,setCalY]=useState(today.getFullYear());
   const [calM,setCalM]=useState(today.getMonth());
 
-  const blankForm={channel:'instagram' as SocialPost['channel'],strategy:'ig1',town:'Whitstable',caption:'',imageUrl:'',imageCredit:'',scheduledDate:today.toISOString().split('T')[0],scheduledTime:'10:00',status:'draft' as SocialPost['status']};
-  const [form,setForm]=useState(blankForm);
-  const [genForm,setGenForm]=useState({town:'Whitstable',channels:{instagram:true,facebook:true,linkedin:true},postsPerChannel:3,weekStart:today.toISOString().split('T')[0]});
+  const defaultAccountId=()=>accounts.find(a=>a.active)?.id||'acc1';
+  const blankForm=()=>({accountId:defaultAccountId(),town:'Whitstable',caption:'',imageUrl:'',imageCredit:'',scheduledDate:today.toISOString().split('T')[0],scheduledTime:'10:00',status:'draft' as SocialPost['status']});
+  const [form,setForm]=useState(blankForm());
+  const [genForm,setGenForm]=useState({town:'Whitstable',accountIds:[] as string[],postsPerAccount:3,weekStart:today.toISOString().split('T')[0]});
 
-  useEffect(()=>{setPosts(getPosts());},[]);
+  useEffect(()=>{
+    const accs=getAccounts();
+    setAccounts(accs);
+    setPosts(getPosts());
+    setGenForm(f=>({...f,accountIds:accs.filter(a=>a.active).map(a=>a.id)}));
+  },[]);
+
   function saveAndSet(p:SocialPost[]){setPosts(p);savePosts(p);}
+
+  function getAccount(id:string):SocialAccount|undefined{return accounts.find(a=>a.id===id);}
 
   function openComposer(post?:SocialPost){
     if(post){
       setEditPost(post);
       const dt=new Date(post.scheduledAt);
-      setForm({channel:post.channel,strategy:post.strategy,town:post.town,caption:post.caption,imageUrl:post.imageUrl||'',imageCredit:post.imageCredit||'',scheduledDate:dt.toISOString().split('T')[0],scheduledTime:dt.toTimeString().slice(0,5),status:post.status});
-    }else{setEditPost(null);setForm(blankForm);}
+      setForm({accountId:post.accountId,town:post.town,caption:post.caption,imageUrl:post.imageUrl||'',imageCredit:post.imageCredit||'',scheduledDate:dt.toISOString().split('T')[0],scheduledTime:dt.toTimeString().slice(0,5),status:post.status});
+    }else{setEditPost(null);setForm(blankForm());}
     setUnsplash([]);setShowComposer(true);
   }
 
@@ -69,7 +86,8 @@ export default function SocialPage(){
     else{
       const np:SocialPost={id:Date.now().toString(),...form,scheduledAt,createdAt:new Date().toISOString()};
       saveAndSet([np,...posts]);
-      addNotification({type:'info',title:'Post created',body:CN[form.channel]+' post scheduled for '+form.scheduledDate});
+      const acc=getAccount(form.accountId);
+      addNotification({type:'info',title:'Post created',body:(acc?.handle||'Post')+' scheduled for '+form.scheduledDate});
     }
     setShowComposer(false);
   }
@@ -82,46 +100,55 @@ export default function SocialPage(){
 
   async function generate(){
     setGenerating(true);
-    const chs=Object.entries(genForm.channels).filter(([,v])=>v).map(([k])=>k);
+    const selectedAccounts=accounts.filter(a=>genForm.accountIds.includes(a.id));
+    if(!selectedAccounts.length){setGenerating(false);return;}
     try{
-      const res=await fetch('/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-        maxTokens:2000,
-        systemPrompt:'You are a social media content generator for Roam Local. Return ONLY a valid JSON array. No markdown, no code blocks, no explanation. Start your response with [ and end with ].',
-        messages:[{role:'user',content:`Generate exactly ${genForm.postsPerChannel} posts for EACH of these channels: ${chs.join(', ')}. Total posts = ${genForm.postsPerChannel * chs.length}. Town: ${genForm.town}, UK.
+      for(const acc of selectedAccounts){
+        const res=await fetch('/api/ai/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+          maxTokens:2000,
+          systemPrompt:'You are a social media content generator. Return ONLY a valid JSON array, no markdown or explanation.',
+          messages:[{role:'user',content:`Generate ${genForm.postsPerAccount} social media posts for the account "${acc.handle}" on ${acc.platform}.
 
-Return ONLY a JSON array. Each item must have: channel, caption, scheduledDay (1-7).
+Account strategy brief:
+- Audience: ${acc.audience}
+- Tone: ${acc.tone}
+- Content: ${acc.contentBrief}
+- Default hashtags: ${acc.hashtags}
+- Region focus: ${acc.region||'UK'}
 
-Rules:
-- instagram posts: warm, visual, end with 3-5 hashtags
-- linkedin posts: professional, business-focused, no hashtags  
-- facebook posts: friendly, community feel
+Town to write about: ${genForm.town}
 
-Example: [{"channel":"instagram","caption":"Discover ${genForm.town}... #HashTag","scheduledDay":1},{"channel":"linkedin","caption":"${genForm.town} is growing...","scheduledDay":2},{"channel":"facebook","caption":"Love ${genForm.town}!","scheduledDay":3}]
+Write posts that match this account's voice exactly. Include the default hashtags naturally.
 
-Generate ${genForm.postsPerChannel} posts per channel now:`}],
-      })});
-      const d=await res.json();
-      // Parse AI response directly
-      let raw = d.content || '[]';
-      raw = raw.replace(/```json/g,'').replace(/```/g,'').trim();
-      const gen=JSON.parse(raw);
-      const start=new Date(genForm.weekStart);
-      const newPosts:SocialPost[]=gen.map((g:Record<string,unknown>,i:number)=>{
-        const dt=new Date(start);
-        const dayOffset=typeof g.scheduledDay==='number'?g.scheduledDay:i;
-        dt.setDate(dt.getDate()+dayOffset);dt.setHours(10,0,0,0);
-        const ch=((g.channel as string)||'instagram') as SocialPost['channel'];
-        const caption=(g.caption||g.text||g.content||g.post||'') as string;
-        return{id:(Date.now()+i).toString(),channel:ch,strategy:strategies.find(s=>s.channel===ch)?.id||'ig1',town:genForm.town,caption,scheduledAt:dt.toISOString(),status:'draft' as const,createdAt:new Date().toISOString(),imageUrl:'',imageCredit:''};
-      });
-      saveAndSet([...newPosts,...posts]);
-      addNotification({type:'info',title:'Content generated',body:newPosts.length+' posts created for '+genForm.town});
+Return JSON array: [{"caption":"post text here","scheduledDay":1},{"caption":"post text","scheduledDay":3}]`}],
+        })});
+        const d=await res.json();
+        let raw=(d.content||'[]').replace(/\`\`\`json/g,'').replace(/\`\`\`/g,'').trim();
+        if(!raw.startsWith('['))raw='[]';
+        const gen=JSON.parse(raw);
+        const start=new Date(genForm.weekStart);
+        const newPosts:SocialPost[]=gen.map((g:Record<string,unknown>,i:number)=>{
+          const dt=new Date(start);
+          const day=typeof g.scheduledDay==='number'?g.scheduledDay:i;
+          dt.setDate(dt.getDate()+day);dt.setHours(10,0,0,0);
+          return{id:(Date.now()+Math.random()*1000).toString(),accountId:acc.id,town:genForm.town,caption:(g.caption as string)||'',scheduledAt:dt.toISOString(),status:'draft' as const,createdAt:new Date().toISOString(),imageUrl:'',imageCredit:''};
+        });
+        saveAndSet([...newPosts,...getPosts()]);
+      }
+      setPosts(getPosts());
+      addNotification({type:'info',title:'Content generated',body:'Posts created for '+genForm.town+' across '+selectedAccounts.length+' accounts'});
       setShowGen(false);
     }catch(e){console.error(e);}
     setGenerating(false);
   }
 
-  const filtered=posts.filter(p=>chFilter==='all'||p.channel===chFilter);
+  const filtered=posts.filter(p=>{
+    const acc=getAccount(p.accountId);
+    if(acctFilter!=='all'&&p.accountId!==acctFilter)return false;
+    if(platFilter!=='all'&&acc?.platform!==platFilter)return false;
+    return true;
+  });
+
   const scheduled=filtered.filter(p=>p.status==='scheduled');
   const drafts=filtered.filter(p=>p.status==='draft');
   const published=filtered.filter(p=>p.status==='published');
@@ -135,42 +162,62 @@ Generate ${genForm.postsPerChannel} posts per channel now:`}],
   const calDays=Array.from({length:42},(_,i)=>{const d=i-firstDay+1;return d>=1&&d<=daysInMonth?d:null;});
   function postsForDay(day:number){return filtered.filter(p=>{const d=new Date(p.scheduledAt);return d.getFullYear()===calY&&d.getMonth()===calM&&d.getDate()===day;});}
 
-  const PostPill=({post}:{post:SocialPost})=>{const c=CC[post.channel];return(
-    <div onClick={(e)=>{e.stopPropagation();openComposer(post);}} style={{background:c.pill,borderLeft:'2px solid '+c.border,borderRadius:3,padding:'2px 5px',marginBottom:2,cursor:'pointer',overflow:'hidden'}}>
-      <div style={{display:'flex',alignItems:'center',gap:3}}><span style={{color:c.text,display:'flex'}}>{CI[post.channel]}</span><span style={{fontSize:9,color:c.text,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:70,opacity:post.status==='draft'?0.6:1}}>{post.town}</span></div>
-    </div>);};
-
-  const PostRow=({post}:{post:SocialPost})=>{const c=CC[post.channel];const d=new Date(post.scheduledAt);return(
-    <div style={{display:'flex',alignItems:'flex-start',gap:12,padding:'12px 18px',borderBottom:'1px solid var(--ink-100)'}}>
-      <div style={{width:8,height:8,borderRadius:'50%',background:c.border,marginTop:5,flexShrink:0}}/>
-      <div style={{width:38,height:38,borderRadius:'var(--r-sm)',background:c.bg,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,overflow:'hidden'}}>
-        {post.imageUrl?<img src={post.imageUrl} style={{width:'100%',height:'100%',objectFit:'cover'}} alt=""/>:<span style={{color:c.text}}>{CI[post.channel]}</span>}
-      </div>
-      <div style={{flex:1,minWidth:0}}>
-        <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:3,flexWrap:'wrap'}}>
-          <span style={{fontSize:11,padding:'2px 8px',borderRadius:'var(--r-pill)',background:c.pill,color:c.text,fontWeight:500,display:'flex',alignItems:'center',gap:4}}>{CI[post.channel]}{CN[post.channel]}</span>
-          <span style={{fontSize:11,color:'var(--ink-500)'}}>{post.town}</span>
-          <span style={{fontSize:11,color:'var(--ink-400)'}}>{d.toLocaleDateString('en-GB',{day:'numeric',month:'short'})} {d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}</span>
+  const PostPill=({post}:{post:SocialPost})=>{
+    const acc=getAccount(post.accountId);
+    const color=acc?.color||'#9b2752';
+    return(
+      <div onClick={(e)=>{e.stopPropagation();openComposer(post);}} style={{borderLeft:'2px solid '+color,background:color+'22',borderRadius:3,padding:'2px 5px',marginBottom:2,cursor:'pointer',overflow:'hidden'}}>
+        <div style={{display:'flex',alignItems:'center',gap:3}}>
+          {acc&&<PlatformIcon platform={acc.platform} size={9} color={color}/>}
+          <span style={{fontSize:9,color:color,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:70,fontWeight:500,opacity:post.status==='draft'?0.7:1}}>{acc?.handle||'Unknown'}</span>
         </div>
-        <div style={{fontSize:12,color:'var(--ink-700)',lineHeight:1.5,marginBottom:4}}>{post.caption.slice(0,120)}{post.caption.length>120?'...':''}</div>
-        <div style={{fontSize:11,color:'var(--ink-400)'}}>{strategies.find(s=>s.id===post.strategy)?.name}</div>
       </div>
-      <div style={{display:'flex',alignItems:'center',gap:6,flexShrink:0}}>
-        <span style={{fontSize:10,padding:'3px 9px',borderRadius:'var(--r-pill)',background:post.status==='scheduled'?'#e8f5ee':post.status==='published'?'#e8f0fb':'var(--ink-100)',color:post.status==='scheduled'?'var(--ok)':post.status==='published'?'var(--info)':'var(--ink-500)',fontWeight:500}}>{post.status}</span>
-        <button onClick={()=>openComposer(post)} style={{width:28,height:28,borderRadius:'var(--r-xs)',border:'1.5px solid var(--ink-200)',background:'var(--white)',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',color:'var(--ink-500)'}}><Edit3 size={12}/></button>
-        <button onClick={()=>saveAndSet(posts.filter(p=>p.id!==post.id))} style={{width:28,height:28,borderRadius:'var(--r-xs)',border:'1.5px solid var(--ink-200)',background:'var(--white)',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',color:'var(--alert)'}}><Trash2 size={12}/></button>
+    );
+  };
+
+  const PostRow=({post}:{post:SocialPost})=>{
+    const acc=getAccount(post.accountId);
+    const color=acc?.color||'#9b2752';
+    const pc=acc?PLATFORM_COLORS[acc.platform]:{bg:'var(--ink-100)',border:'var(--ink-300)',text:'var(--ink-500)'};
+    const d=new Date(post.scheduledAt);
+    return(
+      <div style={{display:'flex',alignItems:'flex-start',gap:12,padding:'12px 18px',borderBottom:'1px solid var(--ink-100)'}}>
+        <div style={{width:8,height:8,borderRadius:'50%',background:color,marginTop:5,flexShrink:0}}/>
+        <div style={{width:38,height:38,borderRadius:'var(--r-sm)',background:pc.bg,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,overflow:'hidden'}}>
+          {post.imageUrl?<img src={post.imageUrl} style={{width:'100%',height:'100%',objectFit:'cover'}} alt=""/>:acc?<PlatformIcon platform={acc.platform} size={16} color={pc.text}/>:<div/>}
+        </div>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:3,flexWrap:'wrap'}}>
+            <span style={{fontSize:11,padding:'2px 8px',borderRadius:'var(--r-pill)',background:color+'22',color:color,fontWeight:600,display:'flex',alignItems:'center',gap:4}}>
+              {acc&&<PlatformIcon platform={acc.platform} size={10} color={color}/>}{acc?.handle||'Unknown'}
+            </span>
+            <span style={{fontSize:11,color:'var(--ink-500)'}}>{post.town}</span>
+            <span style={{fontSize:11,color:'var(--ink-400)'}}>{d.toLocaleDateString('en-GB',{day:'numeric',month:'short'})} {d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}</span>
+            {acc?.region&&<span style={{fontSize:10,color:'var(--ink-400)'}}>· {acc.region}</span>}
+          </div>
+          <div style={{fontSize:12,color:'var(--ink-700)',lineHeight:1.5,marginBottom:4}}>{post.caption.slice(0,140)}{post.caption.length>140?'...':''}</div>
+        </div>
+        <div style={{display:'flex',alignItems:'center',gap:6,flexShrink:0}}>
+          <span style={{fontSize:10,padding:'3px 9px',borderRadius:'var(--r-pill)',background:post.status==='scheduled'?'#e8f5ee':post.status==='published'?'#e8f0fb':'var(--ink-100)',color:post.status==='scheduled'?'var(--ok)':post.status==='published'?'var(--info)':'var(--ink-500)',fontWeight:500}}>{post.status}</span>
+          <button onClick={()=>openComposer(post)} style={{width:28,height:28,borderRadius:'var(--r-xs)',border:'1.5px solid var(--ink-200)',background:'var(--white)',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',color:'var(--ink-500)'}}><Edit3 size={12}/></button>
+          <button onClick={()=>saveAndSet(posts.filter(p=>p.id!==post.id))} style={{width:28,height:28,borderRadius:'var(--r-xs)',border:'1.5px solid var(--ink-200)',background:'var(--white)',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',color:'var(--alert)'}}><Trash2 size={12}/></button>
+        </div>
       </div>
-    </div>);};
+    );
+  };
+
+  const selectedAcc=getAccount(form.accountId);
+  const platforms=['all','instagram','facebook','linkedin'];
+  const pNames:Record<string,string>={all:'All',instagram:'Instagram',facebook:'Facebook',linkedin:'LinkedIn'};
 
   return(
     <div style={{padding:'24px 28px'}}>
       <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',marginBottom:20}} className="page-header">
         <div>
           <h1 style={{fontFamily:'var(--font-display)',fontSize:28,fontWeight:700,color:'var(--ink-900)',lineHeight:1}}>Social Calendar</h1>
-          <p style={{fontSize:12,color:'var(--ink-400)',marginTop:5,fontWeight:500}}>{scheduled.length} scheduled · {drafts.length} drafts · {published.length} published</p>
+          <p style={{fontSize:12,color:'var(--ink-400)',marginTop:5,fontWeight:500}}>{scheduled.length} scheduled · {drafts.length} drafts · {published.length} published · {accounts.filter(a=>a.active).length} accounts</p>
         </div>
         <div style={{display:'flex',gap:8}} className="btn-row">
-          <button style={btnG} onClick={()=>setShowStrats(true)}><Sparkles size={13}/> Strategies</button>
           <button style={btnG} onClick={()=>setShowGen(true)}><Sparkles size={13}/> Generate</button>
           <button style={btnP} onClick={()=>openComposer()}><Plus size={13}/> New post</button>
         </div>
@@ -188,11 +235,16 @@ Generate ${genForm.postsPerChannel} posts per channel now:`}],
             <button key={id} onClick={()=>setTab(id as 'calendar'|'list')} style={{display:'flex',alignItems:'center',gap:6,padding:'6px 14px',borderRadius:'var(--r-sm)',background:tab===id?'var(--white)':'transparent',border:'none',cursor:'pointer',fontSize:12,fontWeight:tab===id?600:400,color:tab===id?'var(--ink-900)':'var(--ink-500)',boxShadow:tab===id?'var(--shadow-sm)':'none'}}>{icon}{label}</button>
           ))}
         </div>
-        <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
-          {(['all','instagram','facebook','linkedin'] as const).map(ch=>{const c=ch==='all'?null:CC[ch];return(
-            <button key={ch} onClick={()=>setChFilter(ch)} style={{fontSize:11,padding:'4px 12px',borderRadius:'var(--r-pill)',border:'1.5px solid '+(chFilter===ch?(c?c.border:'var(--maroon-700)'):'var(--ink-200)'),background:chFilter===ch?(c?c.pill:'var(--maroon-50)'):'var(--white)',color:chFilter===ch?(c?c.text:'var(--maroon-700)'):'var(--ink-500)',cursor:'pointer',fontWeight:chFilter===ch?600:400,display:'flex',alignItems:'center',gap:5}}>
-              {ch!=='all'&&<span style={{color:c?.text}}>{CI[ch]}</span>}{ch==='all'?'All':CN[ch]}
-            </button>);})}
+        <div style={{display:'flex',gap:6,flexWrap:'wrap',alignItems:'center'}}>
+          <select value={platFilter} onChange={e=>{setPlatFilter(e.target.value);setAcctFilter('all');}} style={{...inp,width:'auto',fontSize:11,padding:'4px 10px',cursor:'pointer'}}>
+            {platforms.map(p=><option key={p} value={p}>{pNames[p]} platforms</option>)}
+          </select>
+          <select value={acctFilter} onChange={e=>setAcctFilter(e.target.value)} style={{...inp,width:'auto',fontSize:11,padding:'4px 10px',cursor:'pointer'}}>
+            <option value="all">All accounts</option>
+            {accounts.filter(a=>platFilter==='all'||a.platform===platFilter).map(a=>(
+              <option key={a.id} value={a.id}>{a.handle}</option>
+            ))}
+          </select>
         </div>
       </div>
 
@@ -252,27 +304,50 @@ Generate ${genForm.postsPerChannel} posts per channel now:`}],
               <button onClick={()=>setShowComposer(false)} style={{...btnG,padding:'4px 8px'}}><X size={14}/></button>
             </div>
             <div style={{padding:'18px 22px',display:'flex',flexDirection:'column',gap:14}}>
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
-                <div><label style={{display:'block',fontSize:11,fontWeight:600,color:'var(--ink-600)',marginBottom:5,textTransform:'uppercase',letterSpacing:'0.06em'}}>Channel</label>
-                <select value={form.channel} onChange={e=>setForm({...form,channel:e.target.value as SocialPost['channel'],strategy:strategies.find(s=>s.channel===e.target.value)?.id||'ig1'})} style={{...inp,cursor:'pointer'}}>
-                  <option value="instagram">Instagram</option><option value="facebook">Facebook</option><option value="linkedin">LinkedIn</option>
-                </select></div>
-                <div><label style={{display:'block',fontSize:11,fontWeight:600,color:'var(--ink-600)',marginBottom:5,textTransform:'uppercase',letterSpacing:'0.06em'}}>Strategy</label>
-                <select value={form.strategy} onChange={e=>setForm({...form,strategy:e.target.value})} style={{...inp,cursor:'pointer'}}>
-                  {strategies.filter(s=>s.channel===form.channel).map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
-                </select></div>
+
+              {/* Account picker */}
+              <div>
+                <label style={{display:'block',fontSize:11,fontWeight:600,color:'var(--ink-600)',marginBottom:8,textTransform:'uppercase',letterSpacing:'0.06em'}}>Account</label>
+                <div style={{display:'flex',flexDirection:'column',gap:6}}>
+                  {accounts.filter(a=>a.active).map(a=>{
+                    const pc=PLATFORM_COLORS[a.platform];
+                    const selected=form.accountId===a.id;
+                    return(
+                      <button key={a.id} onClick={()=>setForm({...form,accountId:a.id})} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 12px',borderRadius:'var(--r-md)',border:`1.5px solid ${selected?a.color:'var(--ink-200)'}`,background:selected?a.color+'15':'var(--white)',cursor:'pointer',textAlign:'left',fontFamily:'inherit'}}>
+                        <div style={{width:28,height:28,borderRadius:'50%',background:pc.bg,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                          <PlatformIcon platform={a.platform} size={13} color={pc.text}/>
+                        </div>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{fontSize:13,fontWeight:600,color:selected?a.color:'var(--ink-900)'}}>{a.handle}</div>
+                          <div style={{fontSize:11,color:'var(--ink-400)'}}>{a.platform.charAt(0).toUpperCase()+a.platform.slice(1)}{a.region?' · '+a.region:''}</div>
+                        </div>
+                        {selected&&<Check size={14} color={a.color}/>}
+                      </button>
+                    );
+                  })}
+                </div>
+                {selectedAcc&&<div style={{marginTop:8,padding:'8px 12px',background:'var(--paper)',borderRadius:'var(--r-sm)',fontSize:11,color:'var(--ink-500)',lineHeight:1.5}}><strong style={{color:'var(--ink-700)'}}>Tone:</strong> {selectedAcc.tone}</div>}
               </div>
+
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
-                <div><label style={{display:'block',fontSize:11,fontWeight:600,color:'var(--ink-600)',marginBottom:5,textTransform:'uppercase',letterSpacing:'0.06em'}}>Town</label>
-                <input value={form.town} onChange={e=>setForm({...form,town:e.target.value})} placeholder="e.g. Whitstable" style={inp} list="tl"/><datalist id="tl">{TOWNS.map(t=><option key={t} value={t}/>)}</datalist></div>
-                <div><label style={{display:'block',fontSize:11,fontWeight:600,color:'var(--ink-600)',marginBottom:5,textTransform:'uppercase',letterSpacing:'0.06em'}}>Status</label>
-                <select value={form.status} onChange={e=>setForm({...form,status:e.target.value as SocialPost['status']})} style={{...inp,cursor:'pointer'}}>
-                  <option value="draft">Draft</option><option value="scheduled">Scheduled</option>
-                </select></div>
+                <div>
+                  <label style={{display:'block',fontSize:11,fontWeight:600,color:'var(--ink-600)',marginBottom:5,textTransform:'uppercase',letterSpacing:'0.06em'}}>Town</label>
+                  <input value={form.town} onChange={e=>setForm({...form,town:e.target.value})} placeholder="e.g. Whitstable" style={inp} list="tl"/><datalist id="tl">{TOWNS.map(t=><option key={t} value={t}/>)}</datalist>
+                </div>
+                <div>
+                  <label style={{display:'block',fontSize:11,fontWeight:600,color:'var(--ink-600)',marginBottom:5,textTransform:'uppercase',letterSpacing:'0.06em'}}>Status</label>
+                  <select value={form.status} onChange={e=>setForm({...form,status:e.target.value as SocialPost['status']})} style={{...inp,cursor:'pointer'}}>
+                    <option value="draft">Draft</option><option value="scheduled">Scheduled</option>
+                  </select>
+                </div>
               </div>
-              <div><label style={{display:'block',fontSize:11,fontWeight:600,color:'var(--ink-600)',marginBottom:5,textTransform:'uppercase',letterSpacing:'0.06em'}}>Caption</label>
-              <textarea value={form.caption} onChange={e=>setForm({...form,caption:e.target.value})} placeholder="Write your post caption..." rows={4} style={{...inp,resize:'vertical'}}/>
-              <div style={{fontSize:10,color:'var(--ink-400)',marginTop:3,textAlign:'right'}}>{form.caption.length} chars</div></div>
+
+              <div>
+                <label style={{display:'block',fontSize:11,fontWeight:600,color:'var(--ink-600)',marginBottom:5,textTransform:'uppercase',letterSpacing:'0.06em'}}>Caption</label>
+                <textarea value={form.caption} onChange={e=>setForm({...form,caption:e.target.value})} placeholder="Write your post caption..." rows={4} style={{...inp,resize:'vertical'}}/>
+                <div style={{fontSize:10,color:'var(--ink-400)',marginTop:3,textAlign:'right'}}>{form.caption.length} chars</div>
+              </div>
+
               <div>
                 <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
                   <label style={{fontSize:11,fontWeight:600,color:'var(--ink-600)',textTransform:'uppercase',letterSpacing:'0.06em'}}>Image</label>
@@ -293,10 +368,11 @@ Generate ${genForm.postsPerChannel} posts per channel now:`}],
                 </div>)}
                 {!form.imageUrl&&unsplash.length===0&&(<div style={{background:'var(--paper)',borderRadius:'var(--r-md)',padding:16,textAlign:'center',border:'1.5px dashed var(--ink-200)'}}>
                   <Image size={18} color="var(--ink-300)" style={{margin:'0 auto 6px',display:'block'}}/>
-                  <div style={{fontSize:11,color:'var(--ink-400)',marginBottom:8}}>Search Unsplash for free images or paste URL</div>
+                  <div style={{fontSize:11,color:'var(--ink-400)',marginBottom:8}}>Search Unsplash or paste URL</div>
                   <input value={form.imageUrl} onChange={e=>setForm({...form,imageUrl:e.target.value})} placeholder="Paste image URL..." style={{...inp,fontSize:11}}/>
                 </div>)}
               </div>
+
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
                 <div><label style={{display:'block',fontSize:11,fontWeight:600,color:'var(--ink-600)',marginBottom:5,textTransform:'uppercase',letterSpacing:'0.06em'}}>Date</label><input type="date" value={form.scheduledDate} onChange={e=>setForm({...form,scheduledDate:e.target.value})} style={inp}/></div>
                 <div><label style={{display:'block',fontSize:11,fontWeight:600,color:'var(--ink-600)',marginBottom:5,textTransform:'uppercase',letterSpacing:'0.06em'}}>Time</label><input type="time" value={form.scheduledTime} onChange={e=>setForm({...form,scheduledTime:e.target.value})} style={inp}/></div>
@@ -312,63 +388,57 @@ Generate ${genForm.postsPerChannel} posts per channel now:`}],
 
       {showGen&&(
         <div style={{position:'fixed',inset:0,background:'rgba(26,13,18,0.5)',zIndex:500,display:'flex',alignItems:'center',justifyContent:'center',padding:16}} onClick={e=>{if(e.target===e.currentTarget)setShowGen(false);}}>
-          <div style={{background:'var(--white)',borderRadius:'var(--r-xl)',width:460,maxWidth:'100%',boxShadow:'var(--shadow-lg)'}}>
+          <div style={{background:'var(--white)',borderRadius:'var(--r-xl)',width:500,maxWidth:'100%',maxHeight:'90vh',overflowY:'auto',boxShadow:'var(--shadow-lg)'}}>
             <div style={{padding:'18px 22px 14px',borderBottom:'1px solid var(--ink-100)',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
               <div style={{display:'flex',alignItems:'center',gap:8}}><Sparkles size={16} color="var(--maroon-600)"/><div style={{fontFamily:'var(--font-display)',fontSize:20,color:'var(--ink-900)'}}>Generate with AI</div></div>
               <button onClick={()=>setShowGen(false)} style={{...btnG,padding:'4px 8px'}}><X size={14}/></button>
             </div>
             <div style={{padding:'18px 22px',display:'flex',flexDirection:'column',gap:14}}>
-              <div><label style={{display:'block',fontSize:11,fontWeight:600,color:'var(--ink-600)',marginBottom:5,textTransform:'uppercase',letterSpacing:'0.06em'}}>Town</label>
-              <input value={genForm.town} onChange={e=>setGenForm({...genForm,town:e.target.value})} placeholder="e.g. Whitstable" style={inp} list="gtl"/><datalist id="gtl">{TOWNS.map(t=><option key={t} value={t}/>)}</datalist></div>
-              <div><label style={{display:'block',fontSize:11,fontWeight:600,color:'var(--ink-600)',marginBottom:8,textTransform:'uppercase',letterSpacing:'0.06em'}}>Channels</label>
-              <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
-                {(['instagram','facebook','linkedin'] as const).map(ch=>{const c=CC[ch];const checked=genForm.channels[ch];return(
-                  <label key={ch} style={{display:'flex',alignItems:'center',gap:7,cursor:'pointer',padding:'8px 12px',borderRadius:'var(--r-md)',border:'1.5px solid '+(checked?c.border:'var(--ink-200)'),background:checked?c.pill:'var(--white)'}}>
-                    <input type="checkbox" checked={checked} onChange={e=>setGenForm({...genForm,channels:{...genForm.channels,[ch]:e.target.checked}})} style={{accentColor:c.border}}/>
-                    <span style={{fontSize:12,fontWeight:checked?600:400,color:checked?c.text:'var(--ink-600)'}}>{CN[ch]}</span>
-                  </label>);})}
-              </div></div>
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
-                <div><label style={{display:'block',fontSize:11,fontWeight:600,color:'var(--ink-600)',marginBottom:5,textTransform:'uppercase',letterSpacing:'0.06em'}}>Posts per channel</label>
-                <select value={genForm.postsPerChannel} onChange={e=>setGenForm({...genForm,postsPerChannel:Number(e.target.value)})} style={{...inp,cursor:'pointer'}}>
-                  <option value={2}>2 posts</option><option value={3}>3 posts</option><option value={5}>5 posts</option><option value={7}>7 posts</option>
-                </select></div>
-                <div><label style={{display:'block',fontSize:11,fontWeight:600,color:'var(--ink-600)',marginBottom:5,textTransform:'uppercase',letterSpacing:'0.06em'}}>Week starting</label>
-                <input type="date" value={genForm.weekStart} onChange={e=>setGenForm({...genForm,weekStart:e.target.value})} style={inp}/></div>
+              <div>
+                <label style={{display:'block',fontSize:11,fontWeight:600,color:'var(--ink-600)',marginBottom:5,textTransform:'uppercase',letterSpacing:'0.06em'}}>Town</label>
+                <input value={genForm.town} onChange={e=>setGenForm({...genForm,town:e.target.value})} placeholder="e.g. Whitstable" style={inp} list="gtl"/>
+                <datalist id="gtl">{TOWNS.map(t=><option key={t} value={t}/>)}</datalist>
               </div>
-              <div style={{background:'var(--maroon-50)',borderRadius:'var(--r-md)',padding:'10px 12px',fontSize:11,color:'var(--maroon-700)',lineHeight:1.5}}>All posts start as drafts for your review.</div>
+              <div>
+                <label style={{display:'block',fontSize:11,fontWeight:600,color:'var(--ink-600)',marginBottom:8,textTransform:'uppercase',letterSpacing:'0.06em'}}>Generate for accounts</label>
+                <div style={{display:'flex',flexDirection:'column',gap:6}}>
+                  {accounts.filter(a=>a.active).map(a=>{
+                    const pc=PLATFORM_COLORS[a.platform];
+                    const checked=genForm.accountIds.includes(a.id);
+                    return(
+                      <label key={a.id} style={{display:'flex',alignItems:'center',gap:10,cursor:'pointer',padding:'10px 12px',borderRadius:'var(--r-md)',border:`1.5px solid ${checked?a.color:'var(--ink-200)'}`,background:checked?a.color+'12':'var(--white)'}}>
+                        <input type="checkbox" checked={checked} onChange={e=>setGenForm({...genForm,accountIds:e.target.checked?[...genForm.accountIds,a.id]:genForm.accountIds.filter(id=>id!==a.id)})} style={{accentColor:a.color,width:14,height:14}}/>
+                        <div style={{width:24,height:24,borderRadius:'50%',background:pc.bg,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}><PlatformIcon platform={a.platform} size={12} color={pc.text}/></div>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{fontSize:12,fontWeight:600,color:checked?a.color:'var(--ink-900)'}}>{a.handle}</div>
+                          <div style={{fontSize:10,color:'var(--ink-400)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{a.tone.slice(0,50)}</div>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+                <div>
+                  <label style={{display:'block',fontSize:11,fontWeight:600,color:'var(--ink-600)',marginBottom:5,textTransform:'uppercase',letterSpacing:'0.06em'}}>Posts per account</label>
+                  <select value={genForm.postsPerAccount} onChange={e=>setGenForm({...genForm,postsPerAccount:Number(e.target.value)})} style={{...inp,cursor:'pointer'}}>
+                    <option value={2}>2 posts</option><option value={3}>3 posts</option><option value={5}>5 posts</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={{display:'block',fontSize:11,fontWeight:600,color:'var(--ink-600)',marginBottom:5,textTransform:'uppercase',letterSpacing:'0.06em'}}>Week starting</label>
+                  <input type="date" value={genForm.weekStart} onChange={e=>setGenForm({...genForm,weekStart:e.target.value})} style={inp}/>
+                </div>
+              </div>
+              <div style={{background:'var(--maroon-50)',borderRadius:'var(--r-md)',padding:'10px 12px',fontSize:11,color:'var(--maroon-700)',lineHeight:1.5}}>
+                Roam-io will write in each account's specific voice using their strategy brief. All posts start as drafts.
+              </div>
             </div>
             <div style={{padding:'14px 22px',borderTop:'1px solid var(--ink-100)',display:'flex',gap:8,justifyContent:'flex-end'}}>
               <button onClick={()=>setShowGen(false)} style={btnG}>Cancel</button>
-              <button onClick={generate} disabled={generating||!genForm.town.trim()} style={{...btnP,opacity:generating||!genForm.town.trim()?0.6:1}}><Sparkles size={13}/>{generating?'Generating...':'Generate for '+genForm.town}</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showStrats&&(
-        <div style={{position:'fixed',inset:0,background:'rgba(26,13,18,0.5)',zIndex:500,display:'flex',alignItems:'center',justifyContent:'center',padding:16}} onClick={e=>{if(e.target===e.currentTarget)setShowStrats(false);}}>
-          <div style={{background:'var(--white)',borderRadius:'var(--r-xl)',width:540,maxWidth:'100%',maxHeight:'80vh',overflowY:'auto',boxShadow:'var(--shadow-lg)'}}>
-            <div style={{padding:'18px 22px 14px',borderBottom:'1px solid var(--ink-100)',display:'flex',justifyContent:'space-between',alignItems:'center',position:'sticky',top:0,background:'var(--white)',zIndex:1}}>
-              <div style={{fontFamily:'var(--font-display)',fontSize:20,color:'var(--ink-900)'}}>Channel strategies</div>
-              <button onClick={()=>setShowStrats(false)} style={{...btnG,padding:'4px 8px'}}><X size={14}/></button>
-            </div>
-            <div style={{padding:'16px 22px',display:'flex',flexDirection:'column',gap:10}}>
-              <div style={{fontSize:12,color:'var(--ink-400)',marginBottom:4}}>Multiple strategies per channel — Roam-io uses these when generating content.</div>
-              {(['instagram','facebook','linkedin'] as const).map(ch=>{const c=CC[ch];const cs=strategies.filter(s=>s.channel===ch);return(
-                <div key={ch} style={{background:'var(--paper)',borderRadius:'var(--r-md)',padding:'12px 14px',border:'1px solid var(--ink-100)'}}>
-                  <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10}}>
-                    <span style={{fontSize:11,padding:'3px 10px',borderRadius:'var(--r-pill)',background:c.pill,color:c.text,fontWeight:600,display:'flex',alignItems:'center',gap:5}}>{CI[ch]}{CN[ch]}</span>
-                    <span style={{fontSize:11,color:'var(--ink-400)'}}>{cs.length} {cs.length===1?'strategy':'strategies'}</span>
-                  </div>
-                  {cs.map(s=>(
-                    <div key={s.id} style={{background:'var(--white)',borderRadius:'var(--r-sm)',padding:'10px 12px',border:'1px solid var(--ink-100)',marginBottom:6}}>
-                      <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}><span style={{fontSize:13,fontWeight:600,color:'var(--ink-900)'}}>{s.name}</span><span style={{fontSize:10,color:'var(--ink-400)'}}>{s.persona}</span></div>
-                      <div style={{fontSize:11,color:'var(--ink-500)',marginBottom:2}}>{s.tone}</div>
-                      <div style={{fontSize:11,color:'var(--ink-400)'}}>{s.contentType}</div>
-                    </div>
-                  ))}
-                </div>);})}
+              <button onClick={generate} disabled={generating||!genForm.town.trim()||!genForm.accountIds.length} style={{...btnP,opacity:generating||!genForm.town.trim()||!genForm.accountIds.length?0.6:1}}>
+                <Sparkles size={13}/>{generating?'Generating...':'Generate for '+genForm.accountIds.length+' account'+(genForm.accountIds.length===1?'':'s')}
+              </button>
             </div>
           </div>
         </div>
