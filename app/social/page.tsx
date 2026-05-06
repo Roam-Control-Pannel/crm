@@ -3,6 +3,7 @@ import {useState,useEffect} from 'react';
 import {Plus,Calendar,List,X,Image,Sparkles,ChevronLeft,ChevronRight,Check,Clock,Edit3,Trash2} from 'lucide-react';
 import {addNotification} from '@/components/NotificationCentre';
 import { Brief, getBriefs, getBrief } from '@/lib/briefs';
+import { GOAL_OPTIONS, getGoalLabel } from '@/lib/goals';
 
 interface PostResult{status:'pending'|'publishing'|'published'|'failed';postId?:string;postUrl?:string;error?:string;publishedAt?:string;}
 interface SocialPost{id:string;briefId?:string;accountIds:string[];town:string;caption:string;imageUrl?:string;imageCredit?:string;scheduledAt:string;status:'draft'|'scheduled'|'publishing'|'published'|'partial'|'failed';createdAt:string;results?:Record<string,PostResult>;}
@@ -75,7 +76,7 @@ export default function SocialPage(){
   
   const blankForm=()=>({briefId:'',accountIds:[] as string[],town:'',caption:'',imageUrl:'',imageCredit:'',scheduledDate:today.toISOString().split('T')[0],scheduledTime:'10:00',status:'draft' as SocialPost['status']});
   const [form,setForm]=useState(blankForm());
-  const [genForm,setGenForm]=useState<{briefId:string;accountIds:string[];postsPerAccount:number;weekStart:string;town:string}>({briefId:'',accountIds:[],postsPerAccount:3,weekStart:today.toISOString().split('T')[0],town:''});
+  const [genForm,setGenForm]=useState<{briefId:string;accountIds:string[];postsPerAccount:number;weekStart:string;theme:string;goal:string}>({briefId:'',accountIds:[],postsPerAccount:3,weekStart:today.toISOString().split('T')[0],theme:'',goal:''});
 
   useEffect(()=>{
     setBriefs(getBriefs());
@@ -210,7 +211,8 @@ Account strategy brief:
 - Default hashtags: ${acc.hashtags}
 - Region focus: ${acc.region||'UK'}
 
-Town to write about: ${genForm.town}
+Theme / topic for this batch: ${genForm.theme}
+${getGoalLabel(genForm.goal)?`Goal of these posts: ${getGoalLabel(genForm.goal)}`:''}
 
 Write posts that match this account's voice exactly. Include the default hashtags naturally.
 
@@ -225,12 +227,12 @@ Return JSON array: [{"caption":"post text here","scheduledDay":1},{"caption":"po
           const dt=new Date(start);
           const day=typeof g.scheduledDay==='number'?g.scheduledDay:i;
           dt.setDate(dt.getDate()+day);dt.setHours(10,0,0,0);
-          return{id:(Date.now()+Math.random()*1000).toString(),accountIds:[acc.id],town:genForm.town,caption:(g.caption as string)||'',scheduledAt:dt.toISOString(),status:'draft' as const,createdAt:new Date().toISOString(),imageUrl:'',imageCredit:''};
+          return{id:(Date.now()+Math.random()*1000).toString(),briefId:genForm.briefId,accountIds:[acc.id],town:'',caption:(g.caption as string)||'',scheduledAt:dt.toISOString(),status:'draft' as const,createdAt:new Date().toISOString(),imageUrl:'',imageCredit:''};
         });
         saveAndSet([...newPosts,...getPosts()]);
       }
       setPosts(getPosts());
-      addNotification({type:'info',title:'Content generated',body:'Posts created for '+genForm.town+' across '+selectedAccounts.length+' accounts'});
+      addNotification({type:'info',title:'Content generated',body:'Posts created for '+genForm.theme+' across '+selectedAccounts.length+' accounts'});
       setShowGen(false);
     }catch(e){console.error(e);}
     setGenerating(false);
@@ -510,7 +512,7 @@ Return JSON array: [{"caption":"post text here","scheduledDay":1},{"caption":"po
 
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
                 <div>
-                  <label style={{display:'block',fontSize:11,fontWeight:600,color:'var(--ink-600)',marginBottom:5,textTransform:'uppercase',letterSpacing:'0.06em'}}>Town</label>
+                  <label style={{fontSize:11,fontWeight:600,color:"var(--ink-500)",textTransform:"uppercase",letterSpacing:"0.06em"}}>Context <span style={{fontWeight:400,color:"var(--ink-400)"}}>(optional — town, event, theme)</span></label>
                   <input value={form.town} onChange={e=>setForm({...form,town:e.target.value})} placeholder="e.g. Whitstable" style={inp} list="tl"/><datalist id="tl">{TOWNS.map(t=><option key={t} value={t}/>)}</datalist>
                 </div>
                 <div>
@@ -585,9 +587,13 @@ Return JSON array: [{"caption":"post text here","scheduledDay":1},{"caption":"po
             </div>
             <div style={{padding:'18px 22px',display:'flex',flexDirection:'column',gap:14}}>
               <div>
-                <label style={{display:'block',fontSize:11,fontWeight:600,color:'var(--ink-600)',marginBottom:5,textTransform:'uppercase',letterSpacing:'0.06em'}}>Town</label>
-                <input value={genForm.town} onChange={e=>setGenForm({...genForm,town:e.target.value})} placeholder="e.g. Whitstable" style={inp} list="gtl"/>
-                <datalist id="gtl">{TOWNS.map(t=><option key={t} value={t}/>)}</datalist>
+                <label style={{display:'block',fontSize:11,fontWeight:600,color:'var(--ink-600)',marginBottom:5,textTransform:'uppercase',letterSpacing:'0.06em'}}>What's this about? <span style={{color:'var(--alert)'}}>*</span></label>
+                <input value={genForm.theme} onChange={e=>setGenForm({...genForm,theme:e.target.value})} placeholder="e.g. summer harbour markets in Whitstable" style={inp}/>
+                <label style={{display:'block',fontSize:11,fontWeight:600,color:'var(--ink-600)',marginTop:14,marginBottom:5,textTransform:'uppercase',letterSpacing:'0.06em'}}>Goal <span style={{fontWeight:400,color:'var(--ink-400)',textTransform:'none',letterSpacing:0}}>(optional)</span></label>
+                <select value={genForm.goal} onChange={e=>setGenForm({...genForm,goal:e.target.value})} style={{...inp,background:'var(--white)',cursor:'pointer'}}>
+                  <option value="">— Choose a goal —</option>
+                  {GOAL_OPTIONS.map(g=><option key={g.id} value={g.id}>{g.label} — {g.description}</option>)}
+                </select>
               </div>
               <div>
                 <div style={{marginBottom:16}}>
@@ -639,7 +645,7 @@ Return JSON array: [{"caption":"post text here","scheduledDay":1},{"caption":"po
             </div>
             <div style={{padding:'14px 22px',borderTop:'1px solid var(--ink-100)',display:'flex',gap:8,justifyContent:'flex-end'}}>
               <button onClick={()=>setShowGen(false)} style={btnG}>Cancel</button>
-              <button onClick={generate} disabled={generating||!genForm.briefId||!genForm.accountIds.length} style={{...btnP,opacity:generating||!genForm.briefId||!genForm.accountIds.length?0.6:1}}>
+              <button onClick={generate} disabled={generating||!genForm.briefId||!genForm.accountIds.length||!genForm.theme.trim()} style={{...btnP,opacity:generating||!genForm.briefId||!genForm.accountIds.length||!genForm.theme.trim()?0.6:1}}>
                 <Sparkles size={13}/>{generating?'Generating...':'Generate for '+genForm.accountIds.length+' account'+(genForm.accountIds.length===1?'':'s')}
               </button>
             </div>
