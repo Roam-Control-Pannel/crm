@@ -103,7 +103,7 @@ export default function SocialPage(){
     else{
       const np:SocialPost={id:Date.now().toString(),...form,scheduledAt,createdAt:new Date().toISOString()};
       saveAndSet([np,...posts]);
-      const acc=getAccount(form.accountId);
+      const acc=getAccount(form.accountIds?.[0]||'');
       addNotification({type:'info',title:'Post created',body:(acc?.handle||'Post')+' scheduled for '+form.scheduledDate});
     }
     setShowComposer(false);
