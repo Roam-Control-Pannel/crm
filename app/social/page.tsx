@@ -69,6 +69,7 @@ export default function SocialPage(){
   const [generating,setGenerating]=useState(false);
   const [searchingImgs,setSearchingImgs]=useState(false);
   const [unsplash,setUnsplash]=useState<{url:string;thumb:string;credit:string}[]>([]);
+  const [unsplashQuery,setUnsplashQuery]=useState('');
   const today=new Date();
   const [calY,setCalY]=useState(today.getFullYear());
   const [calM,setCalM]=useState(today.getMonth());
@@ -99,7 +100,15 @@ export default function SocialPage(){
     setUnsplash([]);setShowComposer(true);
   }
 
-  function savePost(){
+  
+  // Debounced Unsplash search — fires 350ms after user stops typing
+  useEffect(()=>{
+    if(!unsplashQuery.trim()){setUnsplash([]);return;}
+    const t=setTimeout(()=>{searchUnsplash(unsplashQuery);},350);
+    return ()=>clearTimeout(t);
+  },[unsplashQuery]);
+
+function savePost(){
     if(!form.caption.trim())return;
     const scheduledAt=new Date(form.scheduledDate+'T'+form.scheduledTime).toISOString();
     if(editPost){saveAndSet(posts.map(p=>p.id===editPost.id?{...p,...form,scheduledAt}
@@ -187,9 +196,16 @@ export default function SocialPage(){
   }
 
 
-  async function searchUnsplash(){
-    setSearchingImgs(true);setUnsplash([]);
-    try{const res=await fetch('/api/images/search?query='+encodeURIComponent(form.town+' town')+'&count=6');const d=await res.json();setUnsplash(d.images||[]);}catch{}
+  async function searchUnsplash(query:string){
+    if(!query||!query.trim()){setUnsplash([]);return;}
+    setSearchingImgs(true);
+    try{
+      const res=await fetch('/api/images/search?query='+encodeURIComponent(query)+'&count=6');
+      const d=await res.json();
+      setUnsplash(d.images||[]);
+    }catch{setUnsplash([]);}
+    finally{setSearchingImgs(false);}
+  }catch{}
     setSearchingImgs(false);
   }
 
@@ -532,7 +548,7 @@ Return JSON array: [{"caption":"post text here","scheduledDay":1},{"caption":"po
               <div>
                 <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
                   <label style={{fontSize:11,fontWeight:600,color:'var(--ink-600)',textTransform:'uppercase',letterSpacing:'0.06em'}}>Image</label>
-                  <button onClick={searchUnsplash} disabled={searchingImgs} style={{...btnG,fontSize:11,padding:'4px 10px',gap:5}}><Image size={11}/>{searchingImgs?'Searching...':'Search Unsplash'}</button>
+                  <input type="text" value={unsplashQuery} onChange={e=>setUnsplashQuery(e.target.value)} placeholder={'Search Unsplash for images... e.g. ' + (form.town||'coastal market')} style={{flex:1,padding:'7px 10px',border:'1.5px solid var(--ink-200)',borderRadius:'var(--r-sm)',fontSize:12,fontFamily:'inherit'}}/>{searchingImgs && <span style={{fontSize:11,color:'var(--ink-400)'}}>Searching…</span>}
                 </div>
                 {form.imageUrl&&(<div style={{marginBottom:8,position:'relative'}}>
                   <img src={form.imageUrl} style={{width:'100%',height:140,objectFit:'cover',borderRadius:'var(--r-md)',border:'1px solid var(--ink-100)',display:'block'}} alt=""/>
@@ -549,7 +565,7 @@ Return JSON array: [{"caption":"post text here","scheduledDay":1},{"caption":"po
                 </div>)}
                 {!form.imageUrl&&unsplash.length===0&&(<div style={{background:'var(--paper)',borderRadius:'var(--r-md)',padding:16,textAlign:'center',border:'1.5px dashed var(--ink-200)'}}>
                   <Image size={18} color="var(--ink-300)" style={{margin:'0 auto 6px',display:'block'}}/>
-                  <div style={{fontSize:11,color:'var(--ink-400)',marginBottom:8}}>Search Unsplash or paste URL</div>
+                  <div style={{fontSize:11,color:'var(--ink-400)',marginBottom:8}}>Type a keyword above to search Unsplash, or paste a URL below</div>
                   <input value={form.imageUrl} onChange={e=>setForm({...form,imageUrl:e.target.value})} placeholder="Paste image URL..." style={{...inp,fontSize:11}}/>
                 </div>)}
               </div>
