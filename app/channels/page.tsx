@@ -46,7 +46,7 @@ export default function ChannelsPage(){
   function connectLinkedIn(){
     const clientId='86ek07ppuumcbf';
     const redirect=encodeURIComponent('https://roam-crm-platform.netlify.app/api/auth/linkedin/callback');
-    const scope='openid%20profile%20email%20w_member_social';
+    const scope='openid profile email w_member_social r_organization_admin w_organization_social';
     window.location.href=`https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id=${clientId}&redirect_uri=${redirect}&scope=${scope}`;
   }
 
@@ -170,13 +170,53 @@ export default function ChannelsPage(){
             </div>
           </div>
           {liConnected&&liAccount&&(
-            <div style={{borderTop:'1px solid var(--ink-100)',padding:'12px 20px',display:'flex',alignItems:'center',gap:10}}>
-              {liAccount.picture&&<img src={liAccount.picture} style={{width:32,height:32,borderRadius:'50%',flexShrink:0}} alt=""/>}
-              <div>
-                <div style={{fontSize:13,fontWeight:500,color:'var(--ink-900)'}}>{liAccount.name}</div>
-                <div style={{fontSize:11,color:'var(--ink-400)'}}>{liAccount.email}</div>
+            <div style={{borderTop:'1px solid var(--ink-100)'}}>
+              {/* Personal Account Row */}
+              <div style={{padding:'14px 20px',display:'flex',alignItems:'center',gap:12,borderBottom:'1px solid var(--ink-50)'}}>
+                {liAccount.picture
+                  ? <img src={liAccount.picture} alt="" style={{width:32,height:32,borderRadius:'50%',objectFit:'cover'}}/>
+                  : <div style={{width:32,height:32,borderRadius:'50%',background:'var(--ink-100)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,fontWeight:600,color:'var(--ink-500)'}}>{(liAccount.name||'?').slice(0,1)}</div>
+                }
+                <div style={{flex:1}}>
+                  <div style={{fontSize:13,fontWeight:600,color:'var(--ink-900)'}}>{liAccount.name} <span style={{fontSize:11,fontWeight:400,color:'var(--ink-400)',marginLeft:6}}>· Personal</span></div>
+                  <div style={{fontSize:11,color:'var(--ink-400)'}}>{liAccount.email}</div>
+                </div>
+                {liAccount.capabilities?.postPersonal
+                  ? <span style={{fontSize:11,color:'var(--ok)',display:'inline-flex',alignItems:'center',gap:4}}><CheckCircle size={14}/>Ready to post</span>
+                  : <span style={{fontSize:11,color:'var(--ink-400)'}}>Sign-in only</span>
+                }
               </div>
-              <CheckCircle size={16} color="var(--ok)" style={{marginLeft:'auto'}}/>
+
+              {/* Company Page Row(s) */}
+              {liAccount.capabilities?.postCompany && (liAccount.organisations||[]).length>0
+                ? (liAccount.organisations||[]).map((org:any)=>(
+                    <div key={org.id} style={{padding:'14px 20px',display:'flex',alignItems:'center',gap:12,borderBottom:'1px solid var(--ink-50)'}}>
+                      <div style={{width:32,height:32,borderRadius:'var(--r-sm)',background:'#0A66C2',display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontSize:12,fontWeight:700}}>{(org.name||'?').slice(0,2).toUpperCase()}</div>
+                      <div style={{flex:1}}>
+                        <div style={{fontSize:13,fontWeight:600,color:'var(--ink-900)'}}>{org.name} <span style={{fontSize:11,fontWeight:400,color:'var(--ink-400)',marginLeft:6}}>· Company Page</span></div>
+                        <div style={{fontSize:11,color:'var(--ink-400)'}}>Admin access</div>
+                      </div>
+                      <span style={{fontSize:11,color:'var(--ok)',display:'inline-flex',alignItems:'center',gap:4}}><CheckCircle size={14}/>Ready to post</span>
+                    </div>
+                  ))
+                : (
+                    <div style={{padding:'14px 20px',display:'flex',alignItems:'center',gap:12,borderBottom:'1px solid var(--ink-50)',background:'var(--ink-50)'}}>
+                      <div style={{width:32,height:32,borderRadius:'var(--r-sm)',background:'#0A66C2',opacity:0.4,display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontSize:12,fontWeight:700}}>RL</div>
+                      <div style={{flex:1}}>
+                        <div style={{fontSize:13,fontWeight:600,color:'var(--ink-700)'}}>Roam Local <span style={{fontSize:11,fontWeight:400,color:'var(--ink-400)',marginLeft:6}}>· Company Page</span></div>
+                        <div style={{fontSize:11,color:'#b45309'}}>Pending Community Management API approval</div>
+                      </div>
+                      <a href="https://www.linkedin.com/developers/apps" target="_blank" rel="noopener noreferrer" style={{...btnG,fontSize:11,padding:'6px 12px',textDecoration:'none'}}><ExternalLink size={12}/>Apply for API</a>
+                    </div>
+                  )
+              }
+
+              {/* Action Row */}
+              <div style={{padding:'10px 20px',display:'flex',alignItems:'center',gap:8,fontSize:11,color:'var(--ink-500)'}}>
+                <span style={{flex:1}}>Connected {liAccount.connectedAt ? new Date(liAccount.connectedAt).toLocaleDateString() : ''}</span>
+                <button onClick={connectLinkedIn} style={{...btnG,fontSize:11,padding:'6px 12px'}}><RefreshCw size={12}/>Reconnect</button>
+                <button onClick={disconnectLinkedIn} style={{...btnG,fontSize:11,padding:'6px 12px',color:'var(--alert)',borderColor:'#f5c2c7'}}>Disconnect</button>
+              </div>
             </div>
           )}
           {liError&&<div style={{padding:'10px 20px',borderTop:'1px solid var(--ink-100)',fontSize:12,color:'var(--alert)'}}>Connection failed: {liError}. Please try again.</div>}
