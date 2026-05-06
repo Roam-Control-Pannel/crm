@@ -31,25 +31,58 @@ export default function ChannelsPage(){
   const [liError,setLiError]=useState<string|null>(null);
 
   useEffect(()=>{
-    fetch('/api/brevo/contacts?limit=1').then(r=>setBrevoOk(r.ok)).catch(()=>setBrevoOk(false));
-    const params=new URLSearchParams(window.location.search);
-    if(params.get('meta_connected')==='true'){
-      const pages=params.get('pages');
-      if(pages){try{const p=JSON.parse(decodeURIComponent(pages));setMetaPages(p);setMetaConnected(true);localStorage.setItem('roam_meta_pages',JSON.stringify(p));}catch{}}
-      window.history.replaceState({},'','/channels');
-    }
-    if(params.get('meta_error')){setMetaError(params.get('meta_error'));window.history.replaceState({},'','/channels');}
-    try{const stored=localStorage.getItem('roam_meta_pages');if(stored){const p=JSON.parse(stored);setMetaPages(p);setMetaConnected(p.length>0);}}catch{}
+    let cancelled = false;
+    async function loadStatus() {
+      try {
+        const res = await fetch('/api/accounts/status');
+        const data = await res.json();
+        if (cancelled) return;
 
-    // LinkedIn callback
-    if(params.get('li_connected')==='true'){
-      const acc=params.get('li_account');
-      if(acc){try{const a=JSON.parse(decodeURIComponent(acc));setLiAccount(a);setLiConnected(true);localStorage.setItem('roam_li_account',JSON.stringify(a));}catch{}}
-      window.history.replaceState({},'','/channels');
+        // LinkedIn
+        if (data.linkedin?.connected) {
+          setLiConnected(true);
+          setLiAccount({
+            name: data.linkedin.name,
+            email: data.linkedin.email,
+            picture: data.linkedin.picture || '',
+            accessToken: '', // no longer client-side
+            sub: data.linkedin.memberUrn?.replace('urn:li:person:', '') || '',
+            memberUrn: data.linkedin.memberUrn,
+            scopes: data.linkedin.scopes || [],
+            capabilities: data.linkedin.capabilities || {},
+            organisations: data.linkedin.organisations || [],
+            connectedAt: data.linkedin.connectedAt ? new Date(data.linkedin.connectedAt).toISOString() : '',
+          });
+        } else {
+          setLiConnected(false);
+          setLiAccount(null);
+        }
+
+        // Meta (Facebook + Instagram)
+        if (data.meta?.connected) {
+          setMetaPages(data.meta.pages || []);
+        } else {
+          setMetaPages([]);
+        }
+      } catch (e) {
+        console.error('Failed to load account status:', e);
+      }
     }
-    if(params.get('li_error')){setLiError(params.get('li_error'));window.history.replaceState({},'','/channels');}
-    try{const s=localStorage.getItem('roam_li_account');if(s){const a=JSON.parse(s);setLiAccount(a);setLiConnected(true);}}catch{}
-  },[]);
+
+    // Read URL params for connection success/error flags
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('li_connected') === '1' || params.get('meta_connected') === '1') {
+      // Clear the URL params after a beat so refresh doesn't re-trigger
+      window.history.replaceState({}, '', '/channels');
+    }
+    const liErr = params.get('li_error');
+    const metaErr = params.get('meta_error');
+    if (liErr) setLiError(liErr);
+    if (metaErr && typeof setMetaError === 'function') setMetaError(metaErr);
+
+    loadStatus();
+    return () => { cancelled = true; };
+  }, []);
 
   function connectMeta(){
     const appId='1319334890088363';
@@ -58,7 +91,12 @@ export default function ChannelsPage(){
     window.location.href=`https://www.facebook.com/v19.0/dialog/oauth?client_id=${appId}&redirect_uri=${redirect}&scope=${scope}&response_type=code`;
   }
 
-  function disconnectMeta(){localStorage.removeItem('roam_meta_pages');setMetaPages([]);setMetaConnected(false);}
+  async function disconnectMeta(){
+    try{
+      await fetch('/api/accounts/disconnect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:'meta'})});
+      setMetaPages([]);
+    }catch(e){console.error('Disconnect failed',e);}
+  }
 
   function connectLinkedIn(){
     const clientId='86ek07ppuumcbf';
@@ -67,7 +105,13 @@ export default function ChannelsPage(){
     window.location.href=`https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id=${clientId}&redirect_uri=${redirect}&scope=${scope}`;
   }
 
-  function disconnectLinkedIn(){localStorage.removeItem('roam_li_account');setLiAccount(null);setLiConnected(false);}
+  async function disconnectLinkedIn(){
+    try{
+      await fetch('/api/accounts/disconnect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:'linkedin'})});
+      setLiAccount(null);
+      setLiConnected(false);
+    }catch(e){console.error('Disconnect failed',e);}
+  }
 
   const btnP:React.CSSProperties={display:'inline-flex',alignItems:'center',gap:6,padding:'8px 16px',borderRadius:'var(--r-md)',background:'var(--maroon-700)',color:'white',fontSize:12.5,fontWeight:600,border:'none',cursor:'pointer'};
   const btnG:React.CSSProperties={display:'inline-flex',alignItems:'center',gap:6,padding:'8px 14px',borderRadius:'var(--r-md)',background:'var(--white)',color:'var(--ink-700)',fontSize:12.5,fontWeight:600,border:'1.5px solid var(--ink-200)',cursor:'pointer'};

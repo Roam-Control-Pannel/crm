@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { saveLinkedInTokens, DEFAULT_USER_ID, type LinkedInTokens } from '@/lib/tokens';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,7 +12,6 @@ export async function GET(req: NextRequest) {
     if (error) {
       return NextResponse.redirect(new URL(`/channels?li_error=${error}`, req.url));
     }
-
     if (!code) {
       return NextResponse.redirect(new URL('/channels?li_error=no_code', req.url));
     }
@@ -39,19 +39,18 @@ export async function GET(req: NextRequest) {
       return NextResponse.redirect(new URL('/channels?li_error=token_failed', req.url));
     }
 
-    // Get user profile (OIDC userinfo endpoint)
+    // Get user profile (OIDC)
     const profileRes = await fetch('https://api.linkedin.com/v2/userinfo', {
       headers: { Authorization: `Bearer ${tokenData.access_token}` },
     });
     const profile = await profileRes.json();
 
-    // Detect granted scopes from token response
     const grantedScopes = (tokenData.scope || '').split(/[, ]+/).filter(Boolean);
     const canPostPersonal = grantedScopes.includes('w_member_social');
     const canPostCompany = grantedScopes.includes('w_organization_social');
     const canListOrgs = grantedScopes.includes('r_organization_admin');
 
-    // Try to fetch organisations the user admins (only works if r_organization_admin granted)
+    // Try to fetch organisations (only works if r_organization_admin granted)
     let organisations: Array<{ id: string; name: string; urn: string }> = [];
     if (canListOrgs) {
       try {
@@ -70,31 +69,31 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const account = {
+    const expiresAt = Date.now() + ((tokenData.expires_in || 3600) * 1000);
+
+    const li: LinkedInTokens = {
+      accessToken: tokenData.access_token,
+      expiresAt,
+      refreshToken: tokenData.refresh_token,
+      scopes: grantedScopes,
+      memberUrn: profile.sub ? `urn:li:person:${profile.sub}` : '',
       name: profile.name || 'LinkedIn Account',
       email: profile.email || '',
-      picture: profile.picture || '',
-      sub: profile.sub || '',
-      memberUrn: profile.sub ? `urn:li:person:${profile.sub}` : '',
-      accessToken: tokenData.access_token,
-      expiresIn: tokenData.expires_in,
-      scopes: grantedScopes,
+      picture: profile.picture,
+      organisations,
       capabilities: {
         signIn: true,
         postPersonal: canPostPersonal,
         postCompany: canPostCompany,
         listOrganisations: canListOrgs,
       },
-      organisations,
-      connectedAt: new Date().toISOString(),
+      connectedAt: Date.now(),
     };
 
-    return NextResponse.redirect(
-      new URL(
-        '/channels?li_connected=true&li_account=' + encodeURIComponent(JSON.stringify(account)),
-        req.url
-      )
-    );
+    await saveLinkedInTokens(DEFAULT_USER_ID, li);
+
+    // Redirect with success flag only — no sensitive data in URL
+    return NextResponse.redirect(new URL('/channels?li_connected=1', req.url));
   } catch (err) {
     console.error('LinkedIn OAuth error:', err);
     return NextResponse.redirect(new URL('/channels?li_error=server_error', req.url));

@@ -1,58 +1,62 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { saveMetaTokens, DEFAULT_USER_ID, type MetaTokens } from '@/lib/tokens';
+
+export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
-  const code = req.nextUrl.searchParams.get('code');
-  const error = req.nextUrl.searchParams.get('error');
-
-  if (error || !code) {
-    return NextResponse.redirect(
-      new URL('/channels?meta_error=access_denied', req.url)
-    );
-  }
-
   try {
+    const { searchParams } = new URL(req.url);
+    const code = searchParams.get('code');
+    const error = searchParams.get('error');
+
+    if (error) {
+      return NextResponse.redirect(new URL(`/channels?meta_error=${error}`, req.url));
+    }
+    if (!code) {
+      return NextResponse.redirect(new URL('/channels?meta_error=no_code', req.url));
+    }
+
     const appId = process.env.META_APP_ID;
     const appSecret = process.env.META_APP_SECRET;
     const redirectUri = 'https://roam-crm-platform.netlify.app/api/auth/meta/callback';
 
-    // Exchange code for access token
-    const tokenRes = await fetch(
-      `https://graph.facebook.com/v19.0/oauth/access_token?client_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&client_secret=${appSecret}&code=${code}`
-    );
+    // Step 1: Exchange code for short-lived user token
+    const tokenUrl = `https://graph.facebook.com/v19.0/oauth/access_token?client_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&client_secret=${appSecret}&code=${code}`;
+    const tokenRes = await fetch(tokenUrl);
     const tokenData = await tokenRes.json();
 
     if (!tokenData.access_token) {
+      console.error('Meta token exchange failed:', tokenData);
       return NextResponse.redirect(new URL('/channels?meta_error=token_failed', req.url));
     }
 
-    // Exchange for long-lived token
-    const longTokenRes = await fetch(
-      `https://graph.facebook.com/v19.0/oauth/access_token?grant_type=fb_exchange_token&client_id=${appId}&client_secret=${appSecret}&fb_exchange_token=${tokenData.access_token}`
-    );
-    const longToken = await longTokenRes.json();
-    const userToken = longToken.access_token || tokenData.access_token;
+    // Step 2: Exchange short-lived for long-lived (60 day) token
+    const longUrl = `https://graph.facebook.com/v19.0/oauth/access_token?grant_type=fb_exchange_token&client_id=${appId}&client_secret=${appSecret}&fb_exchange_token=${tokenData.access_token}`;
+    const longRes = await fetch(longUrl);
+    const longData = await longRes.json();
+    const userToken = longData.access_token || tokenData.access_token;
 
-    // Get user's pages
-    const pagesRes = await fetch(
-      `https://graph.facebook.com/v19.0/me/accounts?access_token=${userToken}&fields=id,name,access_token,instagram_business_account`
-    );
+    // Step 3: Get list of pages user manages, with page tokens
+    const pagesRes = await fetch(`https://graph.facebook.com/v19.0/me/accounts?access_token=${userToken}&fields=id,name,access_token,instagram_business_account`);
     const pagesData = await pagesRes.json();
-    const pages = pagesData.data || [];
 
-    // Build connected accounts data
-    const connected = pages.map((page: {id:string;name:string;access_token:string;instagram_business_account?:{id:string}}) => ({
-      pageId: page.id,
-      pageName: page.name,
-      pageToken: page.access_token,
-      instagramId: page.instagram_business_account?.id || null,
+    const pages = (pagesData.data || []).map((p: any) => ({
+      id: p.id,
+      name: p.name,
+      pageToken: p.access_token,
+      instagramId: p.instagram_business_account?.id,
     }));
 
-    // Store in a cookie temporarily to pass to the channels page
-    const response = NextResponse.redirect(
-      new URL('/channels?meta_connected=true&pages=' + encodeURIComponent(JSON.stringify(connected)), req.url)
-    );
+    const meta: MetaTokens = {
+      userToken,
+      expiresAt: Date.now() + (60 * 24 * 60 * 60 * 1000), // 60 days
+      pages,
+      connectedAt: Date.now(),
+    };
 
-    return response;
+    await saveMetaTokens(DEFAULT_USER_ID, meta);
+
+    return NextResponse.redirect(new URL('/channels?meta_connected=1', req.url));
   } catch (err) {
     console.error('Meta OAuth error:', err);
     return NextResponse.redirect(new URL('/channels?meta_error=server_error', req.url));
