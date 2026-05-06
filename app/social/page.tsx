@@ -3,7 +3,8 @@ import {useState,useEffect} from 'react';
 import {Plus,Calendar,List,X,Image,Sparkles,ChevronLeft,ChevronRight,Check,Clock,Edit3,Trash2} from 'lucide-react';
 import {addNotification} from '@/components/NotificationCentre';
 
-interface SocialPost{id:string;accountId:string;town:string;caption:string;imageUrl?:string;imageCredit?:string;scheduledAt:string;status:'draft'|'scheduled'|'published'|'failed';createdAt:string;}
+interface PostResult{status:'pending'|'publishing'|'published'|'failed';postId?:string;postUrl?:string;error?:string;publishedAt?:string;}
+interface SocialPost{id:string;accountIds:string[];town:string;caption:string;imageUrl?:string;imageCredit?:string;scheduledAt:string;status:'draft'|'scheduled'|'publishing'|'published'|'partial'|'failed';createdAt:string;results?:Record<string,PostResult>;}
 interface SocialAccount{id:string;handle:string;platform:'instagram'|'facebook'|'linkedin'|'x';region?:string;audience:string;tone:string;contentBrief:string;hashtags:string;color:string;active:boolean;}
 
 const PLATFORM_COLORS:Record<string,{bg:string;border:string;text:string}>={
@@ -24,7 +25,22 @@ const DEFAULT_ACCOUNTS:SocialAccount[]=[
 const MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
 const TOWNS=['Whitstable','Darlington','Aberfeldy','London','Edinburgh','Bristol','Manchester','Leeds','Belfast','Derry'];
 
-function getPosts():SocialPost[]{try{return JSON.parse(localStorage.getItem('roam_social_posts')||'[]');}catch{return[];}}
+function getPosts():SocialPost[]{try{
+  const v=localStorage.getItem('roam_social_posts_v');
+  if(v!=='2'){
+    // v2 migration: wipe (per user request: start fresh)
+    localStorage.setItem('roam_social_posts','[]');
+    localStorage.setItem('roam_social_posts_v','2');
+    return [];
+  }
+  const raw=JSON.parse(localStorage.getItem('roam_social_posts')||'[]');
+  // Defensive migration: convert any lingering accountId entries to accountIds
+  return raw.map((p:any)=>{
+    if(p.accountIds) return p;
+    if(p.accountId) return {...p,accountIds:[p.accountId]};
+    return {...p,accountIds:[]};
+  });
+}catch{return[];}}
 function savePosts(p:SocialPost[]){try{localStorage.setItem('roam_social_posts',JSON.stringify(p));}catch{}}
 function getAccounts():SocialAccount[]{try{const s=localStorage.getItem('roam_accounts');return s?JSON.parse(s):DEFAULT_ACCOUNTS;}catch{return DEFAULT_ACCOUNTS;}}
 function getDays(y:number,m:number):number{return new Date(y,m+1,0).getDate();}
@@ -54,8 +70,8 @@ export default function SocialPage(){
   const [calY,setCalY]=useState(today.getFullYear());
   const [calM,setCalM]=useState(today.getMonth());
 
-  const defaultAccountId=()=>accounts.find(a=>a.active)?.id||'acc1';
-  const blankForm=()=>({accountId:defaultAccountId(),town:'Whitstable',caption:'',imageUrl:'',imageCredit:'',scheduledDate:today.toISOString().split('T')[0],scheduledTime:'10:00',status:'draft' as SocialPost['status']});
+  
+  const blankForm=()=>({accountIds:accounts.filter(a=>a.active).map(a=>a.id),town:'Whitstable',caption:'',imageUrl:'',imageCredit:'',scheduledDate:today.toISOString().split('T')[0],scheduledTime:'10:00',status:'draft' as SocialPost['status']});
   const [form,setForm]=useState(blankForm());
   const [genForm,setGenForm]=useState({town:'Whitstable',accountIds:[] as string[],postsPerAccount:3,weekStart:today.toISOString().split('T')[0]});
 
@@ -74,7 +90,7 @@ export default function SocialPage(){
     if(post){
       setEditPost(post);
       const dt=new Date(post.scheduledAt);
-      setForm({accountId:post.accountId,town:post.town,caption:post.caption,imageUrl:post.imageUrl||'',imageCredit:post.imageCredit||'',scheduledDate:dt.toISOString().split('T')[0],scheduledTime:dt.toTimeString().slice(0,5),status:post.status});
+      setForm({accountIds:(post as any).accountIds||((post as any).accountId?[(post as any).accountId]:[]),town:post.town,caption:post.caption,imageUrl:post.imageUrl||'',imageCredit:post.imageCredit||'',scheduledDate:dt.toISOString().split('T')[0],scheduledTime:dt.toTimeString().slice(0,5),status:post.status});
     }else{setEditPost(null);setForm(blankForm());}
     setUnsplash([]);setShowComposer(true);
   }
@@ -82,7 +98,86 @@ export default function SocialPage(){
   function savePost(){
     if(!form.caption.trim())return;
     const scheduledAt=new Date(form.scheduledDate+'T'+form.scheduledTime).toISOString();
-    if(editPost){saveAndSet(posts.map(p=>p.id===editPost.id?{...p,...form,scheduledAt}:p));}
+    if(editPost){saveAndSet(posts.map(p=>p.id===editPost.id?{...p,...form,scheduledAt}
+
+  // ============== Publishing ==============
+  const [publishing,setPublishing]=useState<string|null>(null); // post id currently publishing
+  const [confirmPublish,setConfirmPublish]=useState<SocialPost|null>(null);
+
+  // Order: LinkedIn first, then Facebook, then Instagram (sequential per user choice)
+  function platformOrder(platform:string):number{
+    if(platform==='linkedin') return 0;
+    if(platform==='facebook') return 1;
+    if(platform==='instagram') return 2;
+    return 3;
+  }
+
+  async function publishPost(post:SocialPost){
+    setPublishing(post.id);
+    const accs=accounts.filter(a=>post.accountIds.includes(a.id));
+    accs.sort((a,b)=>platformOrder(a.platform)-platformOrder(b.platform));
+
+    const results:Record<string,any>={...(post.results||{})};
+    accs.forEach(a=>{ if(!results[a.id]) results[a.id]={status:'pending'}; });
+
+    // Get meta page id from connected meta tokens (need to fetch status to know pages)
+    let metaPagesByPlatform:Record<string,string>={};
+    try{
+      const sRes=await fetch('/api/accounts/status');
+      const sData=await sRes.json();
+      // For each FB account in our local accounts that's connected, find the matching Meta page
+      // For now: take the first connected page as default for facebook AND instagram accounts
+      const pages=sData.meta?.pages||[];
+      if(pages.length>0){
+        metaPagesByPlatform.facebook=pages[0].id;
+        metaPagesByPlatform.instagram=pages.find((p:any)=>p.hasInstagram)?.id||pages[0].id;
+      }
+    }catch(e){console.error('Failed to fetch meta pages:',e);}
+
+    for(const a of accs){
+      results[a.id]={status:'publishing'};
+      saveAndSet(posts.map(p=>p.id===post.id?{...p,results:{...results}}:p));
+
+      try{
+        const res=await fetch('/api/social/publish',{
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({
+            accountId:a.id,
+            platform:a.platform,
+            caption:post.caption,
+            imageUrl:post.imageUrl||undefined,
+            metaPageId:metaPagesByPlatform[a.platform],
+          }),
+        });
+        const data=await res.json();
+        if(data.ok){
+          results[a.id]={status:'published',postId:data.postId,postUrl:data.postUrl,publishedAt:new Date().toISOString()};
+          addNotification({type:'success',title:`Published to ${a.handle}`,description:a.platform});
+        }else{
+          results[a.id]={status:'failed',error:data.error||'Unknown error'};
+          addNotification({type:'error',title:`Failed: ${a.handle}`,description:data.error||'Unknown'});
+        }
+      }catch(err:any){
+        results[a.id]={status:'failed',error:err?.message||'Network error'};
+        addNotification({type:'error',title:`Failed: ${a.handle}`,description:err?.message||'Network error'});
+      }
+      saveAndSet(posts.map(p=>p.id===post.id?{...p,results:{...results}}:p));
+    }
+
+    // Compute summary status
+    const all=Object.values(results);
+    const succeeded=all.filter((r:any)=>r.status==='published').length;
+    const failed=all.filter((r:any)=>r.status==='failed').length;
+    let summary:SocialPost['status']='partial';
+    if(succeeded===all.length) summary='published';
+    else if(failed===all.length) summary='failed';
+
+    saveAndSet(posts.map(p=>p.id===post.id?{...p,results:{...results},status:summary}:p));
+    setPublishing(null);
+    setConfirmPublish(null);
+  }
+:p));}
     else{
       const np:SocialPost={id:Date.now().toString(),...form,scheduledAt,createdAt:new Date().toISOString()};
       saveAndSet([np,...posts]);
@@ -163,7 +258,7 @@ Return JSON array: [{"caption":"post text here","scheduledDay":1},{"caption":"po
   function postsForDay(day:number){return filtered.filter(p=>{const d=new Date(p.scheduledAt);return d.getFullYear()===calY&&d.getMonth()===calM&&d.getDate()===day;});}
 
   const PostPill=({post}:{post:SocialPost})=>{
-    const acc=getAccount(post.accountId);
+    const acc=getAccount(post.accountIds?.[0]);
     const color=acc?.color||'#9b2752';
     return(
       <div onClick={(e)=>{e.stopPropagation();openComposer(post);}} style={{borderLeft:'2px solid '+color,background:color+'22',borderRadius:3,padding:'2px 5px',marginBottom:2,cursor:'pointer',overflow:'hidden'}}>
@@ -176,7 +271,7 @@ Return JSON array: [{"caption":"post text here","scheduledDay":1},{"caption":"po
   };
 
   const PostRow=({post}:{post:SocialPost})=>{
-    const acc=getAccount(post.accountId);
+    const acc=getAccount(post.accountIds?.[0]);
     const color=acc?.color||'#9b2752';
     const pc=acc?PLATFORM_COLORS[acc.platform]:{bg:'var(--ink-100)',border:'var(--ink-300)',text:'var(--ink-500)'};
     const d=new Date(post.scheduledAt);
@@ -199,7 +294,7 @@ Return JSON array: [{"caption":"post text here","scheduledDay":1},{"caption":"po
         </div>
         <div style={{display:'flex',alignItems:'center',gap:6,flexShrink:0}}>
           <span style={{fontSize:10,padding:'3px 9px',borderRadius:'var(--r-pill)',background:post.status==='scheduled'?'#e8f5ee':post.status==='published'?'#e8f0fb':'var(--ink-100)',color:post.status==='scheduled'?'var(--ok)':post.status==='published'?'var(--info)':'var(--ink-500)',fontWeight:500}}>{post.status}</span>
-          <button onClick={()=>openComposer(post)} style={{width:28,height:28,borderRadius:'var(--r-xs)',border:'1.5px solid var(--ink-200)',background:'var(--white)',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',color:'var(--ink-500)'}}><Edit3 size={12}/></button>
+          <button onClick={()=>setConfirmPublish(post)} title="Publish now" style={{width:28,height:28,borderRadius:'var(--r-xs)',border:'1.5px solid var(--ink-200)',background:'var(--white)',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',color:'var(--info)'}}><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M5 12l5 5L20 7" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg></button><button onClick={()=>openComposer(post)} style={{width:28,height:28,borderRadius:'var(--r-xs)',border:'1.5px solid var(--ink-200)',background:'var(--white)',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',color:'var(--ink-500)'}}><Edit3 size={12}/></button>
           <button onClick={()=>saveAndSet(posts.filter(p=>p.id!==post.id))} style={{width:28,height:28,borderRadius:'var(--r-xs)',border:'1.5px solid var(--ink-200)',background:'var(--white)',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',color:'var(--alert)'}}><Trash2 size={12}/></button>
         </div>
       </div>
@@ -292,7 +387,46 @@ Return JSON array: [{"caption":"post text here","scheduledDay":1},{"caption":"po
             {scheduled.length>0&&(<><div style={{padding:'9px 18px',background:'#e8f5ee',borderBottom:'1px solid var(--ink-100)',fontSize:11,fontWeight:600,color:'var(--ok)',textTransform:'uppercase',letterSpacing:'0.08em',display:'flex',alignItems:'center',gap:6}}><Clock size={12}/>Scheduled ({scheduled.length})</div>{scheduled.sort((a,b)=>new Date(a.scheduledAt).getTime()-new Date(b.scheduledAt).getTime()).map(p=><PostRow key={p.id} post={p}/>)}</>)}
             {drafts.length>0&&(<><div style={{padding:'9px 18px',background:'var(--paper)',borderBottom:'1px solid var(--ink-100)',fontSize:11,fontWeight:600,color:'var(--warn)',textTransform:'uppercase',letterSpacing:'0.08em',display:'flex',alignItems:'center',gap:6}}><Edit3 size={12}/>Drafts ({drafts.length})</div>{drafts.map(p=><PostRow key={p.id} post={p}/>)}</>)}
             {published.length>0&&(<><div style={{padding:'9px 18px',background:'var(--paper)',borderBottom:'1px solid var(--ink-100)',fontSize:11,fontWeight:600,color:'var(--info)',textTransform:'uppercase',letterSpacing:'0.08em',display:'flex',alignItems:'center',gap:6}}><Check size={12}/>Published ({published.length})</div>{published.map(p=><PostRow key={p.id} post={p}/>)}</>)}
-          </>)}
+          
+      {confirmPublish && (
+        <div style={{position:'fixed',inset:0,background:'rgba(26,13,18,0.5)',zIndex:600,display:'flex',alignItems:'center',justifyContent:'center',padding:16}} onClick={e=>{if(e.target===e.currentTarget&&!publishing)setConfirmPublish(null);}}>
+          <div style={{background:'var(--white)',borderRadius:'var(--r-lg)',width:'min(480px,100%)',padding:24,boxShadow:'var(--shadow-lg)'}}>
+            <h2 style={{fontSize:20,fontWeight:700,marginBottom:8}}>Publish post?</h2>
+            <p style={{fontSize:13,color:'var(--ink-500)',marginBottom:16}}>This will post to {confirmPublish.accountIds.length} account{confirmPublish.accountIds.length===1?'':'s'} immediately.</p>
+            <div style={{display:'flex',flexDirection:'column',gap:8,marginBottom:20,maxHeight:240,overflowY:'auto'}}>
+              {accounts.filter(a=>confirmPublish.accountIds.includes(a.id)).sort((a,b)=>{
+                const o:Record<string,number>={linkedin:0,facebook:1,instagram:2,x:3};
+                return (o[a.platform]||9)-(o[b.platform]||9);
+              }).map(a=>{
+                const r=confirmPublish.results?.[a.id];
+                return (
+                  <div key={a.id} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 12px',borderRadius:'var(--r-md)',background:'var(--paper)',border:`1px solid ${a.color}33`}}>
+                    <div style={{width:24,height:24,borderRadius:'50%',background:a.color,display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',flexShrink:0}}>
+                      <PlatformIcon platform={a.platform} size={12} color="#fff"/>
+                    </div>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:13,fontWeight:600}}>{a.handle}</div>
+                      <div style={{fontSize:10,color:'var(--ink-400)',textTransform:'capitalize'}}>{a.platform}</div>
+                    </div>
+                    {r?.status==='published'&&<Check size={16} color="var(--ok)"/>}
+                    {r?.status==='publishing'&&<div style={{fontSize:11,color:'var(--info)'}}>Posting…</div>}
+                    {r?.status==='failed'&&<div style={{fontSize:11,color:'var(--alert)'}} title={r.error}>Failed</div>}
+                    {!r&&<div style={{fontSize:11,color:'var(--ink-400)'}}>Pending</div>}
+                  </div>
+                );
+              })}
+            </div>
+            <p style={{fontSize:11,color:'var(--ink-400)',marginBottom:16}}>Posts are sent in order: LinkedIn → Facebook → Instagram.</p>
+            <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
+              <button onClick={()=>{if(!publishing)setConfirmPublish(null);}} disabled={!!publishing} style={btnG}>Cancel</button>
+              <button onClick={()=>publishPost(confirmPublish)} disabled={!!publishing} style={{...btnP,opacity:publishing?0.6:1}}>
+                {publishing?'Publishing…':'Confirm & publish'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+</>)}
         </div>
       )}
 
@@ -310,21 +444,23 @@ Return JSON array: [{"caption":"post text here","scheduledDay":1},{"caption":"po
                 <label style={{display:'block',fontSize:11,fontWeight:600,color:'var(--ink-600)',marginBottom:8,textTransform:'uppercase',letterSpacing:'0.06em'}}>Account</label>
                 <div style={{display:'flex',flexDirection:'column',gap:6}}>
                   {accounts.filter(a=>a.active).map(a=>{
-                    const pc=PLATFORM_COLORS[a.platform];
-                    const selected=form.accountId===a.id;
-                    return(
-                      <button key={a.id} onClick={()=>setForm({...form,accountId:a.id})} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 12px',borderRadius:'var(--r-md)',border:`1.5px solid ${selected?a.color:'var(--ink-200)'}`,background:selected?a.color+'15':'var(--white)',cursor:'pointer',textAlign:'left',fontFamily:'inherit'}}>
-                        <div style={{width:28,height:28,borderRadius:'50%',background:pc.bg,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
-                          <PlatformIcon platform={a.platform} size={13} color={pc.text}/>
-                        </div>
-                        <div style={{flex:1,minWidth:0}}>
-                          <div style={{fontSize:13,fontWeight:600,color:selected?a.color:'var(--ink-900)'}}>{a.handle}</div>
-                          <div style={{fontSize:11,color:'var(--ink-400)'}}>{a.platform.charAt(0).toUpperCase()+a.platform.slice(1)}{a.region?' · '+a.region:''}</div>
-                        </div>
-                        {selected&&<Check size={14} color={a.color}/>}
-                      </button>
-                    );
-                  })}
+                  const selected=form.accountIds?.includes(a.id);
+                  return (
+                    <button key={a.id} type="button" onClick={()=>{
+                      const ids=form.accountIds||[];
+                      setForm({...form,accountIds:selected?ids.filter(x=>x!==a.id):[...ids,a.id]});
+                    }} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 12px',borderRadius:'var(--r-md)',border:`1.5px solid ${selected?a.color:'var(--ink-200)'}`,background:selected?a.color+'15':'var(--white)',cursor:'pointer',textAlign:'left',fontFamily:'inherit',position:'relative'}}>
+                      <div style={{width:24,height:24,borderRadius:'50%',background:a.color,display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',flexShrink:0}}>
+                        <PlatformIcon platform={a.platform} size={12} color="#fff"/>
+                      </div>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:12,fontWeight:600,color:selected?a.color:'var(--ink-900)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{a.handle}</div>
+                        <div style={{fontSize:10,color:'var(--ink-400)',textTransform:'capitalize'}}>{a.platform}{a.region?` · ${a.region}`:''}</div>
+                      </div>
+                      {selected && <div style={{width:18,height:18,borderRadius:'50%',background:a.color,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}><Check size={11} color="#fff"/></div>}
+                    </button>
+                  );
+                })}
                 </div>
                 {selectedAcc&&<div style={{marginTop:8,padding:'8px 12px',background:'var(--paper)',borderRadius:'var(--r-sm)',fontSize:11,color:'var(--ink-500)',lineHeight:1.5}}><strong style={{color:'var(--ink-700)'}}>Tone:</strong> {selectedAcc.tone}</div>}
               </div>
@@ -380,7 +516,18 @@ Return JSON array: [{"caption":"post text here","scheduledDay":1},{"caption":"po
             </div>
             <div style={{padding:'14px 22px',borderTop:'1px solid var(--ink-100)',display:'flex',gap:8,justifyContent:'flex-end',position:'sticky',bottom:0,background:'var(--white)'}}>
               <button onClick={()=>setShowComposer(false)} style={btnG}>Cancel</button>
-              <button onClick={savePost} disabled={!form.caption.trim()} style={{...btnP,opacity:!form.caption.trim()?0.5:1}}><Check size={13}/>{editPost?'Save changes':'Create post'}</button>
+              <button type="button" onClick={()=>{
+                if(!form.accountIds?.length||!form.caption.trim()) return;
+                // Build a temp post object, save first if not yet saved, then trigger confirm
+                if(editPost){
+                  setConfirmPublish({...editPost,...form,scheduledAt:new Date(form.scheduledDate+'T'+form.scheduledTime).toISOString()} as SocialPost);
+                }else{
+                  const np:SocialPost={id:'p'+Date.now(),accountIds:form.accountIds,town:form.town,caption:form.caption,imageUrl:form.imageUrl,imageCredit:form.imageCredit,scheduledAt:new Date(form.scheduledDate+'T'+form.scheduledTime).toISOString(),status:'draft',createdAt:new Date().toISOString()};
+                  saveAndSet([np,...posts]);
+                  setShowComposer(false);
+                  setConfirmPublish(np);
+                }
+              }} disabled={!form.caption.trim()||!form.accountIds?.length} style={{...btnP,background:'#0A66C2',opacity:(!form.caption.trim()||!form.accountIds?.length)?0.5:1,marginRight:8}}>Publish Now</button><button onClick={savePost} disabled={!form.caption.trim()||!form.accountIds?.length} style={{...btnP,opacity:!form.caption.trim()?0.5:1}}><Check size={13}/>{editPost?'Save changes':'Create post'}</button>
             </div>
           </div>
         </div>
