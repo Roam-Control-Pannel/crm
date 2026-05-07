@@ -4,23 +4,52 @@ import { getUserTokens, DEFAULT_USER_ID } from '@/lib/tokens';
 export const dynamic = 'force-dynamic';
 
 interface PublishBody {
-  accountId: string;       // local account id (acc1, acc2, etc.)
+  accountId: string;       // real account id: 'li-personal:{urn}', 'meta-page:{id}', 'meta-ig:{id}'
   platform: 'linkedin' | 'facebook' | 'instagram';
   caption: string;
   imageUrl?: string;
-  // For Facebook/Instagram: which Meta page to use (matched by platform)
+  // Optional explicit overrides (mostly for legacy callers):
   metaPageId?: string;
-  // For LinkedIn: which entity to post as (defaults to personal memberUrn)
   linkedinAuthorUrn?: string;
+}
+
+/**
+ * Parse account ID prefix into platform routing info.
+ * 'li-personal:urn:li:person:abc'    -> { kind: 'li-personal', value: 'urn:li:person:abc' }
+ * 'li-company:urn:li:organization:1' -> { kind: 'li-company', value: 'urn:li:organization:1' }
+ * 'meta-page:1234567890'             -> { kind: 'meta-page', value: '1234567890' }
+ * 'meta-ig:1234567890'               -> { kind: 'meta-ig', value: '1234567890' }
+ */
+function parseAccountId(id: string): { kind: string; value: string } {
+  const idx = id.indexOf(':');
+  if (idx === -1) return { kind: '', value: id };
+  return { kind: id.slice(0, idx), value: id.slice(idx + 1) };
 }
 
 export async function POST(req: NextRequest) {
   try {
     const body: PublishBody = await req.json();
-    const { accountId, platform, caption, imageUrl, metaPageId, linkedinAuthorUrn } = body;
+    const { accountId, platform, caption, imageUrl } = body;
+    let { metaPageId, linkedinAuthorUrn } = body;
 
     if (!platform || !caption) {
       return NextResponse.json({ ok: false, error: 'Missing platform or caption' }, { status: 400 });
+    }
+
+    // Auto-resolve from accountId if not explicitly provided
+    if (accountId) {
+      const parsed = parseAccountId(accountId);
+      if (parsed.kind === 'li-personal' && !linkedinAuthorUrn) {
+        linkedinAuthorUrn = parsed.value;
+      } else if (parsed.kind === 'li-company' && !linkedinAuthorUrn) {
+        linkedinAuthorUrn = parsed.value;
+      } else if (parsed.kind === 'meta-page' && !metaPageId) {
+        metaPageId = parsed.value;
+      } else if (parsed.kind === 'meta-ig' && !metaPageId) {
+        // For IG, we need to find the parent page. accountId has IG ID directly,
+        // we look up the page that owns it.
+        // metaPageId stays empty here; the IG block below handles lookup by IG id.
+      }
     }
 
     const tokens = await getUserTokens(DEFAULT_USER_ID);
@@ -32,8 +61,13 @@ export async function POST(req: NextRequest) {
       if (!tokens.linkedin?.accessToken) {
         return NextResponse.json({ ok: false, error: 'LinkedIn not connected' }, { status: 400 });
       }
-      if (!tokens.linkedin.capabilities?.postPersonal && !linkedinAuthorUrn) {
-        return NextResponse.json({ ok: false, error: 'LinkedIn posting capability not granted' }, { status: 403 });
+      // Decide which capability is required based on the author URN
+      const isCompanyPost = !!linkedinAuthorUrn?.includes(':organization:');
+      if (isCompanyPost && !tokens.linkedin.capabilities?.postCompany) {
+        return NextResponse.json({ ok: false, error: 'LinkedIn company posting capability not granted (Community Management API approval required)' }, { status: 403 });
+      }
+      if (!isCompanyPost && !tokens.linkedin.capabilities?.postPersonal && !linkedinAuthorUrn) {
+        return NextResponse.json({ ok: false, error: 'LinkedIn personal posting capability not granted' }, { status: 403 });
       }
 
       const authorUrn = linkedinAuthorUrn || tokens.linkedin.memberUrn;
@@ -152,7 +186,17 @@ export async function POST(req: NextRequest) {
       if (!tokens.meta?.userToken) {
         return NextResponse.json({ ok: false, error: 'Meta not connected' }, { status: 400 });
       }
-      const page = (tokens.meta.pages || []).find(p => p.id === metaPageId);
+
+      // For Instagram, we need to find the parent page. Two paths:
+      // 1. metaPageId was passed explicitly
+      // 2. accountId is 'meta-ig:{igId}' — we look up the page whose instagramId matches
+      let page = (tokens.meta.pages || []).find(p => p.id === metaPageId);
+      if (!page && accountId) {
+        const parsed = parseAccountId(accountId);
+        if (parsed.kind === 'meta-ig') {
+          page = (tokens.meta.pages || []).find(p => p.instagramId === parsed.value);
+        }
+      }
       if (!page?.instagramId) {
         return NextResponse.json({ ok: false, error: 'No Instagram account linked to this page' }, { status: 400 });
       }
