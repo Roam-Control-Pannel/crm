@@ -68,7 +68,7 @@ export async function GET() {
 
     // LinkedIn personal
     if (tokens.linkedin && tokens.linkedin.expiresAt > Date.now()) {
-      const canPost = !!tokens.linkedin.capabilities?.canPostAsPerson;
+      const canPost = !!tokens.linkedin.capabilities?.postPersonal;
       realAccounts.push({
         id: `li-personal:${tokens.linkedin.memberUrn}`,
         platform: 'linkedin',
@@ -82,22 +82,22 @@ export async function GET() {
       // LinkedIn organisations (company pages) — pending until Community Mgmt API approval
       const orgs = tokens.linkedin.organisations || [];
       for (const org of orgs) {
-        const canPostAsOrg = !!tokens.linkedin.capabilities?.canPostAsOrg;
+        const postCompany = !!tokens.linkedin.capabilities?.postCompany;
         realAccounts.push({
           id: `li-company:${org.urn}`,
           platform: 'linkedin',
           type: 'company',
           handle: org.name || 'LinkedIn Company',
           region: 'UK',
-          capabilities: { canPost: canPostAsOrg },
-          pendingApproval: !canPostAsOrg,
+          capabilities: { canPost: postCompany },
+          pendingApproval: !postCompany,
           meta: { organizationUrn: org.urn },
         });
       }
 
       // If no org admin scope yet, surface the pending Roam company page placeholder
       // so the user sees it and knows it's coming
-      if (!tokens.linkedin.capabilities?.canPostAsOrg && orgs.length === 0) {
+      if (!tokens.linkedin.capabilities?.postCompany && orgs.length === 0) {
         realAccounts.push({
           id: 'li-company:pending',
           platform: 'linkedin',
