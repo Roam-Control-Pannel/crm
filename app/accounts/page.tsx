@@ -322,7 +322,7 @@ export default function AccountsPage() {
                     <div style={{ marginTop: 8, padding: '10px 12px', background: b.color + '0a', borderRadius: 'var(--r-sm)', fontSize: 11, color: 'var(--ink-600)', lineHeight: 1.5 }}>
                       <div style={{ marginBottom: 4 }}><strong>Audience:</strong> {b.audience}</div>
                       <div style={{ marginBottom: 4 }}><strong>Tone:</strong> {b.tone}</div>
-                      <div><strong>Content:</strong> {b.contentGuidance}</div>
+                      <div><strong>Content:</strong> {b.contentBrief}</div>
                     </div>
                   );
                 })()}
