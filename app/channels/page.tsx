@@ -1,295 +1,765 @@
 'use client';
-import {useState,useEffect} from 'react';
-import {CheckCircle,XCircle,ExternalLink,RefreshCw} from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
+import {
+  CheckCircle2, AlertCircle, ExternalLink, RefreshCw, Plug,
+  Mail, Sparkles, Clock, Wifi,
+} from 'lucide-react';
+import { loadWithMigration } from '@/lib/client-store';
 
-interface ConnectedPage{pageId:string;pageName:string;pageToken:string;instagramId:string|null;}
+// ============================================================================
+// Types — kept internal, mirrors what /api/accounts/status returns
+// ============================================================================
+interface MetaPageInfo {
+  id: string;
+  name: string;
+  hasInstagram: boolean;
+  instagramId?: string;
+}
+interface LinkedInOrg { id: string; name: string; urn: string; }
+interface LinkedInStatus {
+  connected: boolean;
+  name?: string; email?: string; picture?: string;
+  memberUrn?: string;
+  scopes?: string[];
+  capabilities?: { signIn?: boolean; postPersonal?: boolean; postCompany?: boolean; listOrganisations?: boolean; };
+  organisations?: LinkedInOrg[];
+  connectedAt?: number;
+  isExpired?: boolean;
+}
+interface MetaStatus {
+  connected: boolean;
+  pages?: MetaPageInfo[];
+  connectedAt?: number;
+  isExpired?: boolean;
+}
+interface PostResult { status: 'pending' | 'publishing' | 'published' | 'failed'; }
+interface SocialPostLite {
+  id: string;
+  accountIds: string[];
+  scheduledAt: string;
+  status: 'draft' | 'scheduled' | 'publishing' | 'published' | 'partial' | 'failed';
+  results?: Record<string, PostResult>;
+}
 
-export default function ChannelsPage(){
-  const [brevoOk,setBrevoOk]=useState<boolean|null>(null);
-  const [metaPages,setMetaPages]=useState<ConnectedPage[]>([]);
-  const [metaError,setMetaError]=useState<string|null>(null);
-  const [metaConnected,setMetaConnected]=useState(false);
-  const [liConnected,setLiConnected]=useState(false);
-  const [liAccount,setLiAccount] = useState<{
-    name: string;
-    email: string;
-    picture: string;
-    accessToken: string;
-    sub?: string;
-    memberUrn?: string;
-    expiresIn?: number;
-    scopes?: string[];
-    capabilities?: {
-      signIn?: boolean;
-      postPersonal?: boolean;
-      postCompany?: boolean;
-      listOrganisations?: boolean;
-    };
-    organisations?: Array<{ id: string; name: string; urn: string }>;
-    connectedAt?: string;
-  }|null>(null);
-  const [liError,setLiError]=useState<string|null>(null);
+// ============================================================================
+// Brand glyphs — kept inline so the file is self-contained
+// ============================================================================
+function FacebookGlyph({ size = 22, color = '#1877F2' }: { size?: number; color?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={color} aria-hidden>
+      <path d="M24 12.073C24 5.405 18.627 0 12 0S0 5.405 0 12.073c0 6.019 4.388 11.013 10.125 11.927v-8.437H7.078v-3.49h3.047V9.31c0-3.027 1.788-4.7 4.533-4.7 1.314 0 2.686.236 2.686.236v2.972h-1.514c-1.49 0-1.954.93-1.954 1.886v2.265h3.328l-.532 3.49h-2.796V24C19.612 23.086 24 18.092 24 12.073z" />
+    </svg>
+  );
+}
+function InstagramGlyph({ size = 18 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden>
+      <defs>
+        <radialGradient id="igGrad" cx="30%" cy="107%" r="150%">
+          <stop offset="0%" stopColor="#fdf497" />
+          <stop offset="5%" stopColor="#fdf497" />
+          <stop offset="45%" stopColor="#fd5949" />
+          <stop offset="60%" stopColor="#d6249f" />
+          <stop offset="90%" stopColor="#285AEB" />
+        </radialGradient>
+      </defs>
+      <rect x="2" y="2" width="20" height="20" rx="5" fill="url(#igGrad)" />
+      <circle cx="12" cy="12" r="4.2" fill="none" stroke="#fff" strokeWidth="1.6" />
+      <circle cx="17.5" cy="6.5" r="1.1" fill="#fff" />
+    </svg>
+  );
+}
+function LinkedInGlyph({ size = 22, color = '#0A66C2' }: { size?: number; color?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={color} aria-hidden>
+      <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 01-2.063-2.065 2.064 2.064 0 112.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z" />
+    </svg>
+  );
+}
+function XGlyph({ size = 20 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117L17.083 19.77z" />
+    </svg>
+  );
+}
 
-  useEffect(()=>{
+// ============================================================================
+// Helpers
+// ============================================================================
+function timeAgo(iso?: string | null): string {
+  if (!iso) return '';
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return '';
+  const diff = Date.now() - t;
+  const m = Math.round(diff / 60_000);
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m}m ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.round(h / 24);
+  if (d < 30) return `${d}d ago`;
+  const mo = Math.round(d / 30);
+  if (mo < 12) return `${mo}mo ago`;
+  return `${Math.round(mo / 12)}y ago`;
+}
+
+/**
+ * Given posts and a real account id, find the most recent successful publish.
+ * Looks at both top-level status and per-account `results` map.
+ */
+function lastPublishFor(posts: SocialPostLite[], accountId: string): string | null {
+  let latest: number | null = null;
+  for (const p of posts) {
+    if (!p.accountIds?.includes(accountId)) continue;
+    const r = p.results?.[accountId];
+    const isPublished = r?.status === 'published' || (p.status === 'published' && !r);
+    if (!isPublished) continue;
+    const t = new Date(p.scheduledAt).getTime();
+    if (!Number.isNaN(t) && (latest === null || t > latest)) latest = t;
+  }
+  return latest ? new Date(latest).toISOString() : null;
+}
+
+// ============================================================================
+// Page
+// ============================================================================
+export default function ChannelsPage() {
+  const [meta, setMeta] = useState<MetaStatus>({ connected: false });
+  const [linkedin, setLinkedin] = useState<LinkedInStatus>({ connected: false });
+  const [posts, setPosts] = useState<SocialPostLite[]>([]);
+  const [brevoOk, setBrevoOk] = useState<boolean | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [errors, setErrors] = useState<{ meta?: string; linkedin?: string }>({});
+
+  useEffect(() => {
     let cancelled = false;
-    async function loadStatus() {
-      try {
-        const res = await fetch('/api/accounts/status');
-        const data = await res.json();
-        if (cancelled) return;
 
-        // LinkedIn
-        if (data.linkedin?.connected) {
-          setLiConnected(true);
-          setLiAccount({
-            name: data.linkedin.name,
-            email: data.linkedin.email,
-            picture: data.linkedin.picture || '',
-            accessToken: '', // no longer client-side
-            sub: data.linkedin.memberUrn?.replace('urn:li:person:', '') || '',
-            memberUrn: data.linkedin.memberUrn,
-            scopes: data.linkedin.scopes || [],
-            capabilities: data.linkedin.capabilities || {},
-            organisations: data.linkedin.organisations || [],
-            connectedAt: data.linkedin.connectedAt ? new Date(data.linkedin.connectedAt).toISOString() : '',
-          });
-        } else {
-          setLiConnected(false);
-          setLiAccount(null);
-        }
-
-        // Meta (Facebook + Instagram)
-        if (data.meta?.connected) {
-          setMetaPages(data.meta.pages || []);
-        } else {
-          setMetaPages([]);
-        }
-      } catch (e) {
-        console.error('Failed to load account status:', e);
-      }
-    }
-
-    // Read URL params for connection success/error flags
+    // Read URL params for connection success/error flags then clean them
     const params = new URLSearchParams(window.location.search);
-    if (params.get('li_connected') === '1' || params.get('meta_connected') === '1') {
-      // Clear the URL params after a beat so refresh doesn't re-trigger
-      window.history.replaceState({}, '', '/channels');
-    }
     const liErr = params.get('li_error');
     const metaErr = params.get('meta_error');
-    if (liErr) setLiError(liErr);
-    if (metaErr && typeof setMetaError === 'function') setMetaError(metaErr);
+    if (liErr || metaErr) {
+      setErrors({ linkedin: liErr || undefined, meta: metaErr || undefined });
+    }
+    if (params.get('li_connected') === '1' || params.get('meta_connected') === '1' || liErr || metaErr) {
+      window.history.replaceState({}, '', '/channels');
+    }
 
-    loadStatus();
+    (async () => {
+      try {
+        const [statusRes, brevoRes, postsData] = await Promise.allSettled([
+          fetch('/api/accounts/status', { cache: 'no-store' }).then(r => r.json()),
+          fetch('/api/brevo/lists', { cache: 'no-store' }).then(r => r.ok),
+          loadWithMigration<SocialPostLite[]>('social_posts'),
+        ]);
+
+        if (cancelled) return;
+
+        if (statusRes.status === 'fulfilled') {
+          setMeta(statusRes.value.meta || { connected: false });
+          setLinkedin(statusRes.value.linkedin || { connected: false });
+        }
+        if (brevoRes.status === 'fulfilled') {
+          setBrevoOk(brevoRes.value);
+        } else {
+          setBrevoOk(false);
+        }
+        if (postsData.status === 'fulfilled' && Array.isArray(postsData.value)) {
+          setPosts(postsData.value);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
     return () => { cancelled = true; };
   }, []);
 
-  function connectMeta(){
-    window.location.href='/api/auth/meta/start';
-  }
+  // ==========================================================================
+  // Derived state — counts for the summary band
+  // ==========================================================================
+  const summary = useMemo(() => {
+    let connected = 0;
+    let readyAccounts = 0;
 
-  async function disconnectMeta(){
-    try{
-      await fetch('/api/accounts/disconnect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:'meta'})});
-      setMetaPages([]);
-    }catch(e){console.error('Disconnect failed',e);}
-  }
+    if (brevoOk) connected += 1;
+    if (linkedin.connected && !linkedin.isExpired) connected += 1;
+    if (meta.connected && !meta.isExpired) connected += 1;
 
-  function connectLinkedIn(){
-    window.location.href='/api/auth/linkedin/start';
-  }
+    if (linkedin.connected && linkedin.capabilities?.postPersonal) readyAccounts += 1;
+    if (linkedin.connected && linkedin.capabilities?.postCompany) {
+      readyAccounts += (linkedin.organisations || []).length;
+    }
+    if (meta.connected) {
+      const pages = meta.pages || [];
+      readyAccounts += pages.length; // each FB page
+      readyAccounts += pages.filter(p => p.hasInstagram).length; // each linked IG
+    }
 
-  async function disconnectLinkedIn(){
-    try{
-      await fetch('/api/accounts/disconnect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:'linkedin'})});
-      setLiAccount(null);
-      setLiConnected(false);
-    }catch(e){console.error('Disconnect failed',e);}
-  }
+    let latest: number | null = null;
+    for (const p of posts) {
+      if (p.status !== 'published' && p.status !== 'partial') continue;
+      const t = new Date(p.scheduledAt).getTime();
+      if (!Number.isNaN(t) && (latest === null || t > latest)) latest = t;
+    }
+    return {
+      connected,
+      readyAccounts,
+      lastPublishedIso: latest ? new Date(latest).toISOString() : null,
+    };
+  }, [linkedin, meta, brevoOk, posts]);
 
-  const btnP:React.CSSProperties={display:'inline-flex',alignItems:'center',gap:6,padding:'8px 16px',borderRadius:'var(--r-md)',background:'var(--maroon-700)',color:'white',fontSize:12.5,fontWeight:600,border:'none',cursor:'pointer'};
-  const btnG:React.CSSProperties={display:'inline-flex',alignItems:'center',gap:6,padding:'8px 14px',borderRadius:'var(--r-md)',background:'var(--white)',color:'var(--ink-700)',fontSize:12.5,fontWeight:600,border:'1.5px solid var(--ink-200)',cursor:'pointer'};
-  const btnFB:React.CSSProperties={display:'inline-flex',alignItems:'center',gap:8,padding:'12px 22px',borderRadius:'var(--r-md)',background:'#1877F2',color:'white',fontSize:14,fontWeight:600,border:'none',cursor:'pointer'};
+  // ==========================================================================
+  // Render
+  // ==========================================================================
+  return (
+    <div style={S.page}>
+      {/* Hero */}
+      <header style={S.header}>
+        <div>
+          <div style={S.eyebrow}>Channels</div>
+          <h1 style={S.headline}>Where your stories <em style={S.emItalic}>go</em></h1>
+          <p style={S.subhead}>
+            Connect the accounts you publish from. Posts scheduled in your calendar will go out via the channels you authorise here.
+          </p>
+        </div>
+      </header>
 
-  return(
-    <div style={{padding:'24px 28px'}}>
-      <div style={{marginBottom:24}}>
-        <h1 style={{fontFamily:'var(--font-display)',fontSize:28,fontWeight:700,color:'var(--ink-900)',lineHeight:1,marginBottom:6}}>Channels</h1>
-        <p style={{fontSize:12,color:'var(--ink-400)',fontWeight:500}}>Connect your social media accounts to publish directly from the Social Calendar</p>
+      {/* Errors banner */}
+      {(errors.meta || errors.linkedin) && (
+        <div style={S.errBanner} role="alert">
+          <AlertCircle size={14} />
+          <span>
+            {errors.meta && <>Facebook connection failed: <code style={S.code}>{errors.meta}</code>. </>}
+            {errors.linkedin && <>LinkedIn connection failed: <code style={S.code}>{errors.linkedin}</code>. </>}
+            Try connecting again below.
+          </span>
+        </div>
+      )}
+
+      {/* Stat band */}
+      <section style={S.stats}>
+        <StatTile
+          label="Channels live"
+          value={loading ? '—' : String(summary.connected)}
+          accent="var(--maroon-600)"
+          icon={<Plug size={14} />}
+          caption={loading ? 'Checking…' : summary.connected === 0 ? 'No channels yet' : 'Authorised & ready'}
+        />
+        <StatTile
+          label="Accounts ready to post"
+          value={loading ? '—' : String(summary.readyAccounts)}
+          accent="var(--ok)"
+          icon={<CheckCircle2 size={14} />}
+          caption={loading ? 'Checking…' : summary.readyAccounts === 0 ? 'Connect a channel to begin' : 'Across LinkedIn, Facebook & Instagram'}
+        />
+        <StatTile
+          label="Last published"
+          value={summary.lastPublishedIso ? timeAgo(summary.lastPublishedIso) : 'never'}
+          accent="var(--info)"
+          icon={<Clock size={14} />}
+          caption={summary.lastPublishedIso
+            ? new Date(summary.lastPublishedIso).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+            : 'No posts have gone out yet'}
+        />
+      </section>
+
+      {/* Channel cards */}
+      <section style={S.cards}>
+        <BrevoCard ok={brevoOk} />
+        <MetaCard meta={meta} posts={posts} loading={loading} />
+        <LinkedInCard linkedin={linkedin} posts={posts} loading={loading} />
+        <ComingSoonRow />
+      </section>
+    </div>
+  );
+}
+
+// ============================================================================
+// Subcomponents
+// ============================================================================
+function StatTile({
+  label, value, accent, icon, caption,
+}: { label: string; value: string; accent: string; icon: React.ReactNode; caption: string }) {
+  return (
+    <div style={S.statTile}>
+      <div style={{ ...S.statAccent, background: accent }} />
+      <div style={S.statRow}>
+        <span style={S.statLabel}>{label}</span>
+        <span style={{ ...S.statIcon, color: accent }}>{icon}</span>
       </div>
+      <div style={{ ...S.statValue, color: 'var(--ink-900)' }}>{value}</div>
+      <div style={S.statCaption}>{caption}</div>
+    </div>
+  );
+}
 
-      {metaError&&<div style={{background:'#fcebeb',border:'1px solid #f5c2c7',borderRadius:'var(--r-md)',padding:'12px 16px',marginBottom:16,fontSize:13,color:'var(--alert)'}}>Connection failed: {metaError}. Please try again.</div>}
-
-      <div style={{display:'flex',flexDirection:'column',gap:12}}>
-
-        {/* Brevo */}
-        <div style={{background:'var(--white)',border:'1px solid var(--ink-100)',borderRadius:'var(--r-lg)',padding:'18px 20px',display:'flex',alignItems:'center',gap:14}}>
-          <div style={{width:42,height:42,borderRadius:'var(--r-md)',background:'#e8f5ee',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M4 4h16M4 9h16M4 14h16M4 19h16" stroke="#2f7a4f" strokeWidth="1.5" strokeLinecap="round"/></svg>
-          </div>
-          <div style={{flex:1}}>
-            <div style={{fontSize:14,fontWeight:600,color:'var(--ink-900)'}}>Brevo Email</div>
-            <div style={{fontSize:12,color:'var(--ink-500)',marginTop:2}}>Transactional email · hello@roam-everywhere.com · 500 contacts</div>
-          </div>
-          {brevoOk===null?<span style={{fontSize:12,color:'var(--ink-400)'}}>Checking...</span>:brevoOk?<span style={{display:'flex',alignItems:'center',gap:5,fontSize:12,color:'var(--ok)',fontWeight:500}}><CheckCircle size={14}/>Connected</span>:<span style={{display:'flex',alignItems:'center',gap:5,fontSize:12,color:'var(--alert)',fontWeight:500}}><XCircle size={14}/>Error</span>}
+function ChannelHeader({
+  glyph, title, subtitle, status, action,
+}: {
+  glyph: React.ReactNode;
+  title: string;
+  subtitle: string;
+  status?: { tone: 'ok' | 'warn' | 'alert' | 'idle'; label: string };
+  action?: React.ReactNode;
+}) {
+  const statusColors: Record<string, { bg: string; fg: string }> = {
+    ok: { bg: '#e8f5ee', fg: 'var(--ok)' },
+    warn: { bg: '#fbf0e0', fg: 'var(--warn)' },
+    alert: { bg: '#fcebeb', fg: 'var(--alert)' },
+    idle: { bg: 'var(--ink-100)', fg: 'var(--ink-500)' },
+  };
+  return (
+    <div style={S.channelHead}>
+      <div style={S.channelGlyph}>{glyph}</div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={S.channelTitle}>{title}</div>
+        <div style={S.channelSub}>{subtitle}</div>
+      </div>
+      {status && (
+        <div style={{ ...S.statusPill, background: statusColors[status.tone].bg, color: statusColors[status.tone].fg }}>
+          {status.tone === 'ok' && <CheckCircle2 size={12} />}
+          {status.tone === 'warn' && <AlertCircle size={12} />}
+          {status.tone === 'alert' && <AlertCircle size={12} />}
+          {status.tone === 'idle' && <Wifi size={12} />}
+          {status.label}
         </div>
+      )}
+      {action}
+    </div>
+  );
+}
 
-        {/* Facebook + Instagram */}
-        <div style={{background:'var(--white)',border:'1px solid var(--ink-100)',borderRadius:'var(--r-lg)',overflow:'hidden'}}>
-          <div style={{padding:'18px 20px',display:'flex',alignItems:'center',gap:14}}>
-            <div style={{width:42,height:42,borderRadius:'var(--r-md)',background:'#dde9f7',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M18 2h-3a5 5 0 00-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 011-1h3z" stroke="#1877F2" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-            </div>
-            <div style={{flex:1}}>
-              <div style={{fontSize:14,fontWeight:600,color:'var(--ink-900)'}}>Facebook Pages + Instagram</div>
-              <div style={{fontSize:12,color:'var(--ink-500)',marginTop:2}}>
-                {metaConnected?`${metaPages.length} page${metaPages.length===1?'':'s'} connected · ${metaPages.filter(p=>p.instagramId).length} with Instagram`:'Connect your Facebook account to link all Pages and Instagram accounts in one click'}
-              </div>
-            </div>
-            <div style={{display:'flex',gap:8,flexShrink:0}}>
-              {metaConnected?(
-                <>
-                  <span style={{display:'flex',alignItems:'center',gap:5,fontSize:12,color:'var(--ok)',fontWeight:500,marginRight:4}}><CheckCircle size={14}/>Connected</span>
-                  <button onClick={connectMeta} style={{...btnG,fontSize:11,padding:'6px 12px'}}><RefreshCw size={12}/>Reconnect</button>
-                  <button onClick={disconnectMeta} style={{...btnG,fontSize:11,padding:'6px 12px',color:'var(--alert)',borderColor:'#f5c2c7'}}>Disconnect</button>
-                </>
-              ):(
-                <button onClick={connectMeta} style={btnFB}>
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="white"><path d="M18 2h-3a5 5 0 00-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 011-1h3z"/></svg>
-                  Connect with Facebook
-                </button>
-              )}
-            </div>
+function AccountRow({
+  avatar, name, secondary, statusLabel, statusTone = 'ok', action,
+}: {
+  avatar: React.ReactNode;
+  name: React.ReactNode;
+  secondary?: React.ReactNode;
+  statusLabel?: string;
+  statusTone?: 'ok' | 'warn' | 'idle' | 'alert';
+  action?: React.ReactNode;
+}) {
+  const colors: Record<string, { bg: string; fg: string }> = {
+    ok: { bg: '#e8f5ee', fg: 'var(--ok)' },
+    warn: { bg: '#fbf0e0', fg: 'var(--warn)' },
+    alert: { bg: '#fcebeb', fg: 'var(--alert)' },
+    idle: { bg: 'var(--ink-100)', fg: 'var(--ink-500)' },
+  };
+  return (
+    <div style={S.accRow}>
+      {avatar}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={S.accName}>{name}</div>
+        {secondary && <div style={S.accSec}>{secondary}</div>}
+      </div>
+      {statusLabel && (
+        <div style={{ ...S.statusPillSm, background: colors[statusTone].bg, color: colors[statusTone].fg }}>
+          {statusTone === 'ok' && <CheckCircle2 size={11} />}
+          {statusTone === 'warn' && <Clock size={11} />}
+          {statusTone === 'alert' && <AlertCircle size={11} />}
+          {statusLabel}
+        </div>
+      )}
+      {action}
+    </div>
+  );
+}
+
+// ============================================================================
+// Brevo
+// ============================================================================
+function BrevoCard({ ok }: { ok: boolean | null }) {
+  const status =
+    ok === null
+      ? { tone: 'idle' as const, label: 'Checking…' }
+      : ok
+        ? { tone: 'ok' as const, label: 'Live' }
+        : { tone: 'alert' as const, label: 'Cannot reach' };
+  return (
+    <div style={S.card}>
+      <ChannelHeader
+        glyph={<Mail size={20} color="#2f7a4f" />}
+        title="Brevo Email"
+        subtitle="Transactional email · hello@roam-everywhere.com"
+        status={status}
+      />
+    </div>
+  );
+}
+
+// ============================================================================
+// Meta (Facebook + Instagram)
+// ============================================================================
+function MetaCard({ meta, posts, loading }: { meta: MetaStatus; posts: SocialPostLite[]; loading: boolean }) {
+  const connected = !!meta.connected;
+  const expired = !!meta.isExpired;
+  const pages = meta.pages || [];
+
+  function connectMeta() { window.location.href = '/api/auth/meta/start'; }
+  async function disconnectMeta() {
+    await fetch('/api/accounts/disconnect', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider: 'meta' }),
+    });
+    window.location.reload();
+  }
+
+  const headerStatus = loading
+    ? { tone: 'idle' as const, label: 'Checking…' }
+    : !connected
+      ? { tone: 'idle' as const, label: 'Not connected' }
+      : expired
+        ? { tone: 'warn' as const, label: 'Re-auth needed' }
+        : { tone: 'ok' as const, label: `${pages.length} page${pages.length === 1 ? '' : 's'}` };
+
+  return (
+    <div style={S.card}>
+      <ChannelHeader
+        glyph={<FacebookGlyph />}
+        title="Facebook Pages + Instagram"
+        subtitle={connected
+          ? `${pages.length} Page${pages.length === 1 ? '' : 's'} · ${pages.filter(p => p.hasInstagram).length} with Instagram`
+          : 'Connect a Facebook account to link all Pages and linked Instagram Business accounts in one click'}
+        status={headerStatus}
+        action={connected ? (
+          <div style={S.actionGroup}>
+            <button onClick={connectMeta} style={S.btnGhost}><RefreshCw size={12} />Reconnect</button>
+            <button onClick={disconnectMeta} style={S.btnDanger}>Disconnect</button>
           </div>
+        ) : (
+          <button onClick={connectMeta} style={S.btnFB}>
+            <FacebookGlyph size={16} color="#fff" /> Connect with Facebook
+          </button>
+        )}
+      />
 
-          {metaConnected&&metaPages.length>0&&(
-            <div style={{borderTop:'1px solid var(--ink-100)'}}>
-              {metaPages.map(page=>(
-                <div key={page.pageId} style={{padding:'12px 20px',borderBottom:'1px solid var(--ink-100)',display:'flex',alignItems:'center',gap:12}}>
-                  <div style={{width:32,height:32,borderRadius:'50%',background:'#dde9f7',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,fontSize:13,fontWeight:700,color:'#1877F2'}}>{page.pageName.charAt(0)}</div>
-                  <div style={{flex:1,minWidth:0}}>
-                    <div style={{fontSize:13,fontWeight:500,color:'var(--ink-900)'}}>{page.pageName}</div>
-                    <div style={{display:'flex',gap:6,marginTop:3,flexWrap:'wrap'}}>
-                      <span style={{fontSize:10,padding:'2px 7px',borderRadius:'var(--r-pill)',background:'#dde9f7',color:'#1877F2',fontWeight:500}}>Facebook Page</span>
-                      {page.instagramId&&<span style={{fontSize:10,padding:'2px 7px',borderRadius:'var(--r-pill)',background:'#fbeaef',color:'var(--maroon-600)',fontWeight:500}}>Instagram</span>}
+      {connected && pages.length > 0 && (
+        <div style={S.accList}>
+          {pages.map(page => {
+            const fbId = `meta-page:${page.id}`;
+            const igId = page.instagramId ? `meta-ig:${page.instagramId}` : null;
+            const fbLast = lastPublishFor(posts, fbId);
+            const igLast = igId ? lastPublishFor(posts, igId) : null;
+            return (
+              <div key={page.id}>
+                <AccountRow
+                  avatar={
+                    <div style={{ ...S.avatarSquare, background: '#1877F2' }}>
+                      <FacebookGlyph size={16} color="#fff" />
                     </div>
-                  </div>
-                  <CheckCircle size={16} color="var(--ok)"/>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {!metaConnected&&(
-            <div style={{padding:'16px 20px',borderTop:'1px solid var(--ink-100)',background:'var(--paper)',fontSize:11,color:'var(--ink-400)',lineHeight:1.6}}>
-              Clicking "Connect with Facebook" will open Facebook login. Select which Pages and Instagram accounts to grant access to. You'll be redirected back here automatically.
-            </div>
-          )}
+                  }
+                  name={<>{page.name} <span style={S.subtleMeta}>· Facebook Page</span></>}
+                  secondary={fbLast ? <>Last posted {timeAgo(fbLast)}</> : 'Ready to post — no posts yet'}
+                  statusLabel={fbLast ? `Posted ${timeAgo(fbLast)}` : 'Ready'}
+                  statusTone="ok"
+                />
+                {page.hasInstagram && (
+                  <AccountRow
+                    avatar={<div style={S.avatarSquare}><InstagramGlyph size={20} /></div>}
+                    name={<>{page.name} <span style={S.subtleMeta}>· Instagram Business</span></>}
+                    secondary={igLast ? <>Last posted {timeAgo(igLast)}</> : 'Ready to post — no posts yet'}
+                    statusLabel={igLast ? `Posted ${timeAgo(igLast)}` : 'Ready'}
+                    statusTone="ok"
+                  />
+                )}
+              </div>
+            );
+          })}
+          <div style={S.cardFootMeta}>
+            Connected {meta.connectedAt ? new Date(meta.connectedAt).toLocaleDateString('en-GB') : ''}
+          </div>
         </div>
+      )}
+    </div>
+  );
+}
 
-        {/* LinkedIn */}
-        <div style={{background:'var(--white)',border:'1px solid var(--ink-100)',borderRadius:'var(--r-lg)',padding:'18px 20px',display:'flex',alignItems:'center',gap:14}}>
-          <div style={{width:42,height:42,borderRadius:'var(--r-md)',background:'#e8f0fb',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M16 8a6 6 0 016 6v7h-4v-7a2 2 0 00-2-2 2 2 0 00-2 2v7h-4v-7a6 6 0 016-6z" stroke="#185FA5" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><rect x="2" y="9" width="4" height="12" stroke="#185FA5" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><circle cx="4" cy="4" r="2" stroke="#185FA5" strokeWidth="1.5"/></svg>
-          </div>
-          <div style={{flex:1}}>
-            <div style={{fontSize:14,fontWeight:600,color:'var(--ink-900)'}}>LinkedIn</div>
-            <div style={{fontSize:12,color:'var(--ink-500)',marginTop:2}}>Apply for API access — approval takes 3-7 days</div>
-          </div>
-          <a href="https://linkedin.com/developers" target="_blank" rel="noopener noreferrer" style={{...btnG,fontSize:11,padding:'6px 12px',textDecoration:'none'}}><ExternalLink size={12}/>Apply for access</a>
-        </div>
+// ============================================================================
+// LinkedIn — single unified card. Personal + each org as separate rows.
+// Pending Community Mgmt API surfaces inline.
+// ============================================================================
+function LinkedInCard({ linkedin, posts, loading }: { linkedin: LinkedInStatus; posts: SocialPostLite[]; loading: boolean }) {
+  const connected = !!linkedin.connected;
+  const expired = !!linkedin.isExpired;
+  const orgs = linkedin.organisations || [];
+  const canPostCompany = !!linkedin.capabilities?.postCompany;
 
-        {/* LinkedIn */}
-        <div style={{background:'var(--white)',border:'1px solid var(--ink-100)',borderRadius:'var(--r-lg)',overflow:'hidden'}}>
-          <div style={{padding:'18px 20px',display:'flex',alignItems:'center',gap:14}}>
-            <div style={{width:42,height:42,borderRadius:'var(--r-md)',background:'#e8f0fb',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M16 8a6 6 0 016 6v7h-4v-7a2 2 0 00-2-2 2 2 0 00-2 2v7h-4v-7a6 6 0 016-6z" stroke="#185FA5" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><rect x="2" y="9" width="4" height="12" stroke="#185FA5" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><circle cx="4" cy="4" r="2" stroke="#185FA5" strokeWidth="1.5"/></svg>
-            </div>
-            <div style={{flex:1}}>
-              <div style={{fontSize:14,fontWeight:600,color:'var(--ink-900)'}}>LinkedIn</div>
-              <div style={{fontSize:12,color:'var(--ink-500)',marginTop:2}}>{liConnected?`Connected as ${liAccount?.name}`:'Connect your LinkedIn account to post from the Social Calendar'}</div>
-            </div>
-            <div style={{display:'flex',gap:8,flexShrink:0,alignItems:'center'}}>
-              {liConnected?(
-                <>
-                  <span style={{display:'flex',alignItems:'center',gap:5,fontSize:12,color:'var(--ok)',fontWeight:500}}><CheckCircle size={14}/>Connected</span>
-                  <button onClick={connectLinkedIn} style={{...btnG,fontSize:11,padding:'6px 12px'}}><RefreshCw size={12}/>Reconnect</button>
-                  <button onClick={disconnectLinkedIn} style={{...btnG,fontSize:11,padding:'6px 12px',color:'var(--alert)',borderColor:'#f5c2c7'}}>Disconnect</button>
-                </>
-              ):(
-                <button onClick={connectLinkedIn} style={{...btnP,background:'#0A66C2',display:'inline-flex',alignItems:'center',gap:8}}>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="white"><path d="M16 8a6 6 0 016 6v7h-4v-7a2 2 0 00-2-2 2 2 0 00-2 2v7h-4v-7a6 6 0 016-6z"/><rect x="2" y="9" width="4" height="12" fill="white"/><circle cx="4" cy="4" r="2" fill="white"/></svg>
-                  Connect LinkedIn
-                </button>
-              )}
-            </div>
+  function connectLI() { window.location.href = '/api/auth/linkedin/start'; }
+  async function disconnectLI() {
+    await fetch('/api/accounts/disconnect', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider: 'linkedin' }),
+    });
+    window.location.reload();
+  }
+
+  const headerStatus = loading
+    ? { tone: 'idle' as const, label: 'Checking…' }
+    : !connected
+      ? { tone: 'idle' as const, label: 'Not connected' }
+      : expired
+        ? { tone: 'warn' as const, label: 'Re-auth needed' }
+        : { tone: 'ok' as const, label: `Connected as ${linkedin.name?.split(' ')[0] || 'you'}` };
+
+  return (
+    <div style={S.card}>
+      <ChannelHeader
+        glyph={<LinkedInGlyph />}
+        title="LinkedIn"
+        subtitle={connected
+          ? `Personal account${orgs.length > 0 ? ` + ${orgs.length} Company Page${orgs.length === 1 ? '' : 's'}` : ''}`
+          : 'Connect to publish to your personal feed and any Company Pages you administer'}
+        status={headerStatus}
+        action={connected ? (
+          <div style={S.actionGroup}>
+            <button onClick={connectLI} style={S.btnGhost}><RefreshCw size={12} />Reconnect</button>
+            <button onClick={disconnectLI} style={S.btnDanger}>Disconnect</button>
           </div>
-          {liConnected&&liAccount&&(
-            <div style={{borderTop:'1px solid var(--ink-100)'}}>
-              {/* Personal Account Row */}
-              <div style={{padding:'14px 20px',display:'flex',alignItems:'center',gap:12,borderBottom:'1px solid var(--ink-50)'}}>
-                {liAccount.picture
-                  ? <img src={liAccount.picture} alt="" style={{width:32,height:32,borderRadius:'50%',objectFit:'cover'}}/>
-                  : <div style={{width:32,height:32,borderRadius:'50%',background:'var(--ink-100)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,fontWeight:600,color:'var(--ink-500)'}}>{(liAccount.name||'?').slice(0,1)}</div>
+        ) : (
+          <button onClick={connectLI} style={S.btnLI}>
+            <LinkedInGlyph size={14} color="#fff" /> Connect LinkedIn
+          </button>
+        )}
+      />
+
+      {connected && (
+        <div style={S.accList}>
+          {/* Personal account */}
+          {(() => {
+            const id = `li-personal:${linkedin.memberUrn}`;
+            const last = lastPublishFor(posts, id);
+            const canPost = !!linkedin.capabilities?.postPersonal;
+            return (
+              <AccountRow
+                avatar={
+                  linkedin.picture
+                    ? <img src={linkedin.picture} alt="" style={S.avatarRound} />
+                    : <div style={{ ...S.avatarRound, background: 'var(--ink-100)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, color: 'var(--ink-500)' }}>{(linkedin.name || '?').slice(0, 1).toUpperCase()}</div>
                 }
-                <div style={{flex:1}}>
-                  <div style={{fontSize:13,fontWeight:600,color:'var(--ink-900)'}}>{liAccount.name} <span style={{fontSize:11,fontWeight:400,color:'var(--ink-400)',marginLeft:6}}>· Personal</span></div>
-                  <div style={{fontSize:11,color:'var(--ink-400)'}}>{liAccount.email}</div>
-                </div>
-                {liAccount.capabilities?.postPersonal
-                  ? <span style={{fontSize:11,color:'var(--ok)',display:'inline-flex',alignItems:'center',gap:4}}><CheckCircle size={14}/>Ready to post</span>
-                  : <span style={{fontSize:11,color:'var(--ink-400)'}}>Sign-in only</span>
+                name={<>{linkedin.name} <span style={S.subtleMeta}>· Personal</span></>}
+                secondary={last ? <>Last posted {timeAgo(last)} · {linkedin.email}</> : <>{linkedin.email || 'Personal feed'}</>}
+                statusLabel={canPost ? (last ? `Posted ${timeAgo(last)}` : 'Ready') : 'Sign-in only'}
+                statusTone={canPost ? 'ok' : 'idle'}
+              />
+            );
+          })()}
+
+          {/* Org rows — either approved (post) or pending (apply) */}
+          {orgs.length > 0
+            ? orgs.map(org => {
+                const id = `li-company:${org.urn}`;
+                const last = lastPublishFor(posts, id);
+                return (
+                  <AccountRow
+                    key={org.id}
+                    avatar={
+                      <div style={{ ...S.avatarSquare, background: '#0A66C2', color: '#fff', fontSize: 11, fontWeight: 700 }}>
+                        {org.name.slice(0, 2).toUpperCase()}
+                      </div>
+                    }
+                    name={<>{org.name} <span style={S.subtleMeta}>· Company Page</span></>}
+                    secondary={canPostCompany
+                      ? (last ? <>Last posted {timeAgo(last)}</> : 'Admin access')
+                      : <span style={{ color: 'var(--warn)' }}>Pending Community Management API approval</span>}
+                    statusLabel={canPostCompany ? (last ? `Posted ${timeAgo(last)}` : 'Ready') : 'Pending'}
+                    statusTone={canPostCompany ? 'ok' : 'warn'}
+                    action={!canPostCompany
+                      ? <a href="https://www.linkedin.com/developers/apps" target="_blank" rel="noopener noreferrer" style={S.linkAction}>
+                          <ExternalLink size={11} /> Apply
+                        </a>
+                      : undefined}
+                  />
+                );
+              })
+            : (
+              <AccountRow
+                avatar={<div style={{ ...S.avatarSquare, background: '#0A66C2', opacity: 0.4, color: '#fff', fontSize: 11, fontWeight: 700 }}>RL</div>}
+                name={<>Roam Local <span style={S.subtleMeta}>· Company Page</span></>}
+                secondary={<span style={{ color: 'var(--warn)' }}>Pending Community Management API approval</span>}
+                statusLabel="Pending"
+                statusTone="warn"
+                action={
+                  <a href="https://www.linkedin.com/developers/apps" target="_blank" rel="noopener noreferrer" style={S.linkAction}>
+                    <ExternalLink size={11} /> Apply
+                  </a>
                 }
-              </div>
-
-              {/* Company Page Row(s) */}
-              {liAccount.capabilities?.postCompany && (liAccount.organisations||[]).length>0
-                ? (liAccount.organisations||[]).map((org:any)=>(
-                    <div key={org.id} style={{padding:'14px 20px',display:'flex',alignItems:'center',gap:12,borderBottom:'1px solid var(--ink-50)'}}>
-                      <div style={{width:32,height:32,borderRadius:'var(--r-sm)',background:'#0A66C2',display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontSize:12,fontWeight:700}}>{(org.name||'?').slice(0,2).toUpperCase()}</div>
-                      <div style={{flex:1}}>
-                        <div style={{fontSize:13,fontWeight:600,color:'var(--ink-900)'}}>{org.name} <span style={{fontSize:11,fontWeight:400,color:'var(--ink-400)',marginLeft:6}}>· Company Page</span></div>
-                        <div style={{fontSize:11,color:'var(--ink-400)'}}>Admin access</div>
-                      </div>
-                      <span style={{fontSize:11,color:'var(--ok)',display:'inline-flex',alignItems:'center',gap:4}}><CheckCircle size={14}/>Ready to post</span>
-                    </div>
-                  ))
-                : (
-                    <div style={{padding:'14px 20px',display:'flex',alignItems:'center',gap:12,borderBottom:'1px solid var(--ink-50)',background:'var(--ink-50)'}}>
-                      <div style={{width:32,height:32,borderRadius:'var(--r-sm)',background:'#0A66C2',opacity:0.4,display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontSize:12,fontWeight:700}}>RL</div>
-                      <div style={{flex:1}}>
-                        <div style={{fontSize:13,fontWeight:600,color:'var(--ink-700)'}}>Roam Local <span style={{fontSize:11,fontWeight:400,color:'var(--ink-400)',marginLeft:6}}>· Company Page</span></div>
-                        <div style={{fontSize:11,color:'#b45309'}}>Pending Community Management API approval</div>
-                      </div>
-                      <a href="https://www.linkedin.com/developers/apps" target="_blank" rel="noopener noreferrer" style={{...btnG,fontSize:11,padding:'6px 12px',textDecoration:'none'}}><ExternalLink size={12}/>Apply for API</a>
-                    </div>
-                  )
-              }
-
-              {/* Action Row */}
-              <div style={{padding:'10px 20px',display:'flex',alignItems:'center',gap:8,fontSize:11,color:'var(--ink-500)'}}>
-                <span style={{flex:1}}>Connected {liAccount.connectedAt ? new Date(liAccount.connectedAt).toLocaleDateString() : ''}</span>
-                <button onClick={connectLinkedIn} style={{...btnG,fontSize:11,padding:'6px 12px'}}><RefreshCw size={12}/>Reconnect</button>
-                <button onClick={disconnectLinkedIn} style={{...btnG,fontSize:11,padding:'6px 12px',color:'var(--alert)',borderColor:'#f5c2c7'}}>Disconnect</button>
-              </div>
-            </div>
-          )}
-          {liError&&<div style={{padding:'10px 20px',borderTop:'1px solid var(--ink-100)',fontSize:12,color:'var(--alert)'}}>Connection failed: {liError}. Please try again.</div>}
-        </div>
-
-        {/* X/Twitter */}
-        <div style={{background:'var(--white)',border:'1px solid var(--ink-100)',borderRadius:'var(--r-lg)',padding:'18px 20px',display:'flex',alignItems:'center',gap:14}}>
-          <div style={{width:42,height:42,borderRadius:'var(--r-md)',background:'#f0f0f0',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M4 4l16 16M4 20L20 4" stroke="#333" strokeWidth="1.5" strokeLinecap="round"/></svg>
+              />
+            )
+          }
+          <div style={S.cardFootMeta}>
+            Connected {linkedin.connectedAt ? new Date(linkedin.connectedAt).toLocaleDateString('en-GB') : ''}
           </div>
-          <div style={{flex:1}}>
-            <div style={{fontSize:14,fontWeight:600,color:'var(--ink-900)'}}>X / Twitter</div>
-            <div style={{fontSize:12,color:'var(--ink-500)',marginTop:2}}>Apply for developer access at developer.twitter.com</div>
-          </div>
-          <a href="https://developer.twitter.com" target="_blank" rel="noopener noreferrer" style={{...btnG,fontSize:11,padding:'6px 12px',textDecoration:'none'}}><ExternalLink size={12}/>Apply for access</a>
         </div>
+      )}
+    </div>
+  );
+}
 
+// ============================================================================
+// Coming-soon row (X / etc.)
+// ============================================================================
+function ComingSoonRow() {
+  return (
+    <div style={S.comingCard}>
+      <div style={S.comingHead}>
+        <Sparkles size={13} />
+        <span>Coming next</span>
+      </div>
+      <div style={S.comingList}>
+        <a href="https://developer.twitter.com" target="_blank" rel="noopener noreferrer" style={S.comingItem}>
+          <span style={{ ...S.comingGlyph, background: '#000', color: '#fff' }}><XGlyph size={14} /></span>
+          <span style={S.comingItemMain}>
+            <span style={S.comingItemTitle}>X / Twitter</span>
+            <span style={S.comingItemSub}>Apply for developer access</span>
+          </span>
+          <ExternalLink size={12} color="var(--ink-400)" />
+        </a>
       </div>
     </div>
   );
 }
+
+// ============================================================================
+// Styles
+// ============================================================================
+const S: Record<string, React.CSSProperties> = {
+  page: { padding: '32px 28px 64px', maxWidth: 980, margin: '0 auto' },
+
+  header: { marginBottom: 32 },
+  eyebrow: {
+    fontSize: 10, fontWeight: 700, letterSpacing: '0.18em', textTransform: 'uppercase',
+    color: 'var(--maroon-600)', marginBottom: 12,
+  },
+  headline: {
+    fontFamily: 'var(--font-display)', fontSize: 44, lineHeight: 1.05,
+    color: 'var(--ink-900)', fontWeight: 400, letterSpacing: '-0.01em', marginBottom: 10,
+  },
+  emItalic: { fontStyle: 'italic', color: 'var(--maroon-600)', fontWeight: 400 },
+  subhead: {
+    fontSize: 14, lineHeight: 1.55, color: 'var(--ink-500)', maxWidth: 560,
+  },
+
+  errBanner: {
+    display: 'flex', alignItems: 'center', gap: 10,
+    background: '#fcebeb', border: '1px solid #f5c2c7', color: 'var(--alert)',
+    padding: '12px 16px', borderRadius: 'var(--r-md)', fontSize: 13, marginBottom: 20,
+  },
+  code: { fontFamily: 'ui-monospace, SFMono-Regular, monospace', fontSize: 12, padding: '1px 5px', background: 'rgba(0,0,0,0.06)', borderRadius: 4 },
+
+  stats: {
+    display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12,
+    marginBottom: 28,
+  },
+  statTile: {
+    position: 'relative', background: 'var(--white)', borderRadius: 'var(--r-lg)',
+    boxShadow: 'var(--shadow-sm)', padding: '16px 18px 18px', overflow: 'hidden',
+  },
+  statAccent: { position: 'absolute', top: 0, left: 0, right: 0, height: 3 },
+  statRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
+  statLabel: {
+    fontSize: 9.5, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-400)',
+  },
+  statIcon: { display: 'inline-flex' },
+  statValue: { fontFamily: 'var(--font-display)', fontSize: 36, lineHeight: 1, marginBottom: 4 },
+  statCaption: { fontSize: 11.5, color: 'var(--ink-500)' },
+
+  cards: { display: 'flex', flexDirection: 'column', gap: 14 },
+  card: {
+    background: 'var(--white)', borderRadius: 'var(--r-lg)',
+    boxShadow: 'var(--shadow-sm)', overflow: 'hidden',
+  },
+  channelHead: { display: 'flex', alignItems: 'center', gap: 14, padding: '18px 20px' },
+  channelGlyph: {
+    width: 44, height: 44, borderRadius: 'var(--r-md)', background: 'var(--paper)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+  },
+  channelTitle: { fontSize: 14.5, fontWeight: 700, color: 'var(--ink-900)', letterSpacing: '-0.005em' },
+  channelSub: { fontSize: 12.5, color: 'var(--ink-500)', marginTop: 2, lineHeight: 1.45 },
+
+  statusPill: {
+    display: 'inline-flex', alignItems: 'center', gap: 5,
+    fontSize: 11, fontWeight: 600, padding: '5px 10px', borderRadius: 'var(--r-pill)',
+    flexShrink: 0,
+  },
+  statusPillSm: {
+    display: 'inline-flex', alignItems: 'center', gap: 4,
+    fontSize: 10.5, fontWeight: 600, padding: '3px 9px', borderRadius: 'var(--r-pill)',
+    flexShrink: 0,
+  },
+
+  actionGroup: { display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 },
+
+  btnGhost: {
+    display: 'inline-flex', alignItems: 'center', gap: 5,
+    padding: '6px 12px', borderRadius: 'var(--r-sm)', border: '1.5px solid var(--ink-200)',
+    background: 'var(--white)', color: 'var(--ink-700)', fontSize: 11.5, fontWeight: 600, cursor: 'pointer',
+  },
+  btnDanger: {
+    display: 'inline-flex', alignItems: 'center', gap: 5,
+    padding: '6px 12px', borderRadius: 'var(--r-sm)', border: '1.5px solid #f5c2c7',
+    background: 'var(--white)', color: 'var(--alert)', fontSize: 11.5, fontWeight: 600, cursor: 'pointer',
+  },
+  btnFB: {
+    display: 'inline-flex', alignItems: 'center', gap: 8,
+    padding: '10px 16px', borderRadius: 'var(--r-md)', border: 'none',
+    background: '#1877F2', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+  },
+  btnLI: {
+    display: 'inline-flex', alignItems: 'center', gap: 8,
+    padding: '10px 16px', borderRadius: 'var(--r-md)', border: 'none',
+    background: '#0A66C2', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+  },
+
+  accList: { borderTop: '1px solid var(--ink-100)' },
+  accRow: {
+    display: 'flex', alignItems: 'center', gap: 12,
+    padding: '12px 20px', borderBottom: '1px solid var(--ink-100)',
+  },
+  avatarSquare: {
+    width: 32, height: 32, borderRadius: 'var(--r-sm)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, overflow: 'hidden',
+  },
+  avatarRound: {
+    width: 32, height: 32, borderRadius: '50%', objectFit: 'cover', flexShrink: 0,
+  },
+  accName: { fontSize: 13, fontWeight: 600, color: 'var(--ink-900)' },
+  accSec: { fontSize: 11, color: 'var(--ink-400)', marginTop: 2 },
+  subtleMeta: { fontSize: 11, fontWeight: 400, color: 'var(--ink-400)', marginLeft: 6 },
+
+  cardFootMeta: {
+    padding: '10px 20px', fontSize: 11, color: 'var(--ink-400)', textAlign: 'left',
+    background: 'var(--paper)',
+  },
+
+  linkAction: {
+    display: 'inline-flex', alignItems: 'center', gap: 4,
+    padding: '5px 10px', borderRadius: 'var(--r-sm)', border: '1.5px solid var(--ink-200)',
+    background: 'var(--white)', color: 'var(--ink-700)', fontSize: 11, fontWeight: 600,
+    textDecoration: 'none',
+  },
+
+  comingCard: {
+    background: 'transparent', border: '1px dashed var(--ink-200)',
+    borderRadius: 'var(--r-lg)', padding: '14px 16px', marginTop: 4,
+  },
+  comingHead: {
+    display: 'flex', alignItems: 'center', gap: 6,
+    fontSize: 10, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase',
+    color: 'var(--ink-400)', marginBottom: 10,
+  },
+  comingList: { display: 'flex', flexDirection: 'column', gap: 6 },
+  comingItem: {
+    display: 'flex', alignItems: 'center', gap: 12,
+    padding: '8px 10px', borderRadius: 'var(--r-sm)',
+    textDecoration: 'none', color: 'inherit',
+  },
+  comingGlyph: {
+    width: 28, height: 28, borderRadius: 'var(--r-sm)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+  },
+  comingItemMain: { flex: 1, display: 'flex', flexDirection: 'column' },
+  comingItemTitle: { fontSize: 13, fontWeight: 600, color: 'var(--ink-700)' },
+  comingItemSub: { fontSize: 11, color: 'var(--ink-400)', marginTop: 1 },
+};
