@@ -1,6 +1,7 @@
 [build]
   command = "next build"
   publish = ".next"
+  functions = "netlify/functions"
 
 [build.environment]
   NODE_VERSION = "18"
@@ -8,5 +9,5 @@
 [[plugins]]
   package = "@netlify/plugin-nextjs"
 
-# Scheduled function - runs daily at 9am UTC
-# Triggers auto follow-up sequences via /api/sequences
+# Scheduled functions live in netlify/functions/*.mts and declare their own
+# cron schedule via `export const config = { schedule: '...' }`.
