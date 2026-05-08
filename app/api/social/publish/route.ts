@@ -86,35 +86,72 @@ export async function POST(req: NextRequest) {
         isReshareDisabledByAuthor: false,
       };
 
-      // Image upload (optional)
+      // Image upload (optional). If the user attached an image we treat it as
+      // required: if the upload fails for any reason, we surface the error
+      // rather than silently posting text-only — that's a worse UX than seeing
+      // an error and being able to retry.
       if (imageUrl) {
-        try {
-          const initRes = await fetch('https://api.linkedin.com/rest/images?action=initializeUpload', {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-              'Content-Type': 'application/json',
-              'LinkedIn-Version': '202604',
-              'X-Restli-Protocol-Version': '2.0.0',
-            },
-            body: JSON.stringify({ initializeUploadRequest: { owner: authorUrn } }),
-          });
-          const initData = await initRes.json();
-          const uploadUrl = initData?.value?.uploadUrl;
-          const imageUrn = initData?.value?.image;
-          if (uploadUrl && imageUrn) {
-            const imgRes = await fetch(imageUrl);
-            const imgBuffer = await imgRes.arrayBuffer();
-            await fetch(uploadUrl, {
-              method: 'POST',
-              headers: { Authorization: `Bearer ${accessToken}` },
-              body: imgBuffer,
-            });
-            payload.content = { media: { id: imageUrn } };
-          }
-        } catch (imgErr) {
-          console.error('LinkedIn image upload failed:', imgErr);
+        const initRes = await fetch('https://api.linkedin.com/rest/images?action=initializeUpload', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+            'LinkedIn-Version': '202604',
+            'X-Restli-Protocol-Version': '2.0.0',
+          },
+          body: JSON.stringify({ initializeUploadRequest: { owner: authorUrn } }),
+        });
+        if (!initRes.ok) {
+          const initErr = await initRes.text();
+          console.error('LinkedIn image init failed:', initRes.status, initErr);
+          return NextResponse.json(
+            { ok: false, error: 'LinkedIn image upload init failed', details: initErr, accountId, platform },
+            { status: 502 }
+          );
         }
+        const initData = await initRes.json();
+        const uploadUrl = initData?.value?.uploadUrl;
+        const imageUrn = initData?.value?.image;
+        if (!uploadUrl || !imageUrn) {
+          console.error('LinkedIn init returned no uploadUrl/image:', initData);
+          return NextResponse.json(
+            { ok: false, error: 'LinkedIn did not return upload URL', details: initData, accountId, platform },
+            { status: 502 }
+          );
+        }
+
+        // Fetch the source image (the user's brain blob or upload).
+        const imgRes = await fetch(imageUrl);
+        if (!imgRes.ok) {
+          console.error('Source image fetch failed:', imgRes.status, imageUrl);
+          return NextResponse.json(
+            { ok: false, error: `Could not fetch source image (${imgRes.status})`, accountId, platform },
+            { status: 502 }
+          );
+        }
+        const imgBuffer = await imgRes.arrayBuffer();
+        const imgContentType = imgRes.headers.get('content-type') || 'image/jpeg';
+
+        // Upload to LinkedIn. Their docs use PUT with Content-Type set to the
+        // image's MIME type. (POST also works but PUT is what's documented.)
+        const uploadRes = await fetch(uploadUrl, {
+          method: 'PUT',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': imgContentType,
+          },
+          body: imgBuffer,
+        });
+        if (!uploadRes.ok) {
+          const uploadErr = await uploadRes.text().catch(() => '');
+          console.error('LinkedIn image upload failed:', uploadRes.status, uploadErr);
+          return NextResponse.json(
+            { ok: false, error: `LinkedIn image upload failed (${uploadRes.status})`, details: uploadErr, accountId, platform },
+            { status: 502 }
+          );
+        }
+
+        payload.content = { media: { id: imageUrn } };
       }
 
       const postRes = await fetch('https://api.linkedin.com/rest/posts', {
@@ -160,12 +197,37 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ ok: false, error: `No Facebook page for id ${metaPageId}` }, { status: 400 });
       }
 
+      // For posts WITH an image, use /photos with `url` so the image is the
+      // primary content. For text-only posts, use /feed with `message`.
+      // Posting via /feed with `link:` only works for shared web pages — it
+      // does NOT actually attach the image as a photo.
+      if (imageUrl) {
+        const photoRes = await fetch(`https://graph.facebook.com/v21.0/${page.id}/photos`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            url: imageUrl,
+            caption,
+            access_token: page.pageToken,
+          }),
+        });
+        const photoData = await photoRes.json();
+        if (photoData.error) {
+          return NextResponse.json({ ok: false, error: photoData.error.message, accountId, platform }, { status: 400 });
+        }
+        // /photos returns { id, post_id }. post_id is the timeline post URL anchor.
+        const postId = photoData.post_id || photoData.id;
+        return NextResponse.json({
+          ok: true, accountId, platform, postId,
+          postUrl: postId ? `https://www.facebook.com/${postId}` : null,
+        });
+      }
+
       const fbRes = await fetch(`https://graph.facebook.com/v21.0/${page.id}/feed`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: caption,
-          ...(imageUrl ? { link: imageUrl } : {}),
           access_token: page.pageToken,
         }),
       });
