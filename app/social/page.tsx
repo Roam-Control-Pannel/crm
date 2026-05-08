@@ -305,7 +305,7 @@ Return ONLY the caption text. No JSON, no markdown, no preamble. Just the captio
         body: JSON.stringify({ messages: [{ role: 'user', content: prompt }], model: 'claude-sonnet-4-5' }),
       });
       const data = await res.json();
-      const txt = (data.content?.[0]?.text || data.text || '').trim();
+      const txt = (typeof data.content === 'string' ? data.content : (data.content?.[0]?.text || data.text || '')).trim();
       if (txt) {
         setForm(f => ({ ...f, caption: txt }));
         addNotification({ type: 'info', title: 'Caption generated', body: 'Edit it as you like' });
@@ -431,7 +431,7 @@ Return EXACTLY ${genForm.postsPerAccount} posts as a JSON array. Each post is an
           body: JSON.stringify({ messages: [{ role: 'user', content: prompt }], model: 'claude-sonnet-4-5' }),
         });
         const data = await res.json();
-        const txt = data.content?.[0]?.text || data.text || '';
+        const txt = typeof data.content === 'string' ? data.content : (data.content?.[0]?.text || data.text || '');
         let generated: { caption: string }[] = [];
         try {
           const cleaned = txt.replace(/```json|```/g, '').trim();
