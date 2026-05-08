@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
-import { LayoutDashboard, CheckSquare, Users, Search, Mail, ArrowUpCircle, Settings, Menu, X, Brain, ListTodo, BookUser } from 'lucide-react';
+import { LayoutDashboard, CheckSquare, Users, Search, Mail, ArrowUpCircle, Settings, Menu, X, Brain, ListTodo, BookUser, BookOpen } from 'lucide-react';
 import NotificationCentre from './NotificationCentre';
 
 const navSections = [
@@ -27,6 +27,7 @@ const navSections = [
     label: 'Content',
     items: [
       { icon: ArrowUpCircle, label: 'Social Calendar', href: '/social' },
+      { icon: BookOpen, label: 'Briefs', href: '/briefs' },
       { icon: BookUser, label: 'Social Accounts', href: '/accounts' },
       { icon: Settings, label: 'Channels', href: '/channels' },
     ],
