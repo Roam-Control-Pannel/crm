@@ -160,7 +160,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ ok: false, error: `No Facebook page for id ${metaPageId}` }, { status: 400 });
       }
 
-      const fbRes = await fetch(`https://graph.facebook.com/v19.0/${page.id}/feed`, {
+      const fbRes = await fetch(`https://graph.facebook.com/v21.0/${page.id}/feed`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -206,7 +206,7 @@ export async function POST(req: NextRequest) {
 
       // Step 1: Create container
       const containerRes = await fetch(
-        `https://graph.facebook.com/v19.0/${page.instagramId}/media`,
+        `https://graph.facebook.com/v21.0/${page.instagramId}/media`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -220,7 +220,7 @@ export async function POST(req: NextRequest) {
 
       // Step 2: Publish
       const publishRes = await fetch(
-        `https://graph.facebook.com/v19.0/${page.instagramId}/media_publish`,
+        `https://graph.facebook.com/v21.0/${page.instagramId}/media_publish`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
