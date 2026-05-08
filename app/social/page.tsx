@@ -121,6 +121,9 @@ export default function SocialPage() {
   const [platFilter, setPlatFilter] = useState('all');
   const [acctFilter, setAcctFilter] = useState('all');
 
+  // Drag-and-drop: which day index (0-41 in calDays) is being hovered as a drop target
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
+
   const [showComposer, setShowComposer] = useState(false);
   const [editPost, setEditPost] = useState<SocialPost | null>(null);
   const [form, setForm] = useState({
@@ -203,6 +206,19 @@ export default function SocialPage() {
       savePosts(next);
       return next;
     });
+  }
+
+  // Move a post to a different calendar day (drag-and-drop).
+  // Time is reset to 10:00 local. Published / failed / publishing posts are not movable.
+  function movePost(postId: string, targetYear: number, targetMonth: number, targetDay: number) {
+    updatePosts(prev => prev.map(p => {
+      if (p.id !== postId) return p;
+      if (p.status !== 'draft' && p.status !== 'scheduled') return p;
+      const next = new Date(targetYear, targetMonth, targetDay, 10, 0, 0, 0);
+      const current = new Date(p.scheduledAt);
+      if (next.getTime() === current.getTime()) return p;
+      return { ...p, scheduledAt: next.toISOString() };
+    }));
   }
 
   function openComposer(p?: SocialPost) {
@@ -573,12 +589,22 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
     const accs = post.accountIds.map(id => accounts.find(a => a.id === id)).filter(Boolean) as SocialAccount[];
     const primary = accs[0];
     if (!primary) return null;
+    const canDrag = post.status === 'draft' || post.status === 'scheduled';
     return (
-      <div onClick={e => { e.stopPropagation(); openComposer(post); }} style={{
+      <div
+        draggable={canDrag}
+        onDragStart={canDrag ? (e) => {
+          e.stopPropagation();
+          e.dataTransfer.setData('text/plain', post.id);
+          e.dataTransfer.effectAllowed = 'move';
+        } : undefined}
+        onClick={e => { e.stopPropagation(); openComposer(post); }}
+        title={canDrag ? 'Drag to a different day to reschedule' : undefined}
+        style={{
         background: primary.color + '22', borderLeft: `3px solid ${primary.color}`,
         padding: '3px 6px', marginBottom: 2, borderRadius: 'var(--r-sm)',
         fontSize: 10, color: 'var(--ink-700)', display: 'flex', alignItems: 'center', gap: 4,
-        cursor: 'pointer', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis',
+        cursor: canDrag ? 'grab' : 'pointer', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis',
       }}>
         <PlatformIcon platform={primary.platform} size={9} />
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{primary.handle}{accs.length > 1 ? ` +${accs.length - 1}` : ''}</span>
@@ -718,8 +744,30 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
             {calDays.map((day, i) => {
               const isToday = day === today.getDate() && calM === today.getMonth() && calY === today.getFullYear();
               const dp = day ? postsForDay(day) : [];
+              const isDropTarget = day !== null && dragOverIdx === i;
               return (
-                <div key={i} style={{ minHeight: 88, padding: 5, borderRight: i % 7 !== 6 ? '1px solid var(--ink-100)' : 'none', borderBottom: i < 35 ? '1px solid var(--ink-100)' : 'none', background: isToday ? 'var(--maroon-50)' : 'var(--white)', cursor: day ? 'pointer' : 'default' }} onClick={() => { if (day) { setForm(f => ({ ...f, scheduledDate: calY + '-' + String(calM + 1).padStart(2, '0') + '-' + String(day).padStart(2, '0') })); openComposer(); } }}>
+                <div
+                  key={i}
+                  onDragOver={day ? (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (dragOverIdx !== i) setDragOverIdx(i); } : undefined}
+                  onDragLeave={day ? (e) => { if (dragOverIdx === i) setDragOverIdx(null); } : undefined}
+                  onDrop={day ? (e) => {
+                    e.preventDefault();
+                    setDragOverIdx(null);
+                    const postId = e.dataTransfer.getData('text/plain');
+                    if (postId) movePost(postId, calY, calM, day);
+                  } : undefined}
+                  style={{
+                    minHeight: 88, padding: 5,
+                    borderRight: i % 7 !== 6 ? '1px solid var(--ink-100)' : 'none',
+                    borderBottom: i < 35 ? '1px solid var(--ink-100)' : 'none',
+                    background: isDropTarget ? 'var(--maroon-100, #f5e6e8)' : (isToday ? 'var(--maroon-50)' : 'var(--white)'),
+                    outline: isDropTarget ? '2px dashed var(--maroon-700)' : 'none',
+                    outlineOffset: '-2px',
+                    cursor: day ? 'pointer' : 'default',
+                    transition: 'background 80ms ease',
+                  }}
+                  onClick={() => { if (day) { setForm(f => ({ ...f, scheduledDate: calY + '-' + String(calM + 1).padStart(2, '0') + '-' + String(day).padStart(2, '0') })); openComposer(); } }}
+                >
                   {day && (<>
                     <div style={{ fontSize: 11, fontWeight: isToday ? 700 : 400, color: isToday ? 'var(--maroon-700)' : 'var(--ink-400)', marginBottom: 3 }}>{day}{isToday && <span style={{ marginLeft: 4, fontSize: 9, background: 'var(--maroon-700)', color: 'white', padding: '1px 5px', borderRadius: 'var(--r-pill)' }}>today</span>}</div>
                     {dp.slice(0, 3).map(p => <PostPill key={p.id} post={p} />)}
