@@ -482,7 +482,7 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
         const res = await fetch('/api/ai/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ messages: [{ role: 'user', content: prompt }], model: 'claude-sonnet-4-5' }),
+          body: JSON.stringify({ messages: [{ role: 'user', content: prompt }] }),
         });
         const data = await res.json();
         const txt = typeof data.content === 'string' ? data.content : (data.content?.[0]?.text || data.text || '');
