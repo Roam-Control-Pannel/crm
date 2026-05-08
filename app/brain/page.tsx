@@ -215,7 +215,7 @@ export default function BrainPage() {
                 await handleUpload(f);
               }
               e.target.value = '';
-            }}}
+            }}
             style={{ display: 'none' }}
           />
         </div>
