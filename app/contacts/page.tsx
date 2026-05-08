@@ -1,6 +1,7 @@
 'use client';
 import {useState,useEffect,useCallback} from "react";
 import {Send,Plus,Pencil,X,Mail,Clock,CheckCircle,AlertCircle,Info,Star,MessageSquare,UserPlus,Search} from 'lucide-react';
+import {BrevoListSelector} from '@/components/BrevoListSelector';
 import {addNotification} from "@/components/NotificationCentre";
 
 interface Contact {id:number;email:string;attributes:Record<string,string>;listIds?:number[];}
@@ -196,10 +197,17 @@ export default function ContactsPage(){
   const [selectedContact,setSelectedContact]=useState<Contact|null>(null);
   const [form,setForm]=useState({name:'',email:'',town:'',type:'Restaurant',website:'',phone:'',source:'manual',status:'not_contacted',notes:'',listId:''});
 
-  const loadContacts=useCallback((listId?:string)=>{
+  const loadContacts=useCallback(async(listId?:string)=>{
     setLoading(true);
     const url=listId?`/api/brevo/contacts?limit=500&listId=${listId}`:`/api/brevo/contacts?limit=500`;
-    fetch(url).then(r=>r.json()).then(d=>{setContacts(d.contacts||[]);setLoading(false);}).catch(()=>setLoading(false));
+    try{
+      const d=await fetch(url,{cache:'no-store'}).then(r=>r.json());
+      setContacts(d.contacts||[]);
+    }catch{
+      setContacts([]);
+    }finally{
+      setLoading(false);
+    }
   },[]);
 
   useEffect(()=>{loadContacts();fetch('/api/brevo/lists').then(r=>r.ok?r.json():Promise.resolve({lists:[]})).then(d=>setLists(d.lists||[])).catch(()=>{});},[loadContacts]);
@@ -283,16 +291,21 @@ export default function ContactsPage(){
         </div>
       </div>
 
+      {/* List selector + sync */}
+      <div style={{marginBottom:12}}>
+        <BrevoListSelector
+          value={listFilter?Number(listFilter):null}
+          onChange={(id)=>handleListFilter(id===null?'':String(id))}
+          onSync={()=>loadContacts(listFilter||undefined)}
+        />
+      </div>
+
       {/* Filter bar */}
       <div style={{display:'flex',gap:8,marginBottom:16,alignItems:'center'}} className="filter-bar">
         <div style={{flex:2,position:'relative'}}>
           <Search size={13} style={{position:'absolute',left:11,top:'50%',transform:'translateY(-50%)',color:'var(--ink-400)',pointerEvents:'none'}}/>
           <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search name, email, town…" style={{...inp,paddingLeft:34}}/>
         </div>
-        {lists.length>0&&<select value={listFilter} onChange={e=>handleListFilter(e.target.value)} style={{...inp,width:'auto',flex:1.5,minWidth:180,cursor:'pointer'}}>
-          <option value="">📋 All Contacts</option>
-          {lists.map(l=><option key={l.id} value={l.id}>{l.name} ({l.uniqueSubscribers})</option>)}
-        </select>}
         <select value={townFilter} onChange={e=>setTownFilter(e.target.value)} style={{...inp,width:'auto',flex:1,minWidth:120,cursor:'pointer'}}>
           <option value="">All Towns</option>
           {towns.map(t=><option key={t}>{t}</option>)}

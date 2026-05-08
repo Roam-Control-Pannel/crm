@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import { Mail, Settings, TrendingUp, CheckCircle, AlertCircle, Clock, Play } from 'lucide-react';
+import { BrevoListSelector } from '@/components/BrevoListSelector';
 
 interface Stats {
   total: number;
@@ -98,10 +99,15 @@ export default function SequencesPage() {
   const [runError, setRunError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<number | null>(1);
   const [loadingStats, setLoadingStats] = useState(true);
+  const [activeListId, setActiveListId] = useState<number | null>(null);
 
   const loadStats = useCallback(async () => {
+    setLoadingStats(true);
     try {
-      const d = await fetch('/api/brevo/contacts?limit=500').then(r => r.json());
+      const url = activeListId !== null
+        ? `/api/brevo/contacts?limit=500&listId=${activeListId}`
+        : '/api/brevo/contacts?limit=500';
+      const d = await fetch(url, { cache: 'no-store' }).then(r => r.json());
       const contacts = d.contacts || [];
       let emailSent = 0, followUpDue = 0, delivered = 0, opened = 0, clicked = 0,
           bounced = 0, listed = 0, unsubscribed = 0;
@@ -124,7 +130,7 @@ export default function SequencesPage() {
     } finally {
       setLoadingStats(false);
     }
-  }, []);
+  }, [activeListId]);
 
   const loadCronStatus = useCallback(async () => {
     try {
@@ -145,7 +151,14 @@ export default function SequencesPage() {
     setRunResult(null);
     setRunError(null);
     try {
-      const res = await fetch('/api/sequences/run-now', { method: 'POST' });
+      // When a list is active, scope the manual run to that list. The
+      // scheduled cron continues to process all contacts regardless.
+      const body = activeListId !== null ? JSON.stringify({ listId: activeListId }) : undefined;
+      const res = await fetch('/api/sequences/run-now', {
+        method: 'POST',
+        headers: body ? { 'Content-Type': 'application/json' } : undefined,
+        body,
+      });
       const data = await res.json();
       if (!res.ok) {
         setRunError(data?.error || `Run failed (${res.status})`);
@@ -169,9 +182,13 @@ export default function SequencesPage() {
         </div>
         <div className="btn-row">
           <button onClick={runSequences} disabled={running} className="btn-primary" style={{ fontSize: 12, opacity: running ? 0.6 : 1, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-            <Play size={12} fill="currentColor" /> {running ? 'Running…' : 'Run sequences now'}
+            <Play size={12} fill="currentColor" /> {running ? 'Running…' : (activeListId !== null ? 'Run for this list now' : 'Run sequences now')}
           </button>
         </div>
+      </div>
+
+      <div style={{ marginBottom: 16 }}>
+        <BrevoListSelector value={activeListId} onChange={setActiveListId} onSync={() => Promise.all([loadStats(), loadCronStatus()]).then(() => {})}/>
       </div>
 
       <div style={{

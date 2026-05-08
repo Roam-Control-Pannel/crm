@@ -121,6 +121,12 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: auth.reason || 'Unauthorized' }, { status: 401 });
   }
 
+  // Optional list filter — used by the manual "Run sequences now" button when
+  // a list is selected on the /sequences page. The scheduled cron always
+  // runs without a listId so it processes all contacts.
+  const { searchParams } = new URL(req.url);
+  const listId = searchParams.get('listId');
+
   const now = new Date();
   const todayDate = now.toISOString().slice(0, 10);
   const counts = { day2: 0, day7: 0, day14: 0, errors: 0, processed: 0 };
@@ -129,7 +135,10 @@ export async function GET(req: NextRequest) {
   try {
     // Pull a generous batch of contacts from Brevo. 500 is plenty for the
     // single-user CRM scale; we can paginate when we outgrow it.
-    const data = await brevoGet('/contacts?limit=500&sort=desc');
+    const path = listId
+      ? `/contacts/lists/${encodeURIComponent(listId)}/contacts?limit=500&sort=desc`
+      : '/contacts?limit=500&sort=desc';
+    const data = await brevoGet(path);
     const contacts: BrevoContact[] = data.contacts || [];
     counts.processed = contacts.length;
 

@@ -20,9 +20,26 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'CRON_SECRET_V2 not configured' }, { status: 500 });
   }
 
-  const origin = new URL(req.url).origin;
+  // Optional listId from the UI. When present, sequences only processes
+  // contacts in that Brevo list. Body-parsing failures are non-fatal —
+  // an empty body just means "all contacts".
+  let listId: number | null = null;
   try {
-    const res = await fetch(`${origin}/api/sequences`, {
+    const body = await req.json();
+    if (body && typeof body.listId === 'number') {
+      listId = body.listId;
+    }
+  } catch {
+    // No body, that's fine.
+  }
+
+  const origin = new URL(req.url).origin;
+  const target = listId
+    ? `${origin}/api/sequences?listId=${encodeURIComponent(listId)}`
+    : `${origin}/api/sequences`;
+
+  try {
+    const res = await fetch(target, {
       method: 'GET',
       headers: { 'x-internal-call': secret },
     });
