@@ -1,8 +1,8 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { Edit3, Pause, Play, RefreshCw, AlertTriangle, Check, X } from 'lucide-react';
-import { Brief, getBriefs } from '@/lib/briefs';
-import { RealAccount, SocialAccount, fetchRealAccounts, combineAccounts, upsertAccountMeta } from '@/lib/social-accounts';
+import { Brief, fetchBriefs } from '@/lib/briefs';
+import { RealAccount, SocialAccount, AccountMeta, fetchRealAccounts, combineAccounts, upsertAccountMeta, fetchAccountMeta } from '@/lib/social-accounts';
 
 const inp = {
   width: '100%',
@@ -81,6 +81,7 @@ export default function AccountsPage() {
   const [realAccounts, setRealAccounts] = useState<RealAccount[]>([]);
   const [briefs, setBriefs] = useState<Brief[]>([]);
   const [accounts, setAccounts] = useState<SocialAccount[]>([]);
+  const [accountMeta, setAccountMeta] = useState<AccountMeta[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<SocialAccount | null>(null);
   const [editForm, setEditForm] = useState({
@@ -92,11 +93,15 @@ export default function AccountsPage() {
 
   async function load() {
     setLoading(true);
-    const [real] = await Promise.all([fetchRealAccounts()]);
-    const briefsData = getBriefs();
+    const [real, briefsData, metas] = await Promise.all([
+      fetchRealAccounts(),
+      fetchBriefs(),
+      fetchAccountMeta(),
+    ]);
     setRealAccounts(real);
     setBriefs(briefsData);
-    setAccounts(combineAccounts(real, briefsData));
+    setAccountMeta(metas);
+    setAccounts(combineAccounts(real, briefsData, metas));
     setLoading(false);
   }
 
@@ -114,22 +119,24 @@ export default function AccountsPage() {
     });
   }
 
-  function saveEdit() {
+  async function saveEdit() {
     if (!editing) return;
-    upsertAccountMeta({
+    const updated = await upsertAccountMeta({
       accountId: editing.id,
       briefId: editForm.briefId || undefined,
       toneOverride: editForm.toneOverride || undefined,
       hashtagsOverride: editForm.hashtagsOverride || undefined,
       contentBriefOverride: editForm.contentBriefOverride || undefined,
     });
-    setAccounts(combineAccounts(realAccounts, briefs));
+    setAccountMeta(updated);
+    setAccounts(combineAccounts(realAccounts, briefs, updated));
     setEditing(null);
   }
 
-  function toggleActive(a: SocialAccount) {
-    upsertAccountMeta({ accountId: a.id, active: !a.active });
-    setAccounts(combineAccounts(realAccounts, briefs));
+  async function toggleActive(a: SocialAccount) {
+    const updated = await upsertAccountMeta({ accountId: a.id, active: !a.active });
+    setAccountMeta(updated);
+    setAccounts(combineAccounts(realAccounts, briefs, updated));
   }
 
   // Group accounts by platform for display

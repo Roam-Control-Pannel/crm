@@ -1,4 +1,5 @@
 import type { Brief } from './briefs';
+import { loadWithMigration, saveRemote } from './client-store';
 
 /**
  * Real account from /api/accounts/status — server-derived from OAuth tokens.
@@ -20,7 +21,7 @@ export interface RealAccount {
 }
 
 /**
- * Per-account metadata stored locally — overrides + brief mapping.
+ * Per-account metadata stored in the server store — overrides + brief mapping.
  */
 export interface AccountMeta {
   accountId: string;        // matches RealAccount.id
@@ -45,54 +46,50 @@ export interface SocialAccount extends RealAccount {
   color: string;
 }
 
-const META_KEY = 'roam_account_meta';
-
-/**
- * Default colour palette for accounts — used when no override is set.
- * Picks based on platform.
- */
 const PLATFORM_DEFAULT_COLORS: Record<string, string> = {
   linkedin: '#0A66C2',
   facebook: '#1877F2',
   instagram: '#E4405F',
 };
 
-export function getAccountMeta(): AccountMeta[] {
-  if (typeof window === 'undefined') return [];
-  try {
-    const raw = localStorage.getItem(META_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
+/**
+ * Fetch account metadata from the server store. Migrates legacy localStorage
+ * data on first call.
+ */
+export async function fetchAccountMeta(): Promise<AccountMeta[]> {
+  const data = await loadWithMigration<AccountMeta[]>('account_meta');
+  return Array.isArray(data) ? data : [];
 }
 
-export function saveAccountMeta(metas: AccountMeta[]) {
-  if (typeof window === 'undefined') return;
-  localStorage.setItem(META_KEY, JSON.stringify(metas));
+export async function saveAccountMeta(metas: AccountMeta[]): Promise<void> {
+  await saveRemote('account_meta', metas);
 }
 
-export function upsertAccountMeta(patch: AccountMeta) {
-  const all = getAccountMeta();
+/**
+ * Upsert a single piece of account metadata. Reads current state, applies the
+ * patch, writes back. Returns the new full list.
+ */
+export async function upsertAccountMeta(patch: AccountMeta): Promise<AccountMeta[]> {
+  const all = await fetchAccountMeta();
   const idx = all.findIndex(m => m.accountId === patch.accountId);
   if (idx === -1) {
     all.push(patch);
   } else {
     all[idx] = { ...all[idx], ...patch };
   }
-  saveAccountMeta(all);
+  await saveAccountMeta(all);
   return all;
 }
 
 /**
- * Combine a list of real accounts with locally stored metadata + brief data
+ * Combine a list of real accounts with metadata + brief data
  * to produce the UI-ready SocialAccount[] list.
  */
 export function combineAccounts(
   real: RealAccount[],
-  briefs: Brief[]
+  briefs: Brief[],
+  metas: AccountMeta[]
 ): SocialAccount[] {
-  const metas = getAccountMeta();
   return real.map(r => {
     const meta = metas.find(m => m.accountId === r.id);
     const brief = meta?.briefId ? briefs.find(b => b.id === meta.briefId) : undefined;
