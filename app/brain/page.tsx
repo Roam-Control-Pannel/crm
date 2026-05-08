@@ -211,9 +211,9 @@ export default function BrainPage() {
             multiple
             onChange={async e => {
               const files = Array.from(e.target.files || []);
-              for (const f of files) {
-                await handleUpload(f);
-              }
+
+
+
               e.target.value = '';
             }}
             style={{ display: 'none' }}
