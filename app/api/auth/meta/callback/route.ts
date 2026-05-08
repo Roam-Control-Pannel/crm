@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
       client_secret: appSecret || '',
       code,
     });
-    const tokenRes = await fetch(`https://graph.facebook.com/v19.0/oauth/access_token?${tokenParams}`);
+    const tokenRes = await fetch(`https://graph.facebook.com/v21.0/oauth/access_token?${tokenParams}`);
     const tokenData = await tokenRes.json();
 
     if (!tokenData.access_token) {
@@ -42,13 +42,13 @@ export async function GET(req: NextRequest) {
     }
 
     // Step 2: Exchange short-lived for long-lived (60 day) token
-    const longUrl = `https://graph.facebook.com/v19.0/oauth/access_token?grant_type=fb_exchange_token&client_id=${appId}&client_secret=${appSecret}&fb_exchange_token=${tokenData.access_token}`;
+    const longUrl = `https://graph.facebook.com/v21.0/oauth/access_token?grant_type=fb_exchange_token&client_id=${appId}&client_secret=${appSecret}&fb_exchange_token=${tokenData.access_token}`;
     const longRes = await fetch(longUrl);
     const longData = await longRes.json();
     const userToken = longData.access_token || tokenData.access_token;
 
     // Step 3: Get list of pages user manages, with page tokens
-    const pagesRes = await fetch(`https://graph.facebook.com/v19.0/me/accounts?access_token=${userToken}&fields=id,name,access_token,instagram_business_account`);
+    const pagesRes = await fetch(`https://graph.facebook.com/v21.0/me/accounts?access_token=${userToken}&fields=id,name,access_token,instagram_business_account`);
     const pagesData = await pagesRes.json();
 
     const pages = (pagesData.data || []).map((p: any) => ({
