@@ -7,7 +7,7 @@ export const maxDuration = 60;
 /**
  * Server-side proxy for "Run sequences now" button on /sequences.
  *
- * The /api/sequences endpoint requires the CRON_SECRET. We don't want to
+ * The /api/sequences endpoint requires the CRON_SECRET_V2. We don't want to
  * ship that secret to the browser, so the UI POSTs here, and this server
  * route adds the secret server-side and forwards the call.
  *
@@ -15,9 +15,9 @@ export const maxDuration = 60;
  */
 
 export async function POST(req: NextRequest) {
-  const secret = process.env.CRON_SECRET;
+  const secret = process.env.CRON_SECRET_V2;
   if (!secret) {
-    return NextResponse.json({ error: 'CRON_SECRET not configured' }, { status: 500 });
+    return NextResponse.json({ error: 'CRON_SECRET_V2 not configured' }, { status: 500 });
   }
 
   const origin = new URL(req.url).origin;

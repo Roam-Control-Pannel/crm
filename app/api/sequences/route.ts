@@ -19,7 +19,7 @@ export const maxDuration = 60;
  * blob the /sequences UI reads.
  *
  * Auth modes:
- *   - Bearer ${CRON_SECRET} on Authorization header (used by the scheduled
+ *   - Bearer ${CRON_SECRET_V2} on Authorization header (used by the scheduled
  *     Netlify Function and any external cron caller)
  *   - Internal call from /api/sequences/run-now via x-internal-call header
  *     (the server proxies user clicks through there so the secret never
@@ -36,9 +36,9 @@ const BREVO_BASE = 'https://api.brevo.com/v3';
 const SENDER = { name: 'Roam Local Team', email: 'hello@roam-everywhere.com' };
 
 function authorize(req: NextRequest): { ok: boolean; reason?: string } {
-  const secret = process.env.CRON_SECRET;
+  const secret = process.env.CRON_SECRET_V2;
   if (!secret) {
-    return { ok: false, reason: 'CRON_SECRET not configured' };
+    return { ok: false, reason: 'CRON_SECRET_V2 not configured' };
   }
   const auth = req.headers.get('authorization');
   if (auth === `Bearer ${secret}`) return { ok: true };

@@ -18,11 +18,11 @@ import type { Config } from '@netlify/functions';
 
 export default async () => {
   const url = process.env.URL || 'https://roam-crm-platform.netlify.app';
-  const secret = process.env.CRON_SECRET;
+  const secret = process.env.CRON_SECRET_V2;
 
   if (!secret) {
-    console.error('[scheduled:sequences] CRON_SECRET not set; aborting.');
-    return new Response(JSON.stringify({ error: 'CRON_SECRET not configured' }), { status: 500 });
+    console.error('[scheduled:sequences] CRON_SECRET_V2 not set; aborting.');
+    return new Response(JSON.stringify({ error: 'CRON_SECRET_V2 not configured' }), { status: 500 });
   }
 
   try {
