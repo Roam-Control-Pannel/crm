@@ -133,10 +133,16 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    // 2. AI auto-tag
-    const base64 = Buffer.from(arrayBuffer).toString('base64');
-    const mediaType = file.type || 'image/jpeg';
-    const { tags, description } = await autoTagImage(base64, mediaType);
+    // 2. AI auto-tag (images only — Claude vision can't read PDFs as base64 image)
+    const mediaType = file.type || 'application/octet-stream';
+    let tags: string[] = [];
+    let description = '';
+    if (mediaType.startsWith('image/')) {
+      const base64 = Buffer.from(arrayBuffer).toString('base64');
+      const result = await autoTagImage(base64, mediaType);
+      tags = result.tags;
+      description = result.description;
+    }
 
     // 3. Save metadata to brain store
     const item: Item = {

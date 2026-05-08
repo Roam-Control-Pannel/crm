@@ -38,7 +38,8 @@ export default function BrainPicker({ open, onClose, onPick }: BrainPickerProps)
   }, [open]);
 
   const visibleItems = useMemo(() => {
-    let list = items;
+    // Only show images — PDFs and other docs aren't attachable to social posts
+    let list = items.filter(i => i.mime?.startsWith('image/'));
     if (folderFilter) {
       list = list.filter(i => i.folderId === folderFilter);
     }

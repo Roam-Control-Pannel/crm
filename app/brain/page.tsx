@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { Plus, FolderPlus, Folder as FolderIcon, ChevronRight, Upload, X, Edit3, Trash2, Search, Brain as BrainIcon, ChevronDown, Image as ImageIcon, Loader } from 'lucide-react';
+import { Plus, FolderPlus, Folder as FolderIcon, ChevronRight, Upload, X, Edit3, Trash2, Search, Brain as BrainIcon, ChevronDown, Image as ImageIcon, Loader, FileText } from 'lucide-react';
 import {
   Folder, BrainItem, FolderNode,
   fetchFolders, createFolder, renameFolder, deleteFolder,
@@ -209,7 +209,13 @@ export default function BrainPage() {
             type="file"
             accept="image/*"
             multiple
-            onChange={e => { handleUpload(e.target.files); e.currentTarget.value = ''; }}
+            onChange={async e => {
+              const files = Array.from(e.target.files || []);
+              for (const f of files) {
+                await handleUpload(f);
+              }
+              e.target.value = '';
+            }}}
             style={{ display: 'none' }}
           />
         </div>
@@ -338,7 +344,12 @@ export default function BrainPage() {
                   onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; }}
                 >
                   <div style={{ width: '100%', height: 130, background: 'var(--paper)', position: 'relative' }}>
-                    <img src={imageUrl(item)} alt={item.description} style={{ width: '100%', height: '100%', objectFit: 'cover' }}/>
+                    {item.mime?.startsWith('image/')
+                      ? <img src={imageUrl(item)} alt={item.description} style={{ width: '100%', height: '100%', objectFit: 'cover' }}/>
+                      : <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#fef2f2', color: '#dc2626', gap: 6 }}>
+                          <FileText size={32} />
+                          <div style={{ fontSize: 9, fontWeight: 600, letterSpacing: '0.08em' }}>PDF</div>
+                        </div>}
                   </div>
                   <div style={{ padding: 10 }}>
                     <div style={{ fontSize: 11, color: 'var(--ink-700)', lineHeight: 1.4, height: 30, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', textOverflow: 'ellipsis' }}>
@@ -372,7 +383,9 @@ export default function BrainPage() {
               <button onClick={() => setEditing(null)} style={{ ...btnG, padding: '4px 8px' }}><X size={13}/></button>
             </div>
             <div style={{ padding: 20, overflowY: 'auto', flex: 1 }}>
-              <img src={imageUrl(editing)} alt="" style={{ width: '100%', maxHeight: 280, objectFit: 'contain', background: 'var(--paper)', borderRadius: 'var(--r-md)', marginBottom: 14 }}/>
+              {editing.mime?.startsWith('image/')
+                ? <img src={imageUrl(editing)} alt="" style={{ width: '100%', maxHeight: 280, objectFit: 'contain', background: 'var(--paper)', borderRadius: 'var(--r-md)', marginBottom: 14 }}/>
+                : <iframe src={imageUrl(editing)} style={{ width: '100%', height: 420, border: '1px solid var(--ink-100)', borderRadius: 'var(--r-md)', marginBottom: 14, background: 'var(--paper)' }} title="PDF preview"/>}
 
               <div style={{ marginBottom: 14 }}>
                 <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--ink-600)', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Description</label>
