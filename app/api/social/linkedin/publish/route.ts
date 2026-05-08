@@ -1,25 +1,36 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getLinkedInTokens, DEFAULT_USER_ID } from '@/lib/tokens';
 
 export const dynamic = 'force-dynamic';
 
 interface PublishBody {
   text: string;
-  authorUrn: string;
-  accessToken: string;
+  authorUrn?: string;
   imageUrl?: string;
 }
 
 export async function POST(req: NextRequest) {
   try {
     const body: PublishBody = await req.json();
-    const { text, authorUrn, accessToken, imageUrl } = body;
+    const { text, imageUrl } = body;
 
-    if (!text || !authorUrn || !accessToken) {
+    if (!text) {
       return NextResponse.json(
-        { ok: false, error: 'Missing required fields: text, authorUrn, accessToken' },
+        { ok: false, error: 'Missing required field: text' },
         { status: 400 }
       );
     }
+
+    const li = await getLinkedInTokens(DEFAULT_USER_ID);
+    if (!li?.accessToken || !li.memberUrn) {
+      return NextResponse.json(
+        { ok: false, error: 'LinkedIn account not connected' },
+        { status: 400 }
+      );
+    }
+
+    const accessToken = li.accessToken;
+    const authorUrn = body.authorUrn || li.memberUrn;
 
     const payload: any = {
       author: authorUrn,
@@ -51,7 +62,7 @@ export async function POST(req: NextRequest) {
         const imageUrn = registerData?.value?.image;
 
         if (uploadUrl && imageUrn) {
-          const imgRes = await fetch(imageUrl);
+          const imgRes = await fetch(imageUrl, { signal: AbortSignal.timeout(15000) });
           const imgBuffer = await imgRes.arrayBuffer();
           await fetch(uploadUrl, {
             method: 'POST',
@@ -82,7 +93,7 @@ export async function POST(req: NextRequest) {
       const errBody = await postRes.text();
       console.error('LinkedIn publish failed:', postRes.status, errBody);
       return NextResponse.json(
-        { ok: false, error: `LinkedIn API error ${postRes.status}`, details: errBody },
+        { ok: false, error: `LinkedIn API error ${postRes.status}` },
         { status: postRes.status }
       );
     }
@@ -92,10 +103,10 @@ export async function POST(req: NextRequest) {
       postUrn,
       url: postUrn ? `https://www.linkedin.com/feed/update/${postUrn}` : null,
     });
-  } catch (err: any) {
+  } catch (err) {
     console.error('LinkedIn publish error:', err);
     return NextResponse.json(
-      { ok: false, error: err?.message || 'Unknown error' },
+      { ok: false, error: 'Publish failed' },
       { status: 500 }
     );
   }

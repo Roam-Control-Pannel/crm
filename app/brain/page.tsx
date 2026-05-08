@@ -210,10 +210,8 @@ export default function BrainPage() {
             accept="image/*"
             multiple
             onChange={async e => {
-              const files = Array.from(e.target.files || []);
-
-
-
+              const files = e.target.files;
+              await handleUpload(files);
               e.target.value = '';
             }}
             style={{ display: 'none' }}

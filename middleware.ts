@@ -9,7 +9,11 @@ export default withAuth(
     callbacks: {
       authorized: ({ token, req }) => {
         const { pathname } = req.nextUrl;
-        if (pathname.startsWith('/api/')) return true;
+        // NextAuth's own endpoints must remain public so sign-in works.
+        if (pathname.startsWith('/api/auth/')) return true;
+        // Cron/sequences gate themselves with a bearer secret server-side.
+        if (pathname === '/api/cron' || pathname === '/api/sequences') return true;
+        // Everything else (including /api/*) requires a session.
         return !!token;
       },
     },
@@ -17,5 +21,5 @@ export default withAuth(
 );
 
 export const config = {
-  matcher: ['/((?!login|api|_next/static|_next/image|favicon.ico).*)'],
+  matcher: ['/((?!login|api/auth|_next/static|_next/image|favicon.ico).*)'],
 };

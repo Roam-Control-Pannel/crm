@@ -69,9 +69,13 @@ async function updateContactStatus(email: string, status: string): Promise<void>
 
 export async function GET(req: NextRequest) {
   // Security check - verify this is called by Netlify/Vercel cron
+  const cronSecret = process.env.CRON_SECRET;
+  if (!cronSecret) {
+    console.error('CRON_SECRET env var is not set; refusing to run cron.');
+    return NextResponse.json({ error: 'Server misconfigured' }, { status: 500 });
+  }
+
   const authHeader = req.headers.get('authorization');
-  const cronSecret = process.env.CRON_SECRET || 'roam-cron-2026';
-  
   if (authHeader !== `Bearer ${cronSecret}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
@@ -130,6 +134,6 @@ export async function GET(req: NextRequest) {
 
   } catch (err) {
     console.error('Cron error:', err);
-    return NextResponse.json({ error: 'Cron failed', details: String(err) }, { status: 500 });
+    return NextResponse.json({ error: 'Cron failed' }, { status: 500 });
   }
 }

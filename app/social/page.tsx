@@ -195,6 +195,16 @@ export default function SocialPage() {
     savePosts(next);
   }
 
+  // Functional variant — use when the next state depends on prior state and
+  // an async boundary sits between the read and the write (publish/generate).
+  function updatePosts(updater: (prev: SocialPost[]) => SocialPost[]) {
+    setPosts(prev => {
+      const next = updater(prev);
+      savePosts(next);
+      return next;
+    });
+  }
+
   function openComposer(p?: SocialPost) {
     if (p) {
       const d = new Date(p.scheduledAt);
@@ -410,8 +420,11 @@ Return ONLY the caption text. No JSON, no markdown, no preamble. Just the captio
     const finalStatus: SocialPost['status'] = allPublished ? 'published' : anyPublished ? 'partial' : 'failed';
 
     const updated: SocialPost = { ...post, results, status: finalStatus };
-    const next = posts.find(x => x.id === post.id) ? posts.map(p => p.id === post.id ? updated : p) : [updated, ...posts];
-    saveAndSet(next);
+    updatePosts(prev =>
+      prev.find(x => x.id === post.id)
+        ? prev.map(p => (p.id === post.id ? updated : p))
+        : [updated, ...prev]
+    );
 
     setPublishing(false);
     // Keep confirm modal open briefly so user sees results
@@ -510,8 +523,7 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
           };
         });
 
-        const next = [...newPosts, ...posts];
-        saveAndSet(next);
+        updatePosts(prev => [...newPosts, ...prev]);
       }
       addNotification({ type: 'info', title: 'Content generated', body: `${selectedAccounts.length} account${selectedAccounts.length === 1 ? '' : 's'} · theme: ${genForm.theme}` });
       setShowGen(false);

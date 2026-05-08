@@ -8,6 +8,7 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const code = searchParams.get('code');
     const error = searchParams.get('error');
+    const state = searchParams.get('state');
 
     if (error) {
       return NextResponse.redirect(new URL(`/channels?meta_error=${error}`, req.url));
@@ -16,13 +17,23 @@ export async function GET(req: NextRequest) {
       return NextResponse.redirect(new URL('/channels?meta_error=no_code', req.url));
     }
 
+    const expectedState = req.cookies.get('meta_oauth_state')?.value;
+    if (!state || !expectedState || state !== expectedState) {
+      return NextResponse.redirect(new URL('/channels?meta_error=state_mismatch', req.url));
+    }
+
     const appId = process.env.META_APP_ID;
     const appSecret = process.env.META_APP_SECRET;
     const redirectUri = 'https://roam-crm-platform.netlify.app/api/auth/meta/callback';
 
     // Step 1: Exchange code for short-lived user token
-    const tokenUrl = `https://graph.facebook.com/v19.0/oauth/access_token?client_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&client_secret=${appSecret}&code=${code}`;
-    const tokenRes = await fetch(tokenUrl);
+    const tokenParams = new URLSearchParams({
+      client_id: appId || '',
+      redirect_uri: redirectUri,
+      client_secret: appSecret || '',
+      code,
+    });
+    const tokenRes = await fetch(`https://graph.facebook.com/v19.0/oauth/access_token?${tokenParams}`);
     const tokenData = await tokenRes.json();
 
     if (!tokenData.access_token) {
@@ -56,7 +67,9 @@ export async function GET(req: NextRequest) {
 
     await saveMetaTokens(DEFAULT_USER_ID, meta);
 
-    return NextResponse.redirect(new URL('/channels?meta_connected=1', req.url));
+    const res = NextResponse.redirect(new URL('/channels?meta_connected=1', req.url));
+    res.cookies.delete('meta_oauth_state');
+    return res;
   } catch (err) {
     console.error('Meta OAuth error:', err);
     return NextResponse.redirect(new URL('/channels?meta_error=server_error', req.url));

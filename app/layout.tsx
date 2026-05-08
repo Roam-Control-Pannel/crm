@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import AppShell from '@/components/AppShell';
+import SessionWrapper from '@/components/SessionWrapper';
 
 export const metadata: Metadata = {
   title: 'Roam Growth Engine',
@@ -18,7 +19,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body>
-        <AppShell>{children}</AppShell>
+        <SessionWrapper>
+          <AppShell>{children}</AppShell>
+        </SessionWrapper>
       </body>
     </html>
   );
