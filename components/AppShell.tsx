@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
-import { LayoutDashboard, CheckSquare, Users, Search, Mail, ArrowUpCircle, Settings, Menu, X, Brain, ListTodo, BookUser, BookOpen } from 'lucide-react';
+import { LayoutDashboard, CheckSquare, Users, Search, Mail, ArrowUpCircle, Settings, Menu, X, Brain, ListTodo, BookUser, BookOpen, Database } from 'lucide-react';
 import NotificationCentre from './NotificationCentre';
 
 const navSections = [
@@ -13,6 +13,12 @@ const navSections = [
       { icon: Brain, label: 'Roam-io Assistant', href: '/hub' },
       { icon: ListTodo, label: 'Tasks', href: '/tasks' },
       { icon: CheckSquare, label: "Today's Queue", href: '/queue' },
+    ],
+  },
+  {
+    label: 'Workspace',
+    items: [
+      { icon: Database, label: 'Roam-io Brain', href: '/brain' },
     ],
   },
   {
