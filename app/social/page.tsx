@@ -4,6 +4,8 @@ import { Plus, Sparkles, Calendar, List, ChevronLeft, ChevronRight, X, Edit3, Ch
 import { Brief, getBriefs } from '@/lib/briefs';
 import { GOAL_OPTIONS, getGoalLabel } from '@/lib/goals';
 import { SocialAccount, fetchRealAccounts, combineAccounts } from '@/lib/social-accounts';
+import BrainPicker from '@/components/BrainPicker';
+import type { BrainItem } from '@/lib/brain';
 
 // ============================================================================
 // One-time legacy data migration
@@ -139,6 +141,8 @@ export default function SocialPage() {
   });
   const [generating, setGenerating] = useState(false);
   const [generatingCaption, setGeneratingCaption] = useState(false);
+  const [showBrainPicker, setShowBrainPicker] = useState(false);
+  const [swappingPostId, setSwappingPostId] = useState<string | null>(null);
 
   const [unsplash, setUnsplash] = useState<{ url: string; thumb: string; credit: string }[]>([]);
   const [unsplashQuery, setUnsplashQuery] = useState('');
@@ -272,6 +276,26 @@ export default function SocialPage() {
     }
   }
 
+
+  function pickFromBrain(item: BrainItem) {
+    const absUrl = window.location.origin + '/api/images/' + item.blobId;
+    if (swappingPostId) {
+      // Swap mode — update the specific post directly
+      const next = posts.map(p =>
+        p.id === swappingPostId ? { ...p, imageUrl: absUrl, imageCredit: 'From Brain' } : p
+      );
+      saveAndSet(next);
+      setSwappingPostId(null);
+      addNotification({ type: 'success', title: 'Image swapped' });
+    } else {
+      // Composer mode — update the form
+      setForm(f => ({ ...f, imageUrl: absUrl, imageCredit: 'From Brain' }));
+      setUnsplash([]);
+      setUnsplashQuery('');
+      addNotification({ type: 'success', title: 'Image attached from Brain' });
+    }
+  }
+
   // Generate a single post caption inline in the composer
   async function generateCaptionForComposer() {
     if (!form.briefId || form.accountIds.length === 0) return;
@@ -402,6 +426,17 @@ Return ONLY the caption text. No JSON, no markdown, no preamble. Just the captio
     const selectedAccounts = accounts.filter(a => genForm.accountIds.includes(a.id));
     if (!selectedAccounts.length) { setGenerating(false); return; }
 
+    // Load brain items so the AI can pick imagery
+    let brainItems: BrainItem[] = [];
+    try {
+      const { fetchItems } = await import('@/lib/brain');
+      brainItems = await fetchItems();
+    } catch { brainItems = []; }
+    const brainCatalog = brainItems.length === 0 ? '' :
+      'Available brain images:\n' + brainItems.map(it =>
+        '  - id: ' + it.id + ' | tags: ' + (it.tags.join(', ') || '(none)') + ' | description: ' + (it.description || '(none)')
+      ).join('\n');
+
     const brief = briefs.find(b => b.id === genForm.briefId);
     const goalLabel = getGoalLabel(genForm.goal);
 
@@ -423,7 +458,13 @@ Brand context:
 Theme / topic for this batch: ${genForm.theme}
 ${goalLabel ? 'Goal of these posts: ' + goalLabel : ''}
 
-Return EXACTLY ${genForm.postsPerAccount} posts as a JSON array. Each post is an object with one field: "caption". No other text or markdown — just valid JSON like: [{"caption":"..."},{"caption":"..."}]`;
+${brainCatalog ? '\n' + brainCatalog + '\n\nFor EACH post, choose the brain image whose tags/description best fit the post. Set "brainItemId" to that id. If no brain image is a strong topical fit, set "brainItemId" to null.' : ''}
+
+Return EXACTLY ${genForm.postsPerAccount} posts as a JSON array. Each post is an object with fields:
+  - "caption": the post text
+  - "brainItemId": ${brainCatalog ? 'one of the brain image ids above, or null if none fit' : 'always null'}
+
+Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"img_123"},{"caption":"...","brainItemId":null}]`;
 
         const res = await fetch('/api/ai/chat', {
           method: 'POST',
@@ -432,7 +473,7 @@ Return EXACTLY ${genForm.postsPerAccount} posts as a JSON array. Each post is an
         });
         const data = await res.json();
         const txt = typeof data.content === 'string' ? data.content : (data.content?.[0]?.text || data.text || '');
-        let generated: { caption: string }[] = [];
+        let generated: { caption: string; brainItemId?: string | null }[] = [];
         try {
           const cleaned = txt.replace(/```json|```/g, '').trim();
           generated = JSON.parse(cleaned);
@@ -446,6 +487,16 @@ Return EXACTLY ${genForm.postsPerAccount} posts as a JSON array. Each post is an
           const dt = new Date(start);
           dt.setDate(dt.getDate() + i * 2);
           dt.setHours(10 + (i % 3) * 2, 0, 0, 0);
+          // Resolve brainItemId to a real URL if AI picked one
+          let resolvedImageUrl = '';
+          let resolvedImageCredit = '';
+          if (g.brainItemId) {
+            const match = brainItems.find(b => b.id === g.brainItemId);
+            if (match) {
+              resolvedImageUrl = window.location.origin + '/api/images/' + match.blobId;
+              resolvedImageCredit = 'From Brain';
+            }
+          }
           return {
             id: 'p' + Date.now() + Math.random(),
             briefId: genForm.briefId,
@@ -454,8 +505,8 @@ Return EXACTLY ${genForm.postsPerAccount} posts as a JSON array. Each post is an
             scheduledAt: dt.toISOString(),
             status: 'draft' as const,
             createdAt: new Date().toISOString(),
-            imageUrl: '',
-            imageCredit: '',
+            imageUrl: resolvedImageUrl,
+            imageCredit: resolvedImageCredit,
           };
         });
 
@@ -538,6 +589,7 @@ Return EXACTLY ${genForm.postsPerAccount} posts as a JSON array. Each post is an
           {post.imageUrl && <img src={post.imageUrl} alt="" style={{ width: 100, height: 60, objectFit: 'cover', borderRadius: 'var(--r-sm)' }} />}
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flexShrink: 0 }}>
+          <button onClick={() => setSwappingPostId(post.id)} style={{ ...btnG, padding: '4px 10px', fontSize: 11 }} title="Swap image from Brain">🧠 Swap</button>
           <button onClick={() => openComposer(post)} style={{ ...btnG, padding: '4px 10px', fontSize: 11 }}><Edit3 size={11} /> Edit</button>
           {(post.status === 'draft' || post.status === 'scheduled') && <button onClick={() => setConfirmPublish(post)} style={{ ...btnP, padding: '4px 10px', fontSize: 11, background: '#0A66C2' }}>Publish</button>}
           <button onClick={() => deletePost(post.id)} style={{ ...btnG, padding: '4px 10px', fontSize: 11, color: 'var(--alert)' }}><Trash2 size={11} /></button>
@@ -832,6 +884,9 @@ Return EXACTLY ${genForm.postsPerAccount} posts as a JSON array. Each post is an
                   <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-600)', textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>Image</label>
                   <input type="text" value={unsplashQuery} onChange={e => setUnsplashQuery(e.target.value)} placeholder={'Search Unsplash... e.g. ' + (form.town || 'coastal market')} style={{ flex: 1, padding: '6px 10px', border: '1.5px solid var(--ink-200)', borderRadius: 'var(--r-sm)', fontSize: 12, fontFamily: 'inherit' }} />
                   {searchingImgs && <span style={{ fontSize: 10, color: 'var(--ink-400)' }}>Searching…</span>}
+                  <button type="button" onClick={() => setShowBrainPicker(true)} style={{ ...btnG, padding: '5px 10px', fontSize: 11, gap: 4, flexShrink: 0 }}>
+                    🧠 Brain
+                  </button>
                   <label style={{ ...btnG, padding: '5px 10px', fontSize: 11, gap: 4, flexShrink: 0, cursor: 'pointer' }}>
                     Upload
                     <input type="file" accept="image/*" onChange={e => { const f = e.target.files?.[0]; if (f) uploadOwnImage(f); e.currentTarget.value = ''; }} style={{ display: 'none' }} />
@@ -987,6 +1042,11 @@ Return EXACTLY ${genForm.postsPerAccount} posts as a JSON array. Each post is an
           </div>
         </div>
       )}
+      <BrainPicker
+        open={showBrainPicker || !!swappingPostId}
+        onClose={() => { setShowBrainPicker(false); setSwappingPostId(null); }}
+        onPick={pickFromBrain}
+      />
     </div>
   );
 }
