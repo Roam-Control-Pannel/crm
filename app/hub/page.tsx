@@ -1,6 +1,7 @@
 'use client';
 import {useState,useEffect,useRef} from 'react';
 import {Plus,Send,Sparkles,X,Check,AlertTriangle,MessageSquare,Brain,Paperclip,Trash2,FileText} from 'lucide-react';
+import {loadWithMigration, saveRemote} from '@/lib/client-store';
 
 interface Message {
   id:string;
@@ -31,9 +32,13 @@ const SUGGESTIONS=[
 
 
 interface RoamDoc{id:string;name:string;size:number;content:string;uploadedAt:string;}
-function getDocs():RoamDoc[]{try{return JSON.parse(localStorage.getItem("roam_docs")||"[]");}catch{return[];}}
-function saveDoc(d:RoamDoc){try{const docs=getDocs();localStorage.setItem("roam_docs",JSON.stringify([d,...docs].slice(0,20)));}catch(e){}}
-function rmDoc(id:string){try{localStorage.setItem("roam_docs",JSON.stringify(getDocs().filter(d=>d.id!==id)));}catch(e){}}
+async function fetchDocs():Promise<RoamDoc[]>{
+  const data=await loadWithMigration<RoamDoc[]>('hub_docs');
+  return Array.isArray(data)?data:[];
+}
+async function persistDocs(docs:RoamDoc[]):Promise<void>{
+  await saveRemote('hub_docs',docs);
+}
 function fmtSize(b:number):string{if(b<1024)return b+"B";if(b<1048576)return Math.round(b/1024)+"KB";return Math.round(b/1048576)+"MB";}
 
 function groupChats(chats:Chat[]):{label:string;chats:Chat[]}[]{
@@ -93,9 +98,7 @@ CONFIRM:{"type":"action","label":"Brief action label","detail":"Full detail of w
 }
 
 export default function HubPage(){
-  const [chats,setChats]=useState<Chat[]>(()=>{
-    try{return JSON.parse(localStorage.getItem('roam_chats')||'[]').map((c:Chat)=>({...c,createdAt:new Date(c.createdAt),updatedAt:new Date(c.updatedAt),messages:c.messages.map((m:Message)=>({...m,timestamp:new Date(m.timestamp)}))}))}catch{return[];}
-  });
+  const [chats,setChats]=useState<Chat[]>([]);
   const [activeChat,setActiveChat]=useState<Chat|null>(null);
   const [input,setInput]=useState('');
   const [loading,setLoading]=useState(false);
@@ -104,15 +107,27 @@ export default function HubPage(){
   const [showSuggestions,setShowSuggestions]=useState(false);
   const [showDocs,setShowDocs]=useState(false);
   const [docs,setDocs]=useState<RoamDoc[]>([]);
+  const [chatsLoaded,setChatsLoaded]=useState(false);
   const fileInputRef=useRef<HTMLInputElement>(null);
   const messagesEndRef=useRef<HTMLDivElement>(null);
   const inputRef=useRef<HTMLTextAreaElement>(null);
 
   useEffect(()=>{
-    setDocs(getDocs());
+    let cancelled=false;
+    (async()=>{
+      const [docsData,chatsData]=await Promise.all([
+        fetchDocs(),
+        loadWithMigration<Chat[]>('hub_chats'),
+      ]);
+      if(cancelled)return;
+      setDocs(docsData);
+      const hydrated=Array.isArray(chatsData)?chatsData.map((c:any)=>({...c,createdAt:new Date(c.createdAt),updatedAt:new Date(c.updatedAt),messages:(c.messages||[]).map((m:any)=>({...m,timestamp:new Date(m.timestamp)}))})):[];
+      setChats(hydrated);
+      setChatsLoaded(true);
+    })();
     const check=()=>setIsMobile(window.innerWidth<640);
     check();window.addEventListener('resize',check);
-    return()=>window.removeEventListener('resize',check);
+    return()=>{cancelled=true;window.removeEventListener('resize',check);};
   },[]);
 
   useEffect(()=>{messagesEndRef.current?.scrollIntoView({behavior:'smooth'});},[activeChat?.messages]);
@@ -130,8 +145,9 @@ export default function HubPage(){
   }
 
   useEffect(()=>{
-    try{localStorage.setItem('roam_chats',JSON.stringify(chats));}catch(e){}
-  },[chats]);
+    if(!chatsLoaded)return;
+    saveRemote('hub_chats',chats).catch(err=>console.error('Failed to save chats:',err));
+  },[chats,chatsLoaded]);
 
   function updateChat(chatId:string,messages:Message[],title?:string){
     const upd=(c:Chat)=>c.id===chatId?{...c,messages,title:title||c.title,updatedAt:new Date()}:c;
@@ -156,7 +172,7 @@ export default function HubPage(){
     const newMsgs=[...chat.messages,userMsg];
     updateChat(chat.id,newMsgs,title);
 
-    const{text:aiText,confirmAction}=await callRoamio(newMsgs.map(m=>({role:m.role,content:m.content})),getDocs());
+    const{text:aiText,confirmAction}=await callRoamio(newMsgs.map(m=>({role:m.role,content:m.content})),docs);
     const aiMsg:Message={id:(Date.now()+1).toString(),role:'assistant',content:aiText,timestamp:new Date(),confirmAction};
     updateChat(chat.id,[...newMsgs,aiMsg],title);
     setLoading(false);
@@ -170,7 +186,7 @@ export default function HubPage(){
     updateChat(chatId,updated);
     setLoading(true);
     const history=[...updated.map(m=>({role:m.role,content:m.content})),{role:'user' as const,content:`Confirmed — please proceed with: ${action.label}`}];
-    const{text}=await callRoamio(history,getDocs());
+    const{text}=await callRoamio(history,docs);
     const confirmMsg:Message={id:Date.now().toString(),role:'user',content:`Confirmed: ${action.label}`,timestamp:new Date()};
     const responseMsg:Message={id:(Date.now()+1).toString(),role:'assistant',content:text,timestamp:new Date()};
     updateChat(chatId,[...updated,confirmMsg,responseMsg]);
@@ -192,7 +208,9 @@ export default function HubPage(){
     reader.onload=(ev)=>{
       const content=(ev.target?.result as string||"").slice(0,10000);
       const doc:RoamDoc={id:Date.now().toString(),name:file.name,size:file.size,content,uploadedAt:new Date().toISOString()};
-      saveDoc(doc);setDocs(getDocs());
+      const updated=[doc,...docs].slice(0,20);
+      setDocs(updated);
+      persistDocs(updated).catch(err=>console.error('Failed to save docs:',err));
       const aiMsg:Message={id:(Date.now()+1).toString(),role:"assistant",content:`I have added **${file.name}** (${fmtSize(file.size)}) to your knowledge base. I will use this in our conversations when relevant. You can view and manage documents from the home screen.`,timestamp:new Date()};
       if(activeChat){updateChat(activeChat.id,[...activeChat.messages,aiMsg]);}
     };
@@ -200,7 +218,11 @@ export default function HubPage(){
     e.target.value="";
   }
 
-  function handleDeleteDoc(id:string){rmDoc(id);setDocs(getDocs());}
+  function handleDeleteDoc(id:string){
+    const updated=docs.filter(d=>d.id!==id);
+    setDocs(updated);
+    persistDocs(updated).catch(err=>console.error('Failed to save docs:',err));
+  }
 
   const ChannelList=()=>(
     <div style={{width:isMobile?'100%':220,background:'var(--maroon-900)',display:'flex',flexDirection:'column',flexShrink:0,height:'100%'}}>

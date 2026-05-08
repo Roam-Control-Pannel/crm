@@ -2,6 +2,7 @@
 import {useState,useEffect} from 'react';
 import {Plus,CheckCircle2,Circle,AlertTriangle,Calendar,Brain,Trash2,ChevronDown,ChevronUp,Sparkles} from 'lucide-react';
 import {addNotification} from '@/components/NotificationCentre';
+import {loadWithMigration, saveRemote} from '@/lib/client-store';
 
 interface Task {
   id:string;
@@ -28,11 +29,12 @@ const pColors:Record<string,{bg:string;color:string}>={
 };
 const cLabels:Record<string,string>={outreach:'Outreach',social:'Social',town_activation:'Town activation',admin:'Admin',ai_suggested:'AI suggested'};
 
-function getTasks():Task[]{
-  try{return JSON.parse(localStorage.getItem('roam_tasks')||'[]');}catch{return[];}
+async function fetchTasks():Promise<Task[]>{
+  const data=await loadWithMigration<Task[]>('tasks');
+  return Array.isArray(data)?data:[];
 }
-function saveTasks(tasks:Task[]){
-  try{localStorage.setItem('roam_tasks',JSON.stringify(tasks));}catch(e){}
+async function persistTasks(tasks:Task[]):Promise<void>{
+  await saveRemote('tasks',tasks);
 }
 function fmtDate(s:string):string{
   const d=new Date(s);const now=new Date();
@@ -76,12 +78,12 @@ export default function TasksPage(){
   const [showAiSuggestions,setShowAiSuggestions]=useState(true);
   const [form,setForm]=useState({title:'',description:'',priority:'medium' as 'high'|'medium'|'low',category:'outreach' as Task['category'],assignee:'Andy',dueDate:new Date().toISOString().split('T')[0]});
 
-  useEffect(()=>{setTasks(getTasks());},[]);
+  useEffect(()=>{(async()=>{setTasks(await fetchTasks());})();},[]);
 
   function addTask(){
     if(!form.title.trim())return;
     const task:Task={id:Date.now().toString(),...form,completed:false,createdAt:new Date().toISOString()};
-    const updated=[task,...tasks];setTasks(updated);saveTasks(updated);
+    const updated=[task,...tasks];setTasks(updated);persistTasks(updated);
     addNotification({type:'info',title:'Task created',body:form.title});
     setForm({title:'',description:'',priority:'medium',category:'outreach',assignee:'Andy',dueDate:new Date().toISOString().split('T')[0]});
     setShowAdd(false);
@@ -89,18 +91,18 @@ export default function TasksPage(){
 
   function acceptAiTask(t:Task){
     const updated=[{...t,id:Date.now().toString(),aiSuggested:true},...tasks];
-    setTasks(updated);saveTasks(updated);
+    setTasks(updated);persistTasks(updated);
     addNotification({type:'info',title:'Task added',body:t.title});
   }
 
   function toggle(id:string){
     const updated=tasks.map(t=>t.id===id?{...t,completed:!t.completed}:t);
-    setTasks(updated);saveTasks(updated);
+    setTasks(updated);persistTasks(updated);
   }
 
   function remove(id:string){
     const updated=tasks.filter(t=>t.id!==id);
-    setTasks(updated);saveTasks(updated);
+    setTasks(updated);persistTasks(updated);
   }
 
   const filtered=tasks.filter(t=>{

@@ -1,27 +1,18 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { Plus, Sparkles, Calendar, List, ChevronLeft, ChevronRight, X, Edit3, Check, Clock, Image, Trash2, AlertTriangle } from 'lucide-react';
-import { Brief, getBriefs } from '@/lib/briefs';
+import { Brief, fetchBriefs } from '@/lib/briefs';
 import { GOAL_OPTIONS, getGoalLabel } from '@/lib/goals';
-import { SocialAccount, fetchRealAccounts, combineAccounts } from '@/lib/social-accounts';
+import { SocialAccount, fetchRealAccounts, combineAccounts, fetchAccountMeta } from '@/lib/social-accounts';
+import { loadWithMigration, saveRemote } from '@/lib/client-store';
 import BrainPicker from '@/components/BrainPicker';
 import type { BrainItem } from '@/lib/brain';
 
 // ============================================================================
-// One-time legacy data migration
+// Storage — posts now live in the per-user server store (Netlify Blobs).
+// One-time migration from the legacy localStorage key happens automatically
+// via lib/client-store on first load.
 // ============================================================================
-const POSTS_VERSION = 5;
-
-function migrateLegacy() {
-  if (typeof window === 'undefined') return;
-  const v = Number(localStorage.getItem('roam_social_posts_v') || '0');
-  if (v < POSTS_VERSION) {
-    // Wipe legacy posts (account IDs are now real platform identifiers)
-    localStorage.removeItem('roam_social_posts');
-    localStorage.removeItem('roam_accounts'); // legacy 5 fictional handles
-    localStorage.setItem('roam_social_posts_v', String(POSTS_VERSION));
-  }
-}
 
 // ============================================================================
 // Types
@@ -56,20 +47,16 @@ interface Notification {
 }
 
 // ============================================================================
-// Posts persistence
+// Posts persistence — wraps the server store. fetchPosts also runs the
+// one-time legacy localStorage migration so existing data isn't lost.
 // ============================================================================
-function getPosts(): SocialPost[] {
-  if (typeof window === 'undefined') return [];
-  try {
-    return JSON.parse(localStorage.getItem('roam_social_posts') || '[]');
-  } catch {
-    return [];
-  }
+async function fetchPosts(): Promise<SocialPost[]> {
+  const data = await loadWithMigration<SocialPost[]>('social_posts');
+  return Array.isArray(data) ? data : [];
 }
 
-function savePosts(posts: SocialPost[]) {
-  if (typeof window === 'undefined') return;
-  localStorage.setItem('roam_social_posts', JSON.stringify(posts));
+async function savePosts(posts: SocialPost[]): Promise<void> {
+  await saveRemote('social_posts', posts);
 }
 
 // ============================================================================
@@ -164,13 +151,16 @@ export default function SocialPage() {
 
   // Load accounts + briefs + posts on mount
   useEffect(() => {
-    migrateLegacy();
     (async () => {
-      const real = await fetchRealAccounts();
-      const briefsData = getBriefs();
+      const [real, briefsData, postsData, accountMeta] = await Promise.all([
+        fetchRealAccounts(),
+        fetchBriefs(),
+        fetchPosts(),
+        fetchAccountMeta(),
+      ]);
       setBriefs(briefsData);
-      setAccounts(combineAccounts(real, briefsData));
-      setPosts(getPosts());
+      setAccounts(combineAccounts(real, briefsData, accountMeta));
+      setPosts(postsData);
       setLoading(false);
     })();
   }, []);

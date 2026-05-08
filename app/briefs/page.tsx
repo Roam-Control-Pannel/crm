@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { Plus, X, Edit3, Trash2, Check, Sparkles, Layers } from 'lucide-react';
-import { Brief, getBriefs, saveBriefs, DEFAULT_BRIEFS } from '@/lib/briefs';
+import { Brief, fetchBriefs, persistBriefs, DEFAULT_BRIEFS } from '@/lib/briefs';
 
 interface SocialAccount {
   id: string;
@@ -40,16 +40,36 @@ export default function BriefsPage() {
   const [form, setForm] = useState<Brief>(blankBrief());
 
   useEffect(() => {
-    setBriefs(getBriefs());
-    try {
-      const s = localStorage.getItem('roam_accounts');
-      setAccounts(s ? JSON.parse(s) : []);
-    } catch {}
+    let cancelled = false;
+    (async () => {
+      const data = await fetchBriefs();
+      if (!cancelled) setBriefs(data);
+
+      // Real accounts come from the social-accounts API + per-account meta.
+      try {
+        const [accRes, metaRes] = await Promise.all([
+          fetch('/api/accounts/status'),
+          fetch('/api/store/account_meta'),
+        ]);
+        const accJson = accRes.ok ? await accRes.json() : { realAccounts: [] };
+        const metaJson = metaRes.ok ? await metaRes.json() : { data: [] };
+        const metas: Array<{ accountId: string; briefId?: string; active?: boolean }> = metaJson?.data || [];
+        const real = (accJson.realAccounts || []) as Array<{ id: string; handle: string; platform: string; region?: string }>;
+        const merged: SocialAccount[] = real.map(r => {
+          const m = metas.find(x => x.accountId === r.id);
+          return { id: r.id, handle: r.handle, platform: r.platform, region: r.region, briefId: m?.briefId, active: m?.active !== false };
+        });
+        if (!cancelled) setAccounts(merged);
+      } catch (err) {
+        console.error('Failed to load accounts for briefs page:', err);
+      }
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   function persist(next: Brief[]) {
     setBriefs(next);
-    saveBriefs(next);
+    persistBriefs(next).catch(err => console.error('Failed to save briefs:', err));
   }
 
   function openNew() {
