@@ -8,12 +8,18 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const code = searchParams.get('code');
     const error = searchParams.get('error');
+    const state = searchParams.get('state');
 
     if (error) {
       return NextResponse.redirect(new URL(`/channels?li_error=${error}`, req.url));
     }
     if (!code) {
       return NextResponse.redirect(new URL('/channels?li_error=no_code', req.url));
+    }
+
+    const expectedState = req.cookies.get('li_oauth_state')?.value;
+    if (!state || !expectedState || state !== expectedState) {
+      return NextResponse.redirect(new URL('/channels?li_error=state_mismatch', req.url));
     }
 
     const clientId = process.env.LINKEDIN_CLIENT_ID;
@@ -93,7 +99,9 @@ export async function GET(req: NextRequest) {
     await saveLinkedInTokens(DEFAULT_USER_ID, li);
 
     // Redirect with success flag only — no sensitive data in URL
-    return NextResponse.redirect(new URL('/channels?li_connected=1', req.url));
+    const res = NextResponse.redirect(new URL('/channels?li_connected=1', req.url));
+    res.cookies.delete('li_oauth_state');
+    return res;
   } catch (err) {
     console.error('LinkedIn OAuth error:', err);
     return NextResponse.redirect(new URL('/channels?li_error=server_error', req.url));

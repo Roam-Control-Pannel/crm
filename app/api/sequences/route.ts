@@ -3,11 +3,16 @@ import { NextRequest, NextResponse } from 'next/server';
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
-  // Allow manual trigger from the CRM with secret
-  const secret = req.nextUrl.searchParams.get('secret');
-  const cronSecret = process.env.CRON_SECRET || 'roam-cron-2026';
-  
-  if (secret !== cronSecret) {
+  const cronSecret = process.env.CRON_SECRET;
+  if (!cronSecret) {
+    console.error('CRON_SECRET env var is not set; refusing to run sequences.');
+    return NextResponse.json({ error: 'Server misconfigured' }, { status: 500 });
+  }
+
+  // Accept the secret only via the Authorization header — query strings end up
+  // in CDN/access logs.
+  const authHeader = req.headers.get('authorization');
+  if (authHeader !== `Bearer ${cronSecret}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -100,6 +105,6 @@ export async function GET(req: NextRequest) {
 
   } catch (err) {
     console.error('Sequence error:', err);
-    return NextResponse.json({ error: 'Failed', details: String(err) }, { status: 500 });
+    return NextResponse.json({ error: 'Failed' }, { status: 500 });
   }
 }

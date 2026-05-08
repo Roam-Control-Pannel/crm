@@ -85,10 +85,7 @@ export default function ChannelsPage(){
   }, []);
 
   function connectMeta(){
-    const appId='1319334890088363';
-    const redirect=encodeURIComponent('https://roam-crm-platform.netlify.app/api/auth/meta/callback');
-    const scope='pages_show_list,pages_read_engagement,pages_manage_posts,public_profile,email';
-    window.location.href=`https://www.facebook.com/v19.0/dialog/oauth?client_id=${appId}&redirect_uri=${redirect}&scope=${scope}&response_type=code`;
+    window.location.href='/api/auth/meta/start';
   }
 
   async function disconnectMeta(){
@@ -99,10 +96,7 @@ export default function ChannelsPage(){
   }
 
   function connectLinkedIn(){
-    const clientId='86ek07ppuumcbf';
-    const redirect=encodeURIComponent('https://roam-crm-platform.netlify.app/api/auth/linkedin/callback');
-    const scope='openid profile email w_member_social';
-    window.location.href=`https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id=${clientId}&redirect_uri=${redirect}&scope=${scope}`;
+    window.location.href='/api/auth/linkedin/start';
   }
 
   async function disconnectLinkedIn(){
