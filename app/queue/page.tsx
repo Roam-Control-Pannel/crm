@@ -25,12 +25,10 @@ export default function QueuePage(){
       return {id:`email-${c.id}`,type:'email' as const,icon:'✉️',title:`${label} — ${c.attributes.BUSINESS_NAME}`,desc:`Step ${step} of 3 · ${step===1?'Not yet contacted':step===2?'Email sent, no response':'Follow-up sent, no response'}`,town:c.attributes?.TOWN||'—',time:step===3?'overdue':'today',overdue:step===3,email:c.email,businessName:c.attributes.BUSINESS_NAME,knownFor:c.attributes?.KNOWN_FOR||'its independent spirit',step};
     });
 
-  const socialItems:QueueItem[]=[
-    {id:'s1',type:'social',icon:'📸',title:'Instagram post ready',desc:'Whitstable oyster scene — generated from page data',town:'Whitstable',time:'today 3pm',overdue:false},
-    {id:'s2',type:'social',icon:'💼',title:'LinkedIn post — local businesses',desc:'Free listing pitch for independent SMEs',town:'Darlington',time:'today 5pm',overdue:false},
-  ];
-
-  const allItems=[...socialItems,...emailItems].filter(i=>!dismissed.includes(i.id));
+  // Social items now come from the real /social calendar, not hard-coded
+  // placeholders. The /queue page focuses on outreach approval; social
+  // approval has its own UI.
+  const allItems=emailItems.filter(i=>!dismissed.includes(i.id));
 
   async function approve(item:QueueItem){
     setStatuses(s=>({...s,[item.id]:'sending'}));

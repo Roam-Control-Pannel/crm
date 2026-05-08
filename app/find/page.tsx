@@ -63,7 +63,10 @@ export default function FindPage() {
           const scraped=await fetch(`/api/scrape/email?website=${encodeURIComponent(website)}`).then(d=>d.json());
           if(scraped.email)email=scraped.email;
         }
-        setResults(prev=>prev.map((x,idx)=>idx===i?{...x,phone,website,email,enriching:false,enriched:true}:x));
+        // After enrichment, auto-deselect rows we couldn't find an email
+        // for. They become "needs research" — user can paste an email and
+        // re-select, or skip.
+        setResults(prev=>prev.map((x,idx)=>idx===i?{...x,phone,website,email,enriching:false,enriched:true,selected:!!email}:x));
       }catch{setResults(prev=>prev.map((x,idx)=>idx===i?{...x,enriching:false,enriched:true}:x));}
     }
     setEnriching(false);
@@ -81,26 +84,31 @@ export default function FindPage() {
   }
 
   async function importSelected(){
-    const sel=results.filter(r=>r.selected);
+    const sel=results.filter(r=>r.selected&&r.email);
     if(!sel.length)return;
     setImporting(true);setImportCount(0);
     const listIds=selectedList?[Number(selectedList)]:[];
     let count=0;
     for(const r of sel){
       try{
-        const email=r.email||`info@${r.name.toLowerCase().replace(/[^a-z0-9]/g,'').slice(0,20)}.co.uk`;
-        await fetch('/api/brevo/contacts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:r.name,email,town:r.town,source:'google',status:'not_contacted',website:r.website||'',phone:r.phone||'',listIds})});
+        await fetch('/api/brevo/contacts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:r.name,email:r.email,town:r.town,source:'google',status:'not_contacted',website:r.website||'',phone:r.phone||'',listIds})});
         count++;setImportCount(count);
       }catch(e){console.error(e);}
     }
     setImporting(false);setDone(true);
   }
 
+  const setEmailFor=(i:number,v:string)=>{
+    const trimmed=v.trim().toLowerCase();
+    setResults(p=>p.map((r,idx)=>idx===i?{...r,email:trimmed,selected:trimmed?true:r.selected}:r));
+  };
+
   const toggle=(i:number)=>setResults(p=>p.map((r,idx)=>idx===i?{...r,selected:!r.selected}:r));
   const toggleAll=(v:boolean)=>setResults(p=>p.map(r=>({...r,selected:v})));
   const enrichedCount=results.filter(r=>r.enriched).length;
   const emailCount=results.filter(r=>r.email).length;
   const phoneCount=results.filter(r=>r.phone).length;
+  const needsResearchCount=results.filter(r=>r.enriched&&!r.email).length;
   const selectedListObj=lists.find(l=>l.id===Number(selectedList));
 
   return (
@@ -184,6 +192,7 @@ export default function FindPage() {
                 <span style={{color:'var(--ok)'}}>✓ {enrichedCount} enriched</span>
                 <span style={{color:'var(--info)'}}>✉ {emailCount} emails</span>
                 <span style={{color:'var(--warn)'}}>📞 {phoneCount} phones</span>
+                {needsResearchCount>0&&<span style={{color:'var(--alert)'}}>⚠ {needsResearchCount} need research</span>}
               </div>
             )}
             {/* Import bar */}
@@ -195,8 +204,8 @@ export default function FindPage() {
               </select>
               <button onClick={()=>setShowCreateList(true)} style={{...btnG,fontSize:11,padding:'6px 10px',flexShrink:0}}>📋 New List</button>
               {selectedListObj&&<span style={{fontSize:11,color:'var(--ok)',fontWeight:600,flexShrink:0}}>→ {selectedListObj.name}</span>}
-              <button onClick={importSelected} disabled={importing||done||!results.some(r=>r.selected)} style={{...btnP,fontSize:11.5,padding:'7px 14px',marginLeft:'auto',opacity:importing||done||!results.some(r=>r.selected)?0.6:1}}>
-                {importing?`Importing ${importCount}…`:done?'✓ Done!':'➕ Import to Brevo'}
+              <button onClick={importSelected} disabled={importing||done||!results.some(r=>r.selected&&r.email)} style={{...btnP,fontSize:11.5,padding:'7px 14px',marginLeft:'auto',opacity:importing||done||!results.some(r=>r.selected&&r.email)?0.6:1}}>
+                {importing?`Importing ${importCount}…`:done?'✓ Done!':`➕ Import ${results.filter(r=>r.selected&&r.email).length} to Brevo`}
               </button>
             </div>
           </div>
@@ -221,8 +230,31 @@ export default function FindPage() {
                     <td style={{padding:'11px 14px',fontSize:12,color:'var(--ink-800)',fontWeight:500,minWidth:120}}>
                       {r.enriching?<span style={{color:'var(--ink-300)',fontSize:11}}>⟳ finding…</span>:r.phone||<span style={{color:'var(--ink-200)'}}>—</span>}
                     </td>
-                    <td style={{padding:'11px 14px',fontSize:12,color:'var(--info)',fontWeight:500,minWidth:180}}>
-                      {r.enriching?<span style={{color:'var(--ink-300)',fontSize:11}}>⟳ finding…</span>:r.email||<span style={{color:'var(--ink-200)'}}>—</span>}
+                    <td style={{padding:'11px 14px',fontSize:12,color:'var(--info)',fontWeight:500,minWidth:200}}>
+                      {r.enriching?(
+                        <span style={{color:'var(--ink-300)',fontSize:11}}>⟳ finding…</span>
+                      ):r.email?(
+                        <input
+                          type="email"
+                          value={r.email}
+                          onChange={e=>setEmailFor(i,e.target.value)}
+                          style={{...inp,padding:'5px 8px',fontSize:12,color:'var(--info)',fontWeight:500,border:'1px solid transparent',background:'transparent',width:'100%'}}
+                          onFocus={e=>{e.currentTarget.style.border='1px solid var(--ink-200)';e.currentTarget.style.background='var(--white)';}}
+                          onBlur={e=>{e.currentTarget.style.border='1px solid transparent';e.currentTarget.style.background='transparent';}}
+                        />
+                      ):r.enriched?(
+                        <div style={{display:'flex',gap:6,alignItems:'center',flexWrap:'wrap'}}>
+                          <span style={{fontSize:10,fontWeight:700,color:'var(--warn)',background:'#fdf0e4',padding:'2px 8px',borderRadius:'var(--r-pill)',letterSpacing:'0.04em',textTransform:'uppercase'}}>Needs research</span>
+                          <input
+                            type="email"
+                            placeholder="paste email here"
+                            onChange={e=>setEmailFor(i,e.target.value)}
+                            style={{...inp,padding:'4px 8px',fontSize:11,flex:1,minWidth:120}}
+                          />
+                        </div>
+                      ):(
+                        <span style={{color:'var(--ink-200)'}}>—</span>
+                      )}
                     </td>
                     <td style={{padding:'11px 14px',fontSize:12,fontWeight:600,color:'var(--warn)'}}>{r.rating?`${r.rating} ★`:'—'}</td>
                     <td style={{padding:'11px 14px'}}>

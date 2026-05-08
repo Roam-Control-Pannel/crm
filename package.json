@@ -3,6 +3,7 @@
     "@getbrevo/brevo": "^5.0.4",
     "@googlemaps/google-maps-services-js": "^3.4.2",
     "@netlify/blobs": "^10.7.4",
+    "@netlify/functions": "^5.2.0",
     "axios": "^1.15.2",
     "clsx": "^2.1.1",
     "lucide-react": "^1.14.0",
