@@ -1,7 +1,8 @@
 'use client';
-import {useState,useEffect} from 'react';
+import {useState,useEffect,useCallback} from 'react';
+import {BrevoListSelector} from '@/components/BrevoListSelector';
 
-interface Contact {id:number;email:string;attributes:Record<string,string>;}
+interface Contact {id:number;email:string;attributes:Record<string,string>;listIds?:number[];}
 interface QueueItem {id:string;type:'email'|'social';icon:string;title:string;desc:string;town:string;time:string;overdue:boolean;email?:string;businessName?:string;knownFor?:string;step?:number;}
 type Status='idle'|'sending'|'done'|'error';
 
@@ -10,10 +11,22 @@ export default function QueuePage(){
   const [loading,setLoading]=useState(true);
   const [statuses,setStatuses]=useState<Record<string,Status>>({});
   const [dismissed,setDismissed]=useState<string[]>([]);
+  const [activeListId,setActiveListId]=useState<number|null>(null);
 
-  useEffect(()=>{
-    fetch('/api/brevo/contacts?limit=500').then(r=>r.json()).then(d=>{setContacts(d.contacts||[]);setLoading(false);}).catch(()=>setLoading(false));
-  },[]);
+  const loadContacts=useCallback(async()=>{
+    setLoading(true);
+    const url=activeListId!==null?`/api/brevo/contacts?limit=500&listId=${activeListId}`:`/api/brevo/contacts?limit=500`;
+    try{
+      const d=await fetch(url,{cache:'no-store'}).then(r=>r.json());
+      setContacts(d.contacts||[]);
+    }catch{
+      setContacts([]);
+    }finally{
+      setLoading(false);
+    }
+  },[activeListId]);
+
+  useEffect(()=>{loadContacts();},[loadContacts]);
 
   const emailItems:QueueItem[]=contacts
     .filter(c=>c.email&&c.attributes?.BUSINESS_NAME&&['not_contacted','email_sent','followed_up'].includes(c.attributes?.OUTREACH_STATUS||'not_contacted'))
@@ -48,17 +61,20 @@ export default function QueuePage(){
 
   return (
     <div style={{padding:'22px 24px'}}>
-      <div style={{marginBottom:20}}>
+      <div style={{marginBottom:14}}>
         <h1 style={{fontFamily:'Nunito,sans-serif',fontSize:22,fontWeight:900,color:'#1a0d12',margin:0}}>Today's Queue</h1>
         <p style={{fontSize:12,color:'#9e7e88',margin:'3px 0 0',fontWeight:500}}>{loading?'Loading…':`${allItems.length} items awaiting approval · nothing sends without your sign-off`}</p>
+      </div>
+      <div style={{marginBottom:16}}>
+        <BrevoListSelector value={activeListId} onChange={setActiveListId} onSync={loadContacts}/>
       </div>
       {loading?(
         <div style={{background:'#fff',border:'1px solid #e4d8dc',borderRadius:12,padding:40,textAlign:'center',color:'#9e7e88',fontSize:13}}>Loading queue from Brevo…</div>
       ):allItems.length===0?(
         <div style={{background:'#fff',border:'1px solid #e4d8dc',borderRadius:12,padding:40,textAlign:'center'}}>
           <div style={{fontSize:32,marginBottom:12}}>✓</div>
-          <div style={{fontFamily:'Nunito,sans-serif',fontSize:16,fontWeight:800,color:'#2d7a4f'}}>All done for today!</div>
-          <div style={{fontSize:12,color:'#9e7e88',marginTop:6}}>Check back tomorrow for new items</div>
+          <div style={{fontFamily:'Nunito,sans-serif',fontSize:16,fontWeight:800,color:'#2d7a4f'}}>{activeListId!==null?'Nothing pending in this list':'All done for today!'}</div>
+          <div style={{fontSize:12,color:'#9e7e88',marginTop:6}}>{activeListId!==null?'Switch to "All lists" or another list to see more':'Check back tomorrow for new items'}</div>
         </div>
       ):(
         <div style={{background:'#fff',border:'1px solid #e4d8dc',borderRadius:12,overflow:'hidden'}}>
