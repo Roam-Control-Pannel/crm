@@ -138,6 +138,7 @@ export default function SocialPage() {
     weekStart: today.toISOString().split('T')[0],
   });
   const [generating, setGenerating] = useState(false);
+  const [generatingCaption, setGeneratingCaption] = useState(false);
 
   const [unsplash, setUnsplash] = useState<{ url: string; thumb: string; credit: string }[]>([]);
   const [unsplashQuery, setUnsplashQuery] = useState('');
@@ -242,6 +243,80 @@ export default function SocialPage() {
       saveAndSet([np, ...posts]);
     }
     setShowComposer(false);
+  }
+
+
+
+  async function uploadOwnImage(file: File) {
+    if (!file) return;
+    if (file.size > 8 * 1024 * 1024) {
+      addNotification({ type: 'email_failed', title: 'File too large', body: 'Max 8MB. Compress and try again.' });
+      return;
+    }
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await fetch('/api/images/upload', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (data.ok && data.url) {
+        const absUrl = data.url.startsWith('http') ? data.url : window.location.origin + data.url;
+        setForm(f => ({ ...f, imageUrl: absUrl, imageCredit: 'Your upload' }));
+        setUnsplash([]);
+        setUnsplashQuery('');
+        addNotification({ type: 'success', title: 'Image uploaded' });
+      } else {
+        addNotification({ type: 'email_failed', title: 'Upload failed', body: data.error || 'Unknown error' });
+      }
+    } catch (e) {
+      addNotification({ type: 'email_failed', title: 'Upload failed', body: 'Network error' });
+    }
+  }
+
+  // Generate a single post caption inline in the composer
+  async function generateCaptionForComposer() {
+    if (!form.briefId || form.accountIds.length === 0) return;
+    const brief = briefs.find(b => b.id === form.briefId);
+    const acc = accounts.find(a => a.id === form.accountIds[0]);
+    if (!brief || !acc) return;
+
+    const audience = acc.toneOverride || brief.audience;
+    const tone = acc.toneOverride || brief.tone;
+    const contentBrief = acc.contentBriefOverride || brief.contentBrief;
+    const hashtags = acc.hashtagsOverride || brief.hashtags;
+    const theme = form.town?.trim() || form.caption.trim().slice(0, 200) || "an upcoming post";
+
+    const prompt = `You are writing a single social media post for ${acc.handle} (${acc.platform}${acc.region ? ' · ' + acc.region : ''}).
+
+Brand context:
+- Audience: ${audience}
+- Tone: ${tone}
+- Content focus: ${contentBrief}
+- Hashtags to use: ${hashtags}
+
+Theme / topic: ${theme}
+
+Return ONLY the caption text. No JSON, no markdown, no preamble. Just the caption ready to publish.`;
+
+    setGeneratingCaption(true);
+    try {
+      const res = await fetch('/api/ai/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: [{ role: 'user', content: prompt }], model: 'claude-sonnet-4-5' }),
+      });
+      const data = await res.json();
+      const txt = (data.content?.[0]?.text || data.text || '').trim();
+      if (txt) {
+        setForm(f => ({ ...f, caption: txt }));
+        addNotification({ type: 'info', title: 'Caption generated', body: 'Edit it as you like' });
+      } else {
+        addNotification({ type: 'email_failed', title: 'Generation failed', body: 'Empty response' });
+      }
+    } catch (e) {
+      addNotification({ type: 'email_failed', title: 'Generation failed', body: 'Network error' });
+    } finally {
+      setGeneratingCaption(false);
+    }
   }
 
   function deletePost(id: string) {
@@ -741,8 +816,13 @@ Return EXACTLY ${genForm.postsPerAccount} posts as a JSON array. Each post is an
 
               {/* Caption */}
               <div>
-                <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--ink-600)', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Caption</label>
-                <textarea value={form.caption} onChange={e => setForm({ ...form, caption: e.target.value })} placeholder="Write your post caption..." rows={4} style={{ ...inp, resize: 'vertical' }} />
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 5 }}>
+                  <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-600)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Caption</label>
+                  <button type="button" onClick={generateCaptionForComposer} disabled={generatingCaption || !form.briefId || form.accountIds.length === 0} style={{ background: 'none', border: 'none', fontSize: 11, color: !form.briefId || form.accountIds.length === 0 ? 'var(--ink-300)' : 'var(--maroon-700)', cursor: !form.briefId || form.accountIds.length === 0 ? 'not-allowed' : 'pointer', fontWeight: 600, padding: 0, display: 'flex', alignItems: 'center', gap: 4, fontFamily: 'inherit' }}>
+                    <Sparkles size={11} />{generatingCaption ? 'Generating…' : 'Generate with AI'}
+                  </button>
+                </div>
+                <textarea value={form.caption} onChange={e => setForm({ ...form, caption: e.target.value })} placeholder="Write your post caption... or click Generate above" rows={4} style={{ ...inp, resize: 'vertical' }} />
                 <div style={{ fontSize: 10, color: 'var(--ink-400)', marginTop: 3, textAlign: 'right' }}>{form.caption.length} chars</div>
               </div>
 
@@ -752,6 +832,10 @@ Return EXACTLY ${genForm.postsPerAccount} posts as a JSON array. Each post is an
                   <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-600)', textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>Image</label>
                   <input type="text" value={unsplashQuery} onChange={e => setUnsplashQuery(e.target.value)} placeholder={'Search Unsplash... e.g. ' + (form.town || 'coastal market')} style={{ flex: 1, padding: '6px 10px', border: '1.5px solid var(--ink-200)', borderRadius: 'var(--r-sm)', fontSize: 12, fontFamily: 'inherit' }} />
                   {searchingImgs && <span style={{ fontSize: 10, color: 'var(--ink-400)' }}>Searching…</span>}
+                  <label style={{ ...btnG, padding: '5px 10px', fontSize: 11, gap: 4, flexShrink: 0, cursor: 'pointer' }}>
+                    Upload
+                    <input type="file" accept="image/*" onChange={e => { const f = e.target.files?.[0]; if (f) uploadOwnImage(f); e.currentTarget.value = ''; }} style={{ display: 'none' }} />
+                  </label>
                 </div>
                 {form.imageUrl && <div style={{ marginBottom: 8, position: 'relative' }}>
                   <img src={form.imageUrl} style={{ width: '100%', height: 140, objectFit: 'cover', borderRadius: 'var(--r-md)', border: '1px solid var(--ink-100)', display: 'block' }} alt="" />
