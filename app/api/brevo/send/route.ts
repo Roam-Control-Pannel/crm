@@ -16,7 +16,7 @@ const signature = `
       <div style="margin-top:6px">
         <a href="https://roam-local.co.uk" style="font-size:11px;color:#8B1A3A;text-decoration:none;font-family:Arial,sans-serif">roam-local.co.uk</a>
         <span style="color:#e4d8dc;margin:0 6px">|</span>
-        <a href="https://roam-local.co.uk/list" style="font-size:11px;color:#8B1A3A;text-decoration:none;font-family:Arial,sans-serif">List your business free</a>
+        <a href="https://roam-local.co.uk" style="font-size:11px;color:#8B1A3A;text-decoration:none;font-family:Arial,sans-serif">List your business free</a>
       </div>
     </td>
   </tr>
@@ -34,7 +34,7 @@ function buildEmail(step:number,businessName:string,town:string,knownFor:string)
   <p>We've built a dedicated page for <strong>${town}</strong> on Roam — a free local discovery app helping people find the best independent businesses in their area.</p>
   <p>${town} is known for ${knownFor}, and we'd love <strong>${businessName}</strong> to be one of the first businesses featured.</p>
   <p>Listing takes <strong>90 seconds</strong> and is completely free — no subscription, no catch.</p>
-  <p style="margin-top:20px"><a href="https://roam-local.co.uk/list" style="background:#8B1A3A;color:white;padding:12px 24px;border-radius:6px;text-decoration:none;display:inline-block;font-weight:700;font-family:Arial,sans-serif">List ${businessName} for free →</a></p>
+  <p style="margin-top:20px"><a href="https://roam-local.co.uk" style="background:#8B1A3A;color:white;padding:12px 24px;border-radius:6px;text-decoration:none;display:inline-block;font-weight:700;font-family:Arial,sans-serif">List ${businessName} for free →</a></p>
   <p style="margin-top:16px">Any questions, just reply to this email.</p>
   <p>Best wishes,</p>
   ${signature}
@@ -43,7 +43,7 @@ function buildEmail(step:number,businessName:string,town:string,knownFor:string)
   <p>Hi there,</p>
   <p>Just a quick follow-up — we'd love to have <strong>${businessName}</strong> on Roam's <strong>${town}</strong> page.</p>
   <p>It's completely free and takes 90 seconds. Businesses across ${town} are already signing up.</p>
-  <p style="margin-top:20px"><a href="https://roam-local.co.uk/list" style="background:#8B1A3A;color:white;padding:12px 24px;border-radius:6px;text-decoration:none;display:inline-block;font-weight:700;font-family:Arial,sans-serif">Get listed now →</a></p>
+  <p style="margin-top:20px"><a href="https://roam-local.co.uk" style="background:#8B1A3A;color:white;padding:12px 24px;border-radius:6px;text-decoration:none;display:inline-block;font-weight:700;font-family:Arial,sans-serif">Get listed now →</a></p>
   <p>Best wishes,</p>
   ${signature}
 </div>`,
@@ -51,7 +51,7 @@ function buildEmail(step:number,businessName:string,town:string,knownFor:string)
   <p>Hi there,</p>
   <p>We won't chase again after this — promise!</p>
   <p>If you'd like <strong>${businessName}</strong> featured on Roam's <strong>${town}</strong> page for free, it only takes 90 seconds.</p>
-  <p style="margin-top:20px"><a href="https://roam-local.co.uk/list" style="background:#8B1A3A;color:white;padding:12px 24px;border-radius:6px;text-decoration:none;display:inline-block;font-weight:700;font-family:Arial,sans-serif">List for free →</a></p>
+  <p style="margin-top:20px"><a href="https://roam-local.co.uk" style="background:#8B1A3A;color:white;padding:12px 24px;border-radius:6px;text-decoration:none;display:inline-block;font-weight:700;font-family:Arial,sans-serif">List for free →</a></p>
   <p>Best wishes,</p>
   ${signature}
 </div>`,

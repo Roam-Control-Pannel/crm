@@ -71,14 +71,14 @@ async function sendFollowUp(
   <p>Hi there,</p>
   <p>Just a quick follow-up — we'd love to have <strong>${name}</strong> on Roam's <strong>${town}</strong> page.</p>
   <p>It's completely free and takes 90 seconds. Businesses across ${town} are already signing up.</p>
-  <p style="margin-top:20px"><a href="https://roam-local.co.uk/list" style="background:#8B1A3A;color:white;padding:12px 24px;border-radius:6px;text-decoration:none;display:inline-block;font-weight:700">Get listed now →</a></p>
+  <p style="margin-top:20px"><a href="https://roam-local.co.uk" style="background:#8B1A3A;color:white;padding:12px 24px;border-radius:6px;text-decoration:none;display:inline-block;font-weight:700">Get listed now →</a></p>
   <p>Best wishes,<br/>— Roam Local Team</p>
 </div>`,
     3: `<div style="font-family:Arial,sans-serif;max-width:560px;color:#1a0d12">
   <p>Hi there,</p>
   <p>We won't chase again after this — promise!</p>
   <p>If you'd like <strong>${name}</strong> featured on Roam's <strong>${town}</strong> page for free, it only takes 90 seconds.</p>
-  <p style="margin-top:20px"><a href="https://roam-local.co.uk/list" style="background:#8B1A3A;color:white;padding:12px 24px;border-radius:6px;text-decoration:none;display:inline-block;font-weight:700">List for free →</a></p>
+  <p style="margin-top:20px"><a href="https://roam-local.co.uk" style="background:#8B1A3A;color:white;padding:12px 24px;border-radius:6px;text-decoration:none;display:inline-block;font-weight:700">List for free →</a></p>
   <p>Best wishes,<br/>— Roam Local Team</p>
 </div>`,
   };
