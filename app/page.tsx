@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { Flame, Clock, Snowflake, RefreshCw, ArrowRight, MapPin, Mail, MousePointerClick, CheckCircle, AlertCircle, MessageSquare } from 'lucide-react';
+import type { AttentionContact } from '@/lib/types';
 
 interface PipelineStages {
   notContacted: number;
@@ -18,17 +19,6 @@ interface PipelineEngagement {
   opened: number;
   clicked: number;
   bounced: number;
-}
-
-interface AttentionContact {
-  email: string;
-  name: string;
-  town: string;
-  status: string;
-  signal: string;
-  signalAt: string;
-  daysIn: number;
-  replyPreview?: string;
 }
 
 interface PipelineResponse {

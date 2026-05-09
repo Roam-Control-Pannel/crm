@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { mostRecentReplyForContact } from '@/lib/replies';
+import type { AttentionContact } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -22,17 +23,6 @@ interface BrevoContact {
   id: number;
   email: string;
   attributes?: Record<string, string>;
-}
-
-interface AttentionContact {
-  email: string;
-  name: string;
-  town: string;
-  status: string;
-  signal: string;       // why this contact's flagged
-  signalAt: string;     // when the signal happened
-  daysIn: number;       // days at this stage
-  replyPreview?: string; // first ~200 chars of reply body (for replied queue)
 }
 
 function asNumber(v: any): number {
