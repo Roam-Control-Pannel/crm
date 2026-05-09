@@ -5,6 +5,7 @@ import {
   DAILY_SEND_CAP,
   type CronRunRecord,
 } from '@/lib/cron-status';
+import { REPLY_TO_ADDRESS } from '@/lib/brevo';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -95,6 +96,7 @@ async function sendFollowUp(
         to: [{ email: contact.email, name }],
         subject: subjects[step],
         htmlContent: bodies[step],
+        replyTo: { email: REPLY_TO_ADDRESS, name: SENDER.name },
       }),
     });
     return res.ok;
