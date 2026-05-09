@@ -492,13 +492,73 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
         });
         const data = await res.json();
         const txt = typeof data.content === 'string' ? data.content : (data.content?.[0]?.text || data.text || '');
+
+        // PARSE-HARDENING-V1: see PR notes. Three layers of defence against
+        // the AI returning slightly-malformed JSON that previously dumped raw
+        // JSON strings into draft captions.
         let generated: { caption: string; brainItemId?: string | null }[] = [];
+        let parsed = false;
+
+        // Layer 1: strip any markdown fence (```json, ```javascript, plain ```)
+        // and trim aggressively, then try direct parse.
+        const stripped = txt.replace(/```[a-z]*\n?|```/gi, '').trim();
         try {
-          const cleaned = txt.replace(/```json|```/g, '').trim();
-          generated = JSON.parse(cleaned);
-        } catch {
-          // Fallback: split text into lines
-          generated = txt.split('\n\n').filter(Boolean).slice(0, genForm.postsPerAccount).map((s: string) => ({ caption: s.trim() }));
+          const candidate = JSON.parse(stripped);
+          if (Array.isArray(candidate)) {
+            generated = candidate;
+            parsed = true;
+          }
+        } catch { /* fall through to layer 2 */ }
+
+        // Layer 2: regex-extract the first [...] block from the response.
+        // Catches cases where the AI prefixed/suffixed prose despite the
+        // "Output ONLY valid JSON" instruction.
+        if (!parsed) {
+          const match = stripped.match(/\[[\s\S]*\]/);
+          if (match) {
+            try {
+              const candidate = JSON.parse(match[0]);
+              if (Array.isArray(candidate)) {
+                generated = candidate;
+                parsed = true;
+              }
+            } catch { /* fall through to error */ }
+          }
+        }
+
+        // Layer 3: if both parse attempts failed, skip this account batch.
+        // Surfacing a notification is far better than silently polluting the
+        // calendar with raw-JSON-string drafts (the original bug).
+        if (!parsed) {
+          console.error('[social-generate] failed to parse AI response for', acc.handle, '— raw:', txt.slice(0, 300));
+          addNotification({
+            type: 'email_failed',
+            title: 'Generation skipped for ' + acc.handle,
+            body: 'AI response was not valid JSON. Try generating again.',
+          });
+          continue;
+        }
+
+        // Layer 4: validate each item. Drop entries whose caption looks like
+        // raw JSON (starts with [ or { after trimming) — defence in depth
+        // against future prompt drift returning malformed structures.
+        generated = generated.filter(g => {
+          if (!g || typeof g.caption !== 'string') return false;
+          const t = g.caption.trim();
+          if (t.startsWith('[') || t.startsWith('{')) {
+            console.warn('[social-generate] dropped item with JSON-shaped caption:', t.slice(0, 80));
+            return false;
+          }
+          return t.length > 0;
+        });
+
+        if (generated.length === 0) {
+          addNotification({
+            type: 'email_failed',
+            title: 'No valid posts for ' + acc.handle,
+            body: 'AI returned an empty or malformed batch. Try again.',
+          });
+          continue;
         }
 
         const start = new Date(genForm.weekStart);
