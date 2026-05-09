@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
+export const maxDuration = 60;
 
 /**
  * Pipeline data for the dashboard.
@@ -50,21 +51,29 @@ function daysBetween(a: Date, b: Date): number {
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const listId = searchParams.get('listId');
+  const startedAt = Date.now();
+
+  if (!process.env.BREVO_API_KEY) {
+    console.error('[pipeline] BREVO_API_KEY not configured');
+    return NextResponse.json({ error: 'BREVO_API_KEY not configured' }, { status: 500 });
+  }
 
   try {
     const path = listId
       ? `/contacts/lists/${encodeURIComponent(listId)}/contacts?limit=500&sort=desc`
       : '/contacts?limit=500&sort=desc';
     const res = await fetch(`${BREVO_BASE}${path}`, {
-      headers: { 'api-key': process.env.BREVO_API_KEY || '', accept: 'application/json' },
+      headers: { 'api-key': process.env.BREVO_API_KEY, accept: 'application/json' },
     });
     if (!res.ok) {
       const errorBody = await res.text();
-      return NextResponse.json({ error: 'Brevo fetch failed', details: errorBody }, { status: 502 });
+      console.error(`[pipeline] Brevo fetch ${res.status}: ${errorBody.slice(0, 500)}`);
+      return NextResponse.json({ error: 'Brevo fetch failed', status: res.status, details: errorBody.slice(0, 500) }, { status: 502 });
     }
     const data = await res.json();
     const contacts: BrevoContact[] = data.contacts || [];
     const totalInBrevo = typeof data.count === 'number' ? data.count : contacts.length;
+    console.log(`[pipeline] fetched ${contacts.length} contacts in ${Date.now() - startedAt}ms`);
 
     const now = new Date();
 
@@ -89,73 +98,84 @@ export async function GET(req: NextRequest) {
     const stuck: AttentionContact[] = [];     // opened, didn't click, sent ≥3 days ago
     const goingCold: AttentionContact[] = []; // final_nudge sent, day 12+ (will auto-cold soon)
 
+    let contactErrors = 0;
     for (const c of contacts) {
-      const a = c.attributes || {};
-      const status = a.OUTREACH_STATUS || 'not_contacted';
-      const name = a.BUSINESS_NAME || a.FIRSTNAME || c.email.split('@')[0];
-      const town = a.TOWN || '';
+      try {
+        const a = c.attributes || {};
+        const status = a.OUTREACH_STATUS || 'not_contacted';
+        const name = a.BUSINESS_NAME || a.FIRSTNAME || (c.email ? c.email.split('@')[0] : 'Unknown');
+        const town = a.TOWN || '';
 
-      // Stage tally.
-      if (status === 'not_contacted') notContacted++;
-      else if (status === 'email_sent') sent++;
-      else if (status === 'followed_up') followedUp++;
-      else if (status === 'final_nudge') finalNudge++;
-      else if (status === 'listed') listed++;
-      else if (status === 'cold') cold++;
-      else if (status === 'responded') responded++;
+        // Stage tally.
+        if (status === 'not_contacted') notContacted++;
+        else if (status === 'email_sent') sent++;
+        else if (status === 'followed_up') followedUp++;
+        else if (status === 'final_nudge') finalNudge++;
+        else if (status === 'listed') listed++;
+        else if (status === 'cold') cold++;
+        else if (status === 'responded') responded++;
 
-      // Engagement tally. Hard bounce excluded from delivered to avoid
-      // double-counting in metrics.
-      if (a.LAST_DELIVERED_AT && !a.BOUNCED_AT) delivered++;
-      if (a.LAST_OPENED_AT) opened++;
-      if (a.LAST_CLICKED_AT) clicked++;
-      if (a.BOUNCED_AT) bounced++;
+        // Engagement tally. Hard bounce excluded from delivered to avoid
+        // double-counting in metrics.
+        if (a.LAST_DELIVERED_AT && !a.BOUNCED_AT) delivered++;
+        if (a.LAST_OPENED_AT) opened++;
+        if (a.LAST_CLICKED_AT) clicked++;
+        if (a.BOUNCED_AT) bounced++;
 
-      // ATTENTION QUEUES
+        // ATTENTION QUEUES
 
-      // Hottest: clicked at all, status not yet listed/cold/responded
-      const clickedAt = asDate(a.LAST_CLICKED_AT);
-      if (clickedAt && !['listed', 'cold', 'responded'].includes(status)) {
-        hottest.push({
-          email: c.email, name, town, status,
-          signal: `Clicked ${asNumber(a.CLICK_COUNT) > 1 ? `\u00d7 ${asNumber(a.CLICK_COUNT)}` : 'a link'}`,
-          signalAt: a.LAST_CLICKED_AT,
-          daysIn: daysBetween(clickedAt, now),
-        });
-      }
-
-      // Stuck: opened (so they read it), no click yet, last contact 3-7 days ago,
-      // status still in pipeline. These are the "follow up manually" candidates.
-      const openedAt = asDate(a.LAST_OPENED_AT);
-      const lastContact = asDate(a.LAST_CONTACT_DATE);
-      if (
-        openedAt && !clickedAt &&
-        ['email_sent', 'followed_up'].includes(status) &&
-        lastContact
-      ) {
-        const days = daysBetween(lastContact, now);
-        if (days >= 3 && days <= 9) {
-          stuck.push({
+        // Hottest: clicked at all, status not yet listed/cold/responded
+        const clickedAt = asDate(a.LAST_CLICKED_AT);
+        if (clickedAt && !['listed', 'cold', 'responded'].includes(status)) {
+          hottest.push({
             email: c.email, name, town, status,
-            signal: `Opened ${asNumber(a.OPEN_COUNT) > 1 ? `\u00d7 ${asNumber(a.OPEN_COUNT)}` : 'once'} but no click`,
-            signalAt: a.LAST_OPENED_AT,
-            daysIn: days,
+            signal: `Clicked ${asNumber(a.CLICK_COUNT) > 1 ? `\u00d7 ${asNumber(a.CLICK_COUNT)}` : 'a link'}`,
+            signalAt: a.LAST_CLICKED_AT,
+            daysIn: daysBetween(clickedAt, now),
           });
         }
-      }
 
-      // Going cold: final_nudge sent, day 12+ (auto-cold at day 14)
-      if (status === 'final_nudge' && lastContact) {
-        const days = daysBetween(lastContact, now);
-        if (days >= 12) {
-          goingCold.push({
-            email: c.email, name, town, status,
-            signal: 'Final nudge sent, no response',
-            signalAt: a.LAST_CONTACT_DATE,
-            daysIn: days,
-          });
+        // Stuck: opened (so they read it), no click yet, last contact 3-7 days ago,
+        // status still in pipeline. These are the "follow up manually" candidates.
+        const openedAt = asDate(a.LAST_OPENED_AT);
+        const lastContact = asDate(a.LAST_CONTACT_DATE);
+        if (
+          openedAt && !clickedAt &&
+          ['email_sent', 'followed_up'].includes(status) &&
+          lastContact
+        ) {
+          const days = daysBetween(lastContact, now);
+          if (days >= 3 && days <= 9) {
+            stuck.push({
+              email: c.email, name, town, status,
+              signal: `Opened ${asNumber(a.OPEN_COUNT) > 1 ? `\u00d7 ${asNumber(a.OPEN_COUNT)}` : 'once'} but no click`,
+              signalAt: a.LAST_OPENED_AT,
+              daysIn: days,
+            });
+          }
         }
+
+        // Going cold: final_nudge sent, day 12+ (auto-cold at day 14)
+        if (status === 'final_nudge' && lastContact) {
+          const days = daysBetween(lastContact, now);
+          if (days >= 12) {
+            goingCold.push({
+              email: c.email, name, town, status,
+              signal: 'Final nudge sent, no response',
+              signalAt: a.LAST_CONTACT_DATE,
+              daysIn: days,
+            });
+          }
+        }
+      } catch (perContactErr) {
+        // Don't let a single bad contact (corrupt date, weird attributes,
+        // etc.) crash the whole pipeline endpoint. Log and skip.
+        contactErrors++;
+        console.error(`[pipeline] contact processing failed for id=${c.id}:`, perContactErr);
       }
+    }
+    if (contactErrors > 0) {
+      console.warn(`[pipeline] skipped ${contactErrors} contacts due to errors`);
     }
 
     // Sort attention queues so the most urgent surface first.
@@ -196,6 +216,10 @@ export async function GET(req: NextRequest) {
       },
     });
   } catch (err: any) {
-    return NextResponse.json({ error: err?.message || 'Pipeline fetch failed' }, { status: 500 });
+    console.error('[pipeline] crashed:', err?.message, err?.stack);
+    return NextResponse.json({
+      error: err?.message || 'Pipeline fetch failed',
+      type: err?.name || 'Error',
+    }, { status: 500 });
   }
 }
