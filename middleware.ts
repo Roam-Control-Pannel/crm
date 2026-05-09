@@ -23,6 +23,7 @@ const PUBLIC_API_ROUTES = [
   '/api/brevo/webhook',             // Brevo posts engagement events here
   '/api/setup/brevo-attributes',    // bearer-gated, idempotent setup
   '/api/debug/contact',             // bearer-gated diagnostic
+  '/api/inbound/poll',              // bearer-gated IMAP reply poller (cron + manual)
 ];
 
 function isPublicApiRoute(pathname: string): boolean {
