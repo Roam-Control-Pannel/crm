@@ -1,6 +1,6 @@
 'use client';
 import {useState,useEffect,useCallback} from "react";
-import {Send,Plus,Pencil,X,Mail,Clock,CheckCircle,AlertCircle,Info,Star,MessageSquare,UserPlus,Search} from 'lucide-react';
+import {Send,Plus,Pencil,X,Mail,Clock,CheckCircle,AlertCircle,Info,Star,MessageSquare,UserPlus,Search,RotateCcw} from 'lucide-react';
 import {BrevoListSelector} from '@/components/BrevoListSelector';
 import {addNotification} from "@/components/NotificationCentre";
 
@@ -69,7 +69,7 @@ function TimelineIcon({type}:{type:string}){
   return<CheckCircle {...p} color="var(--ink-400)"/>;
 }
 
-function ContactPanel({contact,onClose,onSend}:{contact:Contact;onClose:()=>void;onSend:(c:Contact)=>void;}){
+function ContactPanel({contact,onClose,onSend,onReset}:{contact:Contact;onClose:()=>void;onSend:(c:Contact)=>void;onReset:(c:Contact)=>void;}){
   const attrs=contact.attributes||{};
   const nm=attrs.BUSINESS_NAME||attrs.FIRSTNAME||contact.email||'Unknown';
   const timeline=buildTimeline(contact);
@@ -173,6 +173,17 @@ function ContactPanel({contact,onClose,onSend}:{contact:Contact;onClose:()=>void
             <button onClick={saveNote} disabled={saving||!note.trim()} style={{flex:1,fontSize:11,padding:'7px 0',borderRadius:'var(--r-sm)',border:'1.5px solid var(--ink-200)',background:'var(--white)',cursor:'pointer',opacity:saving||!note.trim()?0.5:1}}>{saving?'Saving…':'Add note'}</button>
             <button onClick={()=>onSend(contact)} style={{flex:2,fontSize:11,padding:'7px 0',borderRadius:'var(--r-sm)',border:'none',background:'var(--maroon-700)',color:'white',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',gap:6}}><Send size={12}/> Send email</button>
           </div>
+          {/* Reset status — only useful when there's something to reset. Keeps
+              UI uncluttered when the contact is already at 'not_contacted'.
+              Engagement attributes (LAST_OPENED_AT, OPEN_COUNT etc.) stay
+              intact \u2014 those are real facts about what the contact did and
+              shouldn't be erased. We only clear OUTREACH_STATUS and
+              LAST_CONTACT_DATE so the cron will pick them up again. */}
+          {st!=='not_contacted'&&(
+            <button onClick={()=>onReset(contact)} style={{marginTop:8,width:'100%',fontSize:10.5,padding:'6px 0',borderRadius:'var(--r-sm)',border:'1px solid var(--ink-200)',background:'var(--white)',color:'var(--ink-500)',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',gap:6,fontWeight:600}}>
+              <RotateCcw size={11}/> Reset status to Not Contacted
+            </button>
+          )}
         </div>
       </div>
     </>
@@ -280,6 +291,43 @@ export default function ContactsPage(){
     setQueueing(null);
   }
 
+  /**
+   * Reset a contact's outreach status back to 'not_contacted', so the cron
+   * picks them up again from Step 1. Used to recover contacts that ended up
+   * in a wrong end-state (e.g. accidentally marked cold by a manual rapid-
+   * click bug, or a flaky Brevo event).
+   *
+   * IMPORTANT: only OUTREACH_STATUS and LAST_CONTACT_DATE are cleared.
+   * Engagement attributes (LAST_OPENED_AT, OPEN_COUNT, LAST_CLICKED_AT, etc.)
+   * are FACTS about what the contact did and are preserved. The reset is a
+   * pipeline-state correction, not a history wipe.
+   */
+  async function resetStatus(c:Contact){
+    if(!c.email)return;
+    const businessName=c.attributes?.BUSINESS_NAME||c.attributes?.FIRSTNAME||c.email.split('@')[0]||'this contact';
+    const currentStatus=c.attributes?.OUTREACH_STATUS||'not_contacted';
+    const ok=window.confirm(
+      `Reset ${businessName} from "${currentStatus}" back to "not_contacted"?\n\nThis lets the cron pick them up from Step 1 again. Engagement history (opens, clicks) is preserved.`
+    );
+    if(!ok)return;
+    try{
+      // Send empty string to clear LAST_CONTACT_DATE — Brevo treats empty
+      // string as "unset". Without clearing it, the cron's daysSince logic
+      // would still use the old date.
+      await fetch('/api/brevo/contacts',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+        email:c.email,
+        OUTREACH_STATUS:'not_contacted',
+        LAST_CONTACT_DATE:'',
+      })});
+      showToast(`✓ ${businessName} reset to Not Contacted`);
+      addNotification({type:'info',title:'Status reset',body:`${businessName} reset from "${currentStatus}" \u2192 "not_contacted"`});
+      loadContacts(listFilter||undefined);
+    }catch(e){
+      showToast('Failed to reset status');
+      console.error(e);
+    }
+  }
+
   async function addToQueue(c:Contact){
     if(!c.email){showToast('Contact needs an email address');return;}
     setQueueing(c.id);
@@ -347,7 +395,7 @@ export default function ContactsPage(){
       {toast&&<div style={{position:'fixed',bottom:24,right:24,background:'var(--ink-900)',color:'white',padding:'12px 20px',borderRadius:'var(--r-md)',fontSize:13,fontWeight:500,zIndex:1000,boxShadow:'var(--shadow-lg)'}}>{toast}</div>}
 
       {/* Contact profile panel */}
-      {selectedContact&&<ContactPanel contact={selectedContact} onClose={()=>setSelectedContact(null)} onSend={async(c)=>{setSelectedContact(null);await sendEmail(c);}}/>}
+      {selectedContact&&<ContactPanel contact={selectedContact} onClose={()=>setSelectedContact(null)} onSend={async(c)=>{setSelectedContact(null);await sendEmail(c);}} onReset={async(c)=>{setSelectedContact(null);await resetStatus(c);}}/>}
 
       {/* Header */}
       <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',marginBottom:20}} className="page-header">
