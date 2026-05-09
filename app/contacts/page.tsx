@@ -229,22 +229,52 @@ export default function ContactsPage(){
 
   async function sendEmail(c:Contact){
     if(!c.email){showToast('Contact needs an email address');return;}
+
+    // Rate-limit guard. Without this the user can rapid-click Send and
+    // bump a contact through Step 1 → 2 → 3 in minutes, blowing past the
+    // intended day-spacing the cron enforces. If this contact was emailed
+    // in the last 12h, ask for explicit confirmation before sending again.
+    const lastContact=c.attributes?.LAST_CONTACT_DATE;
+    if(lastContact){
+      const hoursSince=(Date.now()-new Date(lastContact).getTime())/3_600_000;
+      if(hoursSince<12){
+        const businessName=c.attributes?.BUSINESS_NAME||c.attributes?.FIRSTNAME||c.email.split('@')[0]||'this contact';
+        const ok=window.confirm(
+          `${businessName} was already emailed within the last ${Math.max(1,Math.round(hoursSince))} hour(s). Send another email anyway?\n\nClick OK to send, or Cancel to wait for the cron to handle the day-spacing.`
+        );
+        if(!ok){setQueueing(null);return;}
+      }
+    }
+
     setQueueing(c.id);
     try{
       // Personalisation fallbacks for contacts that weren't imported via the
       // business-finder flow (e.g. manually-added personal contacts). Use the
       // most specific name we have: business → first name → email local-part.
       const businessName=c.attributes?.BUSINESS_NAME||c.attributes?.FIRSTNAME||c.email.split('@')[0]||'your business';
-      const step=c.attributes?.OUTREACH_STATUS==='email_sent'?2:c.attributes?.OUTREACH_STATUS==='followed_up'?3:1;
+      const status=c.attributes?.OUTREACH_STATUS;
+      const step:1|2|3=status==='email_sent'?2:status==='followed_up'?3:1;
       const res=await fetch('/api/brevo/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:c.email,businessName,town:c.attributes?.TOWN||'your area',knownFor:c.attributes?.KNOWN_FOR||'its independent spirit',step})});
       if(!res.ok)throw new Error('Send failed');
-      const newStatus=step===1?'email_sent':step===2?'followed_up':'cold';
-      // Persist BUSINESS_NAME so future sends pull a real value, not a fallback.
-      const attrPatch:Record<string,string>={OUTREACH_STATUS:newStatus};
+      // Status transitions match what the daily cron does. Step 3 (the final
+      // nudge) goes to 'final_nudge', NOT 'cold'. The cron is the only thing
+      // that should auto-cold a contact, and only after Day 14 of no response.
+      const newStatus=step===1?'email_sent':step===2?'followed_up':'final_nudge';
+      const todayISODate=new Date().toISOString().slice(0,10);
+      const attrPatch:Record<string,string>={
+        OUTREACH_STATUS:newStatus,
+        // Stamp the date too so the cron's day-spacing logic counts correctly
+        // from this manual send rather than the previous one.
+        LAST_CONTACT_DATE:todayISODate,
+      };
       if(!c.attributes?.BUSINESS_NAME)attrPatch.BUSINESS_NAME=businessName;
       await fetch('/api/brevo/contacts',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:c.email,...attrPatch})});
       showToast(`✓ Email sent to ${businessName}`);
-      addNotification({type:'email_sent',title:'Email sent',body:`Step ${step} outreach sent to ${businessName} at ${c.email}`});
+      // Clearer attribution: "You sent" makes it explicit this was a manual
+      // action, not the automated cron. Helps when scanning the notification
+      // history later.
+      const stepLabel=step===1?'first outreach':step===2?'follow-up':'final nudge';
+      addNotification({type:'email_sent',title:'Email sent',body:`You sent the ${stepLabel} to ${businessName} (${c.email})`});
       loadContacts(listFilter||undefined);
     }catch(e){showToast('Failed to send email');console.error(e);}
     setQueueing(null);

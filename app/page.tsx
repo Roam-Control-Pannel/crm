@@ -57,6 +57,7 @@ export default function Dashboard() {
   const [data, setData] = useState<PipelineResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -64,6 +65,7 @@ export default function Dashboard() {
       if (res.ok) {
         const d = await res.json();
         setData(d);
+        setLastUpdated(new Date());
       }
     } catch (err) {
       console.error('Pipeline load failed:', err);
@@ -75,12 +77,29 @@ export default function Dashboard() {
 
   useEffect(() => { load(); }, [load]);
 
+  // Background refresh every 60s so the dashboard reflects fresh webhook
+  // events without the user mashing F5. Webhooks fire within seconds of an
+  // open/click in Brevo, so this gives near-real-time visibility.
+  useEffect(() => {
+    const interval = setInterval(load, 60_000);
+    return () => clearInterval(interval);
+  }, [load]);
+
   async function handleRefresh() {
     setRefreshing(true);
     await load();
   }
 
   const today = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const lastUpdatedLabel = lastUpdated
+    ? (() => {
+        const s = Math.floor((Date.now() - lastUpdated.getTime()) / 1000);
+        if (s < 10) return 'just now';
+        if (s < 60) return `${s}s ago`;
+        if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+        return lastUpdated.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+      })()
+    : null;
 
   // The funnel visualises the dominant flow. Cold and responded are end-states
   // shown separately so they don't muddy the linear progression view.
@@ -103,7 +122,7 @@ export default function Dashboard() {
       <div className="page-header">
         <div>
           <h1 className="page-title">Growth Dashboard</h1>
-          <p className="page-sub">{today} · Live data from Brevo</p>
+          <p className="page-sub">{today} · Live data from Brevo{lastUpdatedLabel && ` · Updated ${lastUpdatedLabel}`}</p>
         </div>
         <div className="btn-row">
           <button onClick={handleRefresh} disabled={refreshing} className="btn-ghost" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
