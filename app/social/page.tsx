@@ -8,6 +8,32 @@ import { loadWithMigration, saveRemote } from '@/lib/client-store';
 import BrainPicker from '@/components/BrainPicker';
 import type { BrainItem } from '@/lib/brain';
 
+// VOICE-RULES-V1: shared voice + format rules for AI post generation.
+// One source of truth so the modal-button prompt and the bulk-generate
+// prompt never drift apart. Tweak the spec here, both flows update.
+function buildVoiceRules(platform: string): string {
+  const lengthByPlatform: Record<string, string> = {
+    linkedin: '80-120 words',
+    facebook: '50-80 words',
+    instagram: '40-60 words',
+  };
+  const targetLength = lengthByPlatform[platform.toLowerCase()] || '60-90 words';
+
+  return `VOICE & FORMAT RULES (follow strictly):
+
+- Length: ${targetLength}. Strict ceiling — do not exceed.
+- Short, punchy sentences. Strip every word that isn't pulling weight.
+- Fact-driven, but DO NOT invent statistics, percentages, or studies. No "76% of customers..." or "research shows...". If you need a fact, use observed behaviour, lived patterns, or what's plainly true ("People decide in seconds. They want photos and hours, not a tagline.").
+- Personal and charming, never corporate or hype-y. Think witty friend who happens to know the industry — not a brand consultant.
+- No bullshit, no buzzwords, no "in today's fast-paced world", no "game-changing", no "unlock your potential".
+- Format: short paragraphs separated by ONE BLANK LINE between them. Two or three paragraphs maximum. Easy to skim.
+- First sentence is a hook — a fact, a question, a sharp observation. Not a greeting.
+- End with one clear thing for the reader to do or notice — not a stack of CTAs.
+- Emojis: zero or one. If used, only when it actually adds something. Never as bullet points or section headers.`;
+}
+
+
+
 // ============================================================================
 // Storage — posts now live in the per-user server store (Netlify Blobs).
 // One-time migration from the legacy localStorage key happens automatically
@@ -335,6 +361,8 @@ Brand context:
 
 Theme / topic: ${theme}
 
+${buildVoiceRules(acc.platform)}
+
 Return ONLY the caption text. No JSON, no markdown, no preamble. Just the caption ready to publish.`;
 
     setGeneratingCaption(true);
@@ -477,10 +505,14 @@ Brand context:
 Theme / topic for this batch: ${genForm.theme}
 ${goalLabel ? 'Goal of these posts: ' + goalLabel : ''}
 
+${buildVoiceRules(acc.platform)}
+
+Each of the ${genForm.postsPerAccount} posts must follow these voice and format rules independently. Vary the angle, hook, and observation across the batch — no two posts should feel like the same thought rephrased.
+
 ${brainCatalog ? '\n' + brainCatalog + '\n\nFor EACH post, choose the brain image whose tags/description best fit the post. Set "brainItemId" to that id. If no brain image is a strong topical fit, set "brainItemId" to null.' : ''}
 
 Return EXACTLY ${genForm.postsPerAccount} posts as a JSON array. Each post is an object with fields:
-  - "caption": the post text
+  - "caption": the post text (following the voice rules above)
   - "brainItemId": ${brainCatalog ? 'one of the brain image ids above, or null if none fit' : 'always null'}
 
 Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"img_123"},{"caption":"...","brainItemId":null}]`;
