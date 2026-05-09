@@ -35,15 +35,17 @@ function buildTimeline(contact:Contact,replies:StoredReply[]=[]):TimelineEvent[]
   }
   if(replies.length>0){
     for(const r of replies){
+      const truncated=r.bodyText.length>200;
       events.push({
         id:`reply-${r.uid}`,
         type:r.isAutoResponder?'auto_reply':'reply',
         title:r.isAutoResponder?'Auto-reply received':'Reply received',
-        body:r.bodyText.length>200?r.bodyText.slice(0,200)+'… [show full]':r.bodyText,
+        body:truncated?r.bodyText.slice(0,200)+'…':r.bodyText,
         timestamp:new Date(r.receivedAt),
         meta:{
           subject:r.subject,
           classification:r.isAutoResponder?'Auto-responder':'Real reply',
+          ...(truncated?{fullBody:r.bodyText}:{}),
         },
       });
     }
@@ -94,6 +96,8 @@ function ContactPanel({contact,onClose,onSend,onReset}:{contact:Contact;onClose:
   const attrs=contact.attributes||{};
   const nm=attrs.BUSINESS_NAME||attrs.FIRSTNAME||contact.email||'Unknown';
   const [replies,setReplies]=useState<StoredReply[]>([]);
+  const [expandedEvents,setExpandedEvents]=useState<Set<string>>(new Set());
+  const toggleEvent=(id:string)=>setExpandedEvents(p=>{const n=new Set(p);n.has(id)?n.delete(id):n.add(id);return n;});
   // Fetch real replies for this contact when the panel opens. Falls back
   // silently to the synthetic placeholder if the fetch fails or returns
   // empty — the timeline still renders.
@@ -192,7 +196,17 @@ function ContactPanel({contact,onClose,onSend,onReset}:{contact:Contact;onClose:
                     <span style={{fontSize:12,fontWeight:600,color:'var(--ink-900)'}}>{ev.title}</span>
                     <span style={{fontSize:10,color:'var(--ink-400)',flexShrink:0}}>{timeAgo(ev.timestamp)}</span>
                   </div>
-                  {ev.body&&<div style={{fontSize:11,color:'var(--ink-600)',lineHeight:1.5,fontStyle:ev.type==='reply'||ev.type==='note'?'italic':undefined,background:ev.type==='reply'||ev.type==='note'?'var(--paper)':undefined,borderRadius:'var(--r-sm)',padding:ev.type==='reply'||ev.type==='note'?'6px 8px':undefined}}>{ev.body}</div>}
+                  {ev.body&&(()=>{
+                    const isExpandable=!!ev.meta?.fullBody;
+                    const isExpanded=expandedEvents.has(ev.id);
+                    const shown=isExpandable&&isExpanded?ev.meta!.fullBody:ev.body;
+                    return (
+                      <div style={{fontSize:11,color:'var(--ink-600)',lineHeight:1.5,fontStyle:ev.type==='reply'||ev.type==='auto_reply'||ev.type==='note'?'italic':undefined,background:ev.type==='reply'||ev.type==='auto_reply'||ev.type==='note'?'var(--paper)':undefined,borderRadius:'var(--r-sm)',padding:ev.type==='reply'||ev.type==='auto_reply'||ev.type==='note'?'6px 8px':undefined,whiteSpace:isExpanded?'pre-wrap':undefined}}>
+                        {shown}
+                        {isExpandable&&(<>{' '}<button type="button" onClick={(e)=>{e.preventDefault();e.stopPropagation();toggleEvent(ev.id);}} style={{background:'none',border:'none',padding:0,color:'var(--maroon-700)',fontSize:11,fontWeight:600,fontStyle:'normal',cursor:'pointer',textDecoration:'underline'}}>{isExpanded?'show less':'show more'}</button></>)}
+                      </div>
+                    );
+                  })()}
                   {ev.meta?.classification&&<span style={{display:'inline-flex',marginTop:4,fontSize:10,padding:'2px 7px',borderRadius:'var(--r-pill)',background:'#e8f5ee',color:'var(--ok)',fontWeight:600}}>AI: {ev.meta.classification}</span>}
                   {ev.meta?.personalised&&<span style={{display:'inline-flex',marginTop:4,fontSize:10,padding:'2px 7px',borderRadius:'var(--r-pill)',background:'var(--maroon-50)',color:'var(--maroon-600)',fontWeight:600}}>AI personalised</span>}
                 </div>
