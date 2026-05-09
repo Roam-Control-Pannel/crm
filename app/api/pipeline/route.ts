@@ -1,0 +1,201 @@
+import { NextRequest, NextResponse } from 'next/server';
+
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
+/**
+ * Pipeline data for the dashboard.
+ *
+ * Returns:
+ *   - stages: counts per funnel stage (Not contacted → Listed)
+ *   - attention: three "needs attention" lists (hottest, stuck, going cold)
+ *   - totals: overall stats
+ *
+ * Single Brevo fetch per call; everything computed in memory.
+ */
+
+const BREVO_BASE = 'https://api.brevo.com/v3';
+
+interface BrevoContact {
+  id: number;
+  email: string;
+  attributes?: Record<string, string>;
+}
+
+interface AttentionContact {
+  email: string;
+  name: string;
+  town: string;
+  status: string;
+  signal: string;       // why this contact's flagged
+  signalAt: string;     // when the signal happened
+  daysIn: number;       // days at this stage
+}
+
+function asNumber(v: any): number {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function asDate(v: any): Date | null {
+  if (!v) return null;
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function daysBetween(a: Date, b: Date): number {
+  return Math.floor((b.getTime() - a.getTime()) / 86_400_000);
+}
+
+export async function GET(req: NextRequest) {
+  const { searchParams } = new URL(req.url);
+  const listId = searchParams.get('listId');
+
+  try {
+    const path = listId
+      ? `/contacts/lists/${encodeURIComponent(listId)}/contacts?limit=500&sort=desc`
+      : '/contacts?limit=500&sort=desc';
+    const res = await fetch(`${BREVO_BASE}${path}`, {
+      headers: { 'api-key': process.env.BREVO_API_KEY || '', accept: 'application/json' },
+    });
+    if (!res.ok) {
+      const errorBody = await res.text();
+      return NextResponse.json({ error: 'Brevo fetch failed', details: errorBody }, { status: 502 });
+    }
+    const data = await res.json();
+    const contacts: BrevoContact[] = data.contacts || [];
+    const totalInBrevo = typeof data.count === 'number' ? data.count : contacts.length;
+
+    const now = new Date();
+
+    // Stage counts. A contact is in exactly one of these (status-based).
+    let notContacted = 0;
+    let sent = 0;            // email_sent only
+    let followedUp = 0;      // followed_up
+    let finalNudge = 0;      // final_nudge
+    let listed = 0;
+    let cold = 0;
+    let responded = 0;
+
+    // Engagement signals (cross-cut: a contact can be 'sent' AND 'opened').
+    let delivered = 0;
+    let opened = 0;
+    let clicked = 0;
+    let bounced = 0;
+
+    // Attention queues. Cap at 5 each so the dashboard stays scannable;
+    // overflow gets a "view all" link.
+    const hottest: AttentionContact[] = [];   // clicked but not yet listed
+    const stuck: AttentionContact[] = [];     // opened, didn't click, sent ≥3 days ago
+    const goingCold: AttentionContact[] = []; // final_nudge sent, day 12+ (will auto-cold soon)
+
+    for (const c of contacts) {
+      const a = c.attributes || {};
+      const status = a.OUTREACH_STATUS || 'not_contacted';
+      const name = a.BUSINESS_NAME || a.FIRSTNAME || c.email.split('@')[0];
+      const town = a.TOWN || '';
+
+      // Stage tally.
+      if (status === 'not_contacted') notContacted++;
+      else if (status === 'email_sent') sent++;
+      else if (status === 'followed_up') followedUp++;
+      else if (status === 'final_nudge') finalNudge++;
+      else if (status === 'listed') listed++;
+      else if (status === 'cold') cold++;
+      else if (status === 'responded') responded++;
+
+      // Engagement tally. Hard bounce excluded from delivered to avoid
+      // double-counting in metrics.
+      if (a.LAST_DELIVERED_AT && !a.BOUNCED_AT) delivered++;
+      if (a.LAST_OPENED_AT) opened++;
+      if (a.LAST_CLICKED_AT) clicked++;
+      if (a.BOUNCED_AT) bounced++;
+
+      // ATTENTION QUEUES
+
+      // Hottest: clicked at all, status not yet listed/cold/responded
+      const clickedAt = asDate(a.LAST_CLICKED_AT);
+      if (clickedAt && !['listed', 'cold', 'responded'].includes(status)) {
+        hottest.push({
+          email: c.email, name, town, status,
+          signal: `Clicked ${asNumber(a.CLICK_COUNT) > 1 ? `\u00d7 ${asNumber(a.CLICK_COUNT)}` : 'a link'}`,
+          signalAt: a.LAST_CLICKED_AT,
+          daysIn: daysBetween(clickedAt, now),
+        });
+      }
+
+      // Stuck: opened (so they read it), no click yet, last contact 3-7 days ago,
+      // status still in pipeline. These are the "follow up manually" candidates.
+      const openedAt = asDate(a.LAST_OPENED_AT);
+      const lastContact = asDate(a.LAST_CONTACT_DATE);
+      if (
+        openedAt && !clickedAt &&
+        ['email_sent', 'followed_up'].includes(status) &&
+        lastContact
+      ) {
+        const days = daysBetween(lastContact, now);
+        if (days >= 3 && days <= 9) {
+          stuck.push({
+            email: c.email, name, town, status,
+            signal: `Opened ${asNumber(a.OPEN_COUNT) > 1 ? `\u00d7 ${asNumber(a.OPEN_COUNT)}` : 'once'} but no click`,
+            signalAt: a.LAST_OPENED_AT,
+            daysIn: days,
+          });
+        }
+      }
+
+      // Going cold: final_nudge sent, day 12+ (auto-cold at day 14)
+      if (status === 'final_nudge' && lastContact) {
+        const days = daysBetween(lastContact, now);
+        if (days >= 12) {
+          goingCold.push({
+            email: c.email, name, town, status,
+            signal: 'Final nudge sent, no response',
+            signalAt: a.LAST_CONTACT_DATE,
+            daysIn: days,
+          });
+        }
+      }
+    }
+
+    // Sort attention queues so the most urgent surface first.
+    hottest.sort((a, b) => new Date(b.signalAt).getTime() - new Date(a.signalAt).getTime());
+    stuck.sort((a, b) => b.daysIn - a.daysIn);
+    goingCold.sort((a, b) => b.daysIn - a.daysIn);
+
+    return NextResponse.json({
+      // Funnel stages, in narrative order.
+      stages: {
+        notContacted,
+        sent,
+        followedUp,
+        finalNudge,
+        listed,
+        cold,
+        responded,
+      },
+      // Engagement layer (independent of stage).
+      engagement: {
+        delivered,
+        opened,
+        clicked,
+        bounced,
+      },
+      attention: {
+        hottest: hottest.slice(0, 8),
+        stuck: stuck.slice(0, 8),
+        goingCold: goingCold.slice(0, 8),
+        // True totals so we can show "+ N more" if capped.
+        hottestTotal: hottest.length,
+        stuckTotal: stuck.length,
+        goingColdTotal: goingCold.length,
+      },
+      totals: {
+        contactsInResults: contacts.length,
+        contactsTotal: totalInBrevo,
+      },
+    });
+  } catch (err: any) {
+    return NextResponse.json({ error: err?.message || 'Pipeline fetch failed' }, { status: 500 });
+  }
+}

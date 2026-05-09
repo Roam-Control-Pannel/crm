@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { addNotification } from '@/lib/notifications';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -99,6 +100,16 @@ export async function POST(req: NextRequest) {
 
     const patch: Record<string, any> = {};
     const ts = nowIso();
+    // Notification queue for this event. We collect them here and fire after
+    // the contact update succeeds so we don't notify about a state we failed
+    // to persist.
+    let notif: {
+      type: 'hot_lead' | 'engagement' | 'bounce' | 'unsubscribe';
+      title: string;
+      body: string;
+      dedupeKey: string;
+    } | null = null;
+    const displayName = current.BUSINESS_NAME || current.FIRSTNAME || email;
 
     switch (event) {
       case 'delivered':
@@ -108,17 +119,38 @@ export async function POST(req: NextRequest) {
           patch.BOUNCED_AT = '';
           patch.BOUNCE_TYPE = '';
         }
+        // No notification — delivered is the expected happy path.
         break;
 
       case 'opened':
-      case 'unique_opened':
+      case 'unique_opened': {
         patch.LAST_OPENED_AT = ts;
-        patch.OPEN_COUNT = String(Number(current.OPEN_COUNT || 0) + 1);
+        const prevOpens = Number(current.OPEN_COUNT || 0);
+        patch.OPEN_COUNT = String(prevOpens + 1);
+        // Notify only on FIRST open of an email cycle. Repeat opens are noise.
+        // Dedupe key includes the day so a re-engagement after weeks notifies
+        // again, but multiple opens in one day stay quiet.
+        if (prevOpens === 0) {
+          notif = {
+            type: 'engagement',
+            title: `${displayName} opened your email`,
+            body: 'First open — they\u2019re reading.',
+            dedupeKey: `engagement:${email}:${ts.slice(0, 10)}`,
+          };
+        }
         break;
+      }
 
       case 'click':
         patch.LAST_CLICKED_AT = ts;
         patch.CLICK_COUNT = String(Number(current.CLICK_COUNT || 0) + 1);
+        // Click = hot lead. Always notify — high-value signal.
+        notif = {
+          type: 'hot_lead',
+          title: `\ud83d\udd25 ${displayName} clicked through`,
+          body: 'Hot lead \u2014 follow up while interest is fresh.',
+          dedupeKey: `hot_lead:${email}:${ts.slice(0, 10)}`,
+        };
         break;
 
       case 'hard_bounce':
@@ -127,29 +159,50 @@ export async function POST(req: NextRequest) {
         // Hard bounces mean the address is dead. Mark cold so the cron
         // doesn't keep trying.
         patch.OUTREACH_STATUS = 'cold';
+        notif = {
+          type: 'bounce',
+          title: `${displayName} hard-bounced`,
+          body: 'Address rejected \u2014 marked cold automatically.',
+          dedupeKey: `bounce:${email}`,
+        };
         break;
 
       case 'soft_bounce':
         patch.BOUNCED_AT = ts;
         patch.BOUNCE_TYPE = 'soft';
         // Soft = temporary issue (full mailbox, server down). Don't mark
-        // cold; let the cron retry after the standard delay.
+        // cold; let the cron retry after the standard delay. Don't notify
+        // on softs either — they're often transient.
         break;
 
       case 'unsubscribed':
         patch.UNSUBSCRIBED_AT = ts;
         patch.OUTREACH_STATUS = 'cold';
+        notif = {
+          type: 'unsubscribe',
+          title: `${displayName} unsubscribed`,
+          body: 'No further emails will be sent.',
+          dedupeKey: `unsub:${email}`,
+        };
         break;
 
       case 'spam':
       case 'complaint':
         patch.SPAM_AT = ts;
         patch.OUTREACH_STATUS = 'cold';
+        notif = {
+          type: 'bounce',
+          title: `${displayName} marked as spam`,
+          body: 'Recipient flagged the email \u2014 contact marked cold.',
+          dedupeKey: `spam:${email}`,
+        };
         break;
 
       case 'blocked':
         patch.BLOCKED_AT = ts;
         patch.OUTREACH_STATUS = 'cold';
+        // No notification — blocks are usually our own sender-side issue,
+        // less actionable per-contact.
         break;
 
       // 'error', 'deferred', 'request', etc. — ignore for now
@@ -159,8 +212,19 @@ export async function POST(req: NextRequest) {
     }
 
     const ok = await updateContact(email, patch);
-    if (ok) results.updated++;
-    else results.errors++;
+    if (ok) {
+      results.updated++;
+      // Fire the notification only after a successful contact update.
+      if (notif) {
+        await addNotification({
+          ...notif,
+          contactEmail: email,
+          href: `/contacts?search=${encodeURIComponent(email)}`,
+        });
+      }
+    } else {
+      results.errors++;
+    }
   }
 
   return NextResponse.json({ ok: true, ...results });
