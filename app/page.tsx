@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
-import { Flame, Clock, Snowflake, RefreshCw, ArrowRight, MapPin, Mail, MousePointerClick, CheckCircle, AlertCircle } from 'lucide-react';
+import { Flame, Clock, Snowflake, RefreshCw, ArrowRight, MapPin, Mail, MousePointerClick, CheckCircle, AlertCircle, MessageSquare } from 'lucide-react';
 
 interface PipelineStages {
   notContacted: number;
