@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { mostRecentReplyForContact } from '@/lib/replies';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -31,6 +32,7 @@ interface AttentionContact {
   signal: string;       // why this contact's flagged
   signalAt: string;     // when the signal happened
   daysIn: number;       // days at this stage
+  replyPreview?: string; // first ~200 chars of reply body (for replied queue)
 }
 
 function asNumber(v: any): number {
@@ -97,6 +99,7 @@ export async function GET(req: NextRequest) {
     const hottest: AttentionContact[] = [];   // clicked but not yet listed
     const stuck: AttentionContact[] = [];     // opened, didn't click, sent ≥3 days ago
     const goingCold: AttentionContact[] = []; // final_nudge sent, day 12+ (will auto-cold soon)
+    const replied: AttentionContact[] = [];   // status=responded, with reply preview
 
     let contactErrors = 0;
     for (const c of contacts) {
@@ -167,6 +170,17 @@ export async function GET(req: NextRequest) {
             });
           }
         }
+
+        // Replied: status=responded, sorted by LAST_REPLIED_AT desc.
+        // Cheap to flag here; we hydrate previews after the loop.
+        if (status === 'responded' && a.LAST_REPLIED_AT) {
+          replied.push({
+            email: c.email, name, town, status,
+            signal: a.LAST_REPLY_SUBJECT || 'Replied',
+            signalAt: a.LAST_REPLIED_AT,
+            daysIn: daysBetween(asDate(a.LAST_REPLIED_AT) || now, now),
+          });
+        }
       } catch (perContactErr) {
         // Don't let a single bad contact (corrupt date, weird attributes,
         // etc.) crash the whole pipeline endpoint. Log and skip.
@@ -182,6 +196,22 @@ export async function GET(req: NextRequest) {
     hottest.sort((a, b) => new Date(b.signalAt).getTime() - new Date(a.signalAt).getTime());
     stuck.sort((a, b) => b.daysIn - a.daysIn);
     goingCold.sort((a, b) => b.daysIn - a.daysIn);
+    replied.sort((a, b) => new Date(b.signalAt).getTime() - new Date(a.signalAt).getTime());
+
+    // Hydrate reply previews for the top of the replied queue only.
+    // We cap at the first 8 (same as the queue display cap) so we don't
+    // pay for Blobs reads on contacts that won't be shown anyway.
+    const repliedTopN = replied.slice(0, 8);
+    await Promise.all(
+      repliedTopN.map(async (entry) => {
+        const r = await mostRecentReplyForContact(entry.email);
+        if (r?.bodyText) {
+          entry.replyPreview = r.bodyText.length > 200
+            ? r.bodyText.slice(0, 200) + '\u2026'
+            : r.bodyText;
+        }
+      })
+    );
 
     return NextResponse.json({
       // Funnel stages, in narrative order.
@@ -205,10 +235,12 @@ export async function GET(req: NextRequest) {
         hottest: hottest.slice(0, 8),
         stuck: stuck.slice(0, 8),
         goingCold: goingCold.slice(0, 8),
+        replied: repliedTopN,
         // True totals so we can show "+ N more" if capped.
         hottestTotal: hottest.length,
         stuckTotal: stuck.length,
         goingColdTotal: goingCold.length,
+        repliedTotal: replied.length,
       },
       totals: {
         contactsInResults: contacts.length,

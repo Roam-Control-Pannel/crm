@@ -7,6 +7,11 @@ import {addNotification} from "@/components/NotificationCentre";
 interface Contact {id:number;email:string;attributes:Record<string,string>;listIds?:number[];}
 interface BrevoList {id:number;name:string;uniqueSubscribers:number;}
 interface TimelineEvent {id:string;type:string;title:string;body?:string;user?:string;timestamp:Date;meta?:Record<string,string>;}
+interface StoredReply {
+  uid:number;fromEmail:string;fromName:string|null;subject:string;
+  bodyText:string;bodyTextRaw:string;receivedAt:string;
+  isAutoResponder:boolean;storedAt:string;
+}
 
 const sColors:Record<string,string>={not_contacted:'var(--ink-300)',email_sent:'var(--warn)',followed_up:'var(--warn)',responded:'var(--info)',listed:'var(--ok)',cold:'var(--alert)'};
 const sLabels:Record<string,string>={not_contacted:'Not contacted',email_sent:'Email sent',followed_up:'Followed up',responded:'Responded',listed:'Listed ✓',cold:'Cold'};
@@ -16,7 +21,7 @@ function uniqueTowns(contacts:Contact[]):string[]{const seen:Record<string,boole
 function getInitials(name:string):string{return name.split(' ').map((w:string)=>w[0]).join('').slice(0,2).toUpperCase();}
 function timeAgo(d:Date):string{const s=Math.floor((Date.now()-d.getTime())/1000);if(s<60)return 'just now';if(s<3600)return Math.floor(s/60)+'m ago';if(s<86400)return Math.floor(s/3600)+'h ago';return Math.floor(s/86400)+'d ago';}
 
-function buildTimeline(contact:Contact):TimelineEvent[]{
+function buildTimeline(contact:Contact,replies:StoredReply[]=[]):TimelineEvent[]{
   const events:TimelineEvent[]=[];const attrs=contact.attributes||{};
   events.push({id:'created',type:'created',title:'Contact created',body:`Imported via ${attrs.SOURCE||'manual'} · ${attrs.TOWN||'unknown town'}`,timestamp:new Date(Date.now()-7*86400000)});
   if(attrs.WEBSITE||attrs.PHONE){events.push({id:'enriched',type:'enriched',title:'Contact enriched',body:'Email and phone details found',timestamp:new Date(Date.now()-6*86400000)});}
@@ -28,7 +33,21 @@ function buildTimeline(contact:Contact):TimelineEvent[]{
     events.push({id:'opened',type:'email_opened',title:'Email opened × 2',body:'Strong engagement signal',timestamp:new Date(Date.now()-3*86400000)});
     events.push({id:'email2',type:'email_sent',title:'Step 2 follow-up sent via Brevo',body:`Subject: "Just checking in — ${attrs.TOWN||'your area'} on Roam"`,timestamp:new Date(Date.now()-2*86400000)});
   }
-  if(['responded','listed'].includes(attrs.OUTREACH_STATUS||'')){events.push({id:'reply',type:'reply',title:'Reply received',body:'"Thanks for getting in touch — we\'d love to be featured. Can you send more details?"',timestamp:new Date(Date.now()-86400000),meta:{classification:'Interested'}});}
+  if(replies.length>0){
+    for(const r of replies){
+      events.push({
+        id:`reply-${r.uid}`,
+        type:r.isAutoResponder?'auto_reply':'reply',
+        title:r.isAutoResponder?'Auto-reply received':'Reply received',
+        body:r.bodyText.length>200?r.bodyText.slice(0,200)+'… [show full]':r.bodyText,
+        timestamp:new Date(r.receivedAt),
+        meta:{
+          subject:r.subject,
+          classification:r.isAutoResponder?'Auto-responder':'Real reply',
+        },
+      });
+    }
+  }else if(['responded','listed'].includes(attrs.OUTREACH_STATUS||'')){events.push({id:'reply',type:'reply',title:'Reply received',body:'"Thanks for getting in touch — we\'d love to be featured. Can you send more details?"',timestamp:new Date(Date.now()-86400000),meta:{classification:'Interested (placeholder)'}});}
   if(attrs.NOTES){events.push({id:'note',type:'note',title:'Note added',body:attrs.NOTES,user:'Roam Local',timestamp:new Date(Date.now()-3600000)});}
   return events.reverse();
 }
@@ -55,6 +74,7 @@ function getSuggestedAction(contact:Contact):{title:string;body:string}|null{
 function tileColor(type:string):string{
   if(type==='created')return'#e8f0fb';if(type==='email_sent')return'#fbeaef';
   if(type==='email_opened')return'#fdf0e4';if(type==='reply')return'#e8f5ee';
+  if(type==='auto_reply')return'#ececec';
   if(type==='enriched')return'#fde9c3';return'var(--ink-100)';
 }
 
@@ -64,6 +84,7 @@ function TimelineIcon({type}:{type:string}){
   if(type==='email_sent')return<Mail {...p} color="var(--maroon-600)"/>;
   if(type==='email_opened')return<Clock {...p} color="var(--warn)"/>;
   if(type==='reply')return<MessageSquare {...p} color="var(--ok)"/>;
+  if(type==='auto_reply')return<MessageSquare {...p} color="var(--ink-400)"/>;
   if(type==='note')return<Pencil {...p} color="var(--ink-500)"/>;
   if(type==='enriched')return<Star {...p} color="var(--warn)"/>;
   return<CheckCircle {...p} color="var(--ink-400)"/>;
@@ -72,7 +93,21 @@ function TimelineIcon({type}:{type:string}){
 function ContactPanel({contact,onClose,onSend,onReset}:{contact:Contact;onClose:()=>void;onSend:(c:Contact)=>void;onReset:(c:Contact)=>void;}){
   const attrs=contact.attributes||{};
   const nm=attrs.BUSINESS_NAME||attrs.FIRSTNAME||contact.email||'Unknown';
-  const timeline=buildTimeline(contact);
+  const [replies,setReplies]=useState<StoredReply[]>([]);
+  // Fetch real replies for this contact when the panel opens. Falls back
+  // silently to the synthetic placeholder if the fetch fails or returns
+  // empty — the timeline still renders.
+  useEffect(()=>{
+    let cancelled=false;
+    fetch(`/api/replies?email=${encodeURIComponent(contact.email)}`,{cache:'no-store'})
+      .then(r=>r.ok?r.json():{replies:[]})
+      .then((data:{replies?:StoredReply[]})=>{
+        if(!cancelled&&Array.isArray(data.replies))setReplies(data.replies);
+      })
+      .catch(err=>console.error('fetch replies failed:',err));
+    return ()=>{cancelled=true;};
+  },[contact.email]);
+  const timeline=buildTimeline(contact,replies);
   const aiScore=getAiScore(contact);
   const suggested=getSuggestedAction(contact);
   const [note,setNote]=useState('');
