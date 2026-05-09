@@ -216,28 +216,38 @@ export default function ContactsPage(){
   function showToast(msg:string){setToast(msg);setTimeout(()=>setToast(null),3000);}
 
   async function sendEmail(c:Contact){
-    if(!c.email||!c.attributes?.BUSINESS_NAME){showToast('Contact needs a business name and email');return;}
+    if(!c.email){showToast('Contact needs an email address');return;}
     setQueueing(c.id);
     try{
+      // Personalisation fallbacks for contacts that weren't imported via the
+      // business-finder flow (e.g. manually-added personal contacts). Use the
+      // most specific name we have: business → first name → email local-part.
+      const businessName=c.attributes?.BUSINESS_NAME||c.attributes?.FIRSTNAME||c.email.split('@')[0]||'your business';
       const step=c.attributes?.OUTREACH_STATUS==='email_sent'?2:c.attributes?.OUTREACH_STATUS==='followed_up'?3:1;
-      const res=await fetch('/api/brevo/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:c.email,businessName:c.attributes.BUSINESS_NAME,town:c.attributes?.TOWN||'your area',knownFor:c.attributes?.KNOWN_FOR||'its independent spirit',step})});
+      const res=await fetch('/api/brevo/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:c.email,businessName,town:c.attributes?.TOWN||'your area',knownFor:c.attributes?.KNOWN_FOR||'its independent spirit',step})});
       if(!res.ok)throw new Error('Send failed');
       const newStatus=step===1?'email_sent':step===2?'followed_up':'cold';
-      await fetch('/api/brevo/contacts',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:c.email,OUTREACH_STATUS:newStatus})});
-      showToast(`✓ Email sent to ${c.attributes.BUSINESS_NAME}`);
-      addNotification({type:'email_sent',title:'Email sent',body:`Step ${step} outreach sent to ${c.attributes.BUSINESS_NAME} at ${c.email}`});
+      // Persist BUSINESS_NAME so future sends pull a real value, not a fallback.
+      const attrPatch:Record<string,string>={OUTREACH_STATUS:newStatus};
+      if(!c.attributes?.BUSINESS_NAME)attrPatch.BUSINESS_NAME=businessName;
+      await fetch('/api/brevo/contacts',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:c.email,...attrPatch})});
+      showToast(`✓ Email sent to ${businessName}`);
+      addNotification({type:'email_sent',title:'Email sent',body:`Step ${step} outreach sent to ${businessName} at ${c.email}`});
       loadContacts(listFilter||undefined);
     }catch(e){showToast('Failed to send email');console.error(e);}
     setQueueing(null);
   }
 
   async function addToQueue(c:Contact){
-    if(!c.email||!c.attributes?.BUSINESS_NAME){showToast('Contact needs a business name and email');return;}
+    if(!c.email){showToast('Contact needs an email address');return;}
     setQueueing(c.id);
-    await fetch('/api/brevo/contacts',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:c.email,OUTREACH_STATUS:'not_contacted'})});
+    const businessName=c.attributes?.BUSINESS_NAME||c.attributes?.FIRSTNAME||c.email.split('@')[0]||'your business';
+    const attrPatch:Record<string,string>={OUTREACH_STATUS:'not_contacted'};
+    if(!c.attributes?.BUSINESS_NAME)attrPatch.BUSINESS_NAME=businessName;
+    await fetch('/api/brevo/contacts',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:c.email,...attrPatch})});
     setQueued(prev=>[...prev,c.id]);
-    showToast(`${c.attributes.BUSINESS_NAME} added to Today's Queue`);
-    addNotification({type:'info',title:'Added to queue',body:`${c.attributes.BUSINESS_NAME} added manually`});
+    showToast(`${businessName} added to Today's Queue`);
+    addNotification({type:'info',title:'Added to queue',body:`${businessName} added manually`});
     setQueueing(null);
   }
 
