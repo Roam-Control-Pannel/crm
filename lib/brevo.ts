@@ -55,6 +55,19 @@ export async function createContact(data: {
 }
 
 export async function updateContact(email: string, attributes: Record<string, string>) {
+  // If this write would change OUTREACH_STATUS, run it through the guard.
+  // canWriteStatus blocks downgrades from sticky states like 'responded'.
+  if (attributes.OUTREACH_STATUS) {
+    const allowed = await canWriteStatus(email, attributes.OUTREACH_STATUS);
+    if (!allowed) {
+      // Strip the status field but let other attribute updates through.
+      const { OUTREACH_STATUS, ...rest } = attributes;
+      if (Object.keys(rest).length === 0) {
+        return { skipped: true, reason: 'status guarded' };
+      }
+      attributes = rest;
+    }
+  }
   return brevoFetch(`/contacts/${encodeURIComponent(email)}`, {
     method: 'PUT',
     body: JSON.stringify({ attributes }),
@@ -88,4 +101,43 @@ export async function sendTransactionalEmail(data: {
       },
     }),
   });
+}
+
+/**
+ * Status transitions that an automated write must respect.
+ *
+ * Once a contact reaches 'responded' (an inbound reply landed), no automated
+ * code path may downgrade that status. Manual UI actions (Reset Status,
+ * direct Brevo edits) are out of scope for this guard — they go through
+ * different surfaces.
+ *
+ * Returns true if the write should proceed, false if it must be blocked.
+ *
+ * Usage:
+ *   const allowed = await canWriteStatus(email, 'email_sent');
+ *   if (allowed) { ... }
+ */
+const STICKY_STATUSES = new Set(['responded', 'listed']);
+
+export async function canWriteStatus(
+  email: string,
+  newStatus: string
+): Promise<boolean> {
+  // Always permit setting one of the terminal/sticky statuses themselves;
+  // the lock is on transitioning AWAY from them via automation.
+  if (STICKY_STATUSES.has(newStatus)) return true;
+  try {
+    const contact = await getContactByEmail(email);
+    const current = contact?.attributes?.OUTREACH_STATUS;
+    if (current && STICKY_STATUSES.has(current)) {
+      console.log(`[status-guard] blocked ${current} -> ${newStatus} for ${email}`);
+      return false;
+    }
+    return true;
+  } catch (err: any) {
+    // If we can't read the current status (network blip, missing contact),
+    // err on the side of allowing the write — better stale than blocked.
+    console.warn(`[status-guard] couldn't check ${email}, allowing:`, err?.message);
+    return true;
+  }
 }

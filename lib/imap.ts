@@ -66,6 +66,10 @@ export function stripQuotedReply(body: string): string {
   const patterns: RegExp[] = [
     /^On .+ wrote:\s*$/m,
     /^On .+,\s*$/m,        // "On Mon, May 9, 2026 at 3:00 PM,"
+    // Gmail wraps the "On <date> <name> <email>" line across two lines so the
+    // closing "wrote:" lands on its own line. Match that case explicitly.
+    /^On .+\n\s*wrote:\s*$/m,
+    /^On .+\n.*\nwrote:\s*$/m,
     /^From: .+$/m,          // Outlook-style
     /^-{2,}\s*Original Message\s*-{2,}$/im,
     /^_{2,}\s*$/m,          // some clients use lots of underscores
