@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { fetchPendingReplies, markProcessed } from '@/lib/imap';
 import { addNotification } from '@/lib/notifications';
+import { storeReply } from '@/lib/replies';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -135,6 +136,19 @@ export async function GET(req: NextRequest) {
 
     for (const reply of replies) {
       try {
+        // Persist EVERY reply (including auto-responders) so the contact
+        // timeline can show them. Auto-responders render greyed-out in the UI.
+        await storeReply({
+          uid: reply.uid,
+          fromEmail: reply.fromEmail,
+          fromName: reply.fromName,
+          subject: reply.subject,
+          bodyText: reply.bodyText,
+          bodyTextRaw: reply.bodyTextRaw,
+          receivedAt: reply.receivedAt,
+          isAutoResponder: reply.isAutoResponder,
+        });
+
         // Auto-responders: log + mark processed, but don't flip status
         if (reply.isAutoResponder) {
           stats.autoResponders++;
