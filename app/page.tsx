@@ -28,6 +28,7 @@ interface AttentionContact {
   signal: string;
   signalAt: string;
   daysIn: number;
+  replyPreview?: string;
 }
 
 interface PipelineResponse {
