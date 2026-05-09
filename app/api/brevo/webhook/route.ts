@@ -39,10 +39,15 @@ async function getContactAttrs(email: string): Promise<Record<string, any> | nul
     const res = await fetch(`${BREVO_BASE}/contacts/${encodeURIComponent(email)}`, {
       headers: { 'api-key': process.env.BREVO_API_KEY || '', accept: 'application/json' },
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      const body = await res.text();
+      console.error(`[webhook] getContactAttrs ${res.status} for ${email}: ${body.slice(0, 200)}`);
+      return null;
+    }
     const data = await res.json();
     return data?.attributes || {};
-  } catch {
+  } catch (err: any) {
+    console.error(`[webhook] getContactAttrs threw for ${email}:`, err?.message);
     return null;
   }
 }
@@ -57,8 +62,15 @@ async function updateContact(email: string, attributes: Record<string, any>): Pr
       },
       body: JSON.stringify({ attributes }),
     });
-    return res.ok;
-  } catch {
+    if (!res.ok) {
+      const body = await res.text();
+      console.error(`[webhook] updateContact ${res.status} for ${email} attrs=${JSON.stringify(attributes)}: ${body.slice(0, 200)}`);
+      return false;
+    }
+    console.log(`[webhook] updateContact OK for ${email} attrs=${JSON.stringify(attributes)}`);
+    return true;
+  } catch (err: any) {
+    console.error(`[webhook] updateContact threw for ${email}:`, err?.message);
     return false;
   }
 }
@@ -73,6 +85,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
 
+  // Log every payload — events arrive in unpredictable shapes (single
+  // object vs array, field names vary by event type). Logging gives us a
+  // ground-truth record for debugging.
+  console.log('[webhook] payload received:', JSON.stringify(payload).slice(0, 500));
+
   // Brevo posts events with shape:
   //   { event, email, ts, message-id, ... event-specific fields }
   // For batches it can be an array; handle both.
@@ -84,9 +101,11 @@ export async function POST(req: NextRequest) {
     const email = evt?.email;
     const event = evt?.event;
     if (!email || !event) {
+      console.warn(`[webhook] skipping event with missing email/event: ${JSON.stringify(evt).slice(0, 200)}`);
       results.skipped++;
       continue;
     }
+    console.log(`[webhook] processing event=${event} email=${email}`);
     results.processed++;
 
     // Pull current attrs so we can increment counters.
@@ -227,6 +246,7 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  console.log(`[webhook] done: processed=${results.processed} updated=${results.updated} skipped=${results.skipped} errors=${results.errors}`);
   return NextResponse.json({ ok: true, ...results });
 }
 
