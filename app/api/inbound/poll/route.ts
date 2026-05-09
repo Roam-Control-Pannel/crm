@@ -207,9 +207,21 @@ export async function GET(req: NextRequest) {
     console.log(`[inbound] ${message}`);
     return NextResponse.json({ ok: true, ...stats, message });
   } catch (err: any) {
-    console.error('[inbound] poll crashed:', err);
+    // imapflow wraps the real IMAP server response in a generic "Command failed".
+    // Surface the underlying fields so we can see what Gmail actually said.
+    const diagnostic = {
+      message: err?.message,
+      code: err?.code,
+      authenticationFailed: err?.authenticationFailed,
+      response: err?.response,
+      responseText: err?.responseText,
+      responseStatus: err?.responseStatus,
+      cause: err?.cause?.message || err?.cause,
+      stack: err?.stack?.split('\n').slice(0, 5).join(' | '),
+    };
+    console.error('[inbound] poll crashed:', JSON.stringify(diagnostic, null, 2));
     return NextResponse.json(
-      { ok: false, error: err?.message || 'Poll failed', ...stats },
+      { ok: false, error: err?.message || 'Poll failed', diagnostic, ...stats },
       { status: 500 }
     );
   }
