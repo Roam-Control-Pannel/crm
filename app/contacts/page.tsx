@@ -185,6 +185,18 @@ export default function ContactsPage(){
   const [loading,setLoading]=useState(true);
   const [search,setSearch]=useState('');
   const [townFilter,setTownFilter]=useState('');
+  const [stageFilter,setStageFilter]=useState('');
+
+  // Read query params (?stage=...&search=...) once on mount so dashboard
+  // funnel links and notification deep-links can scope the contacts view.
+  useEffect(()=>{
+    if(typeof window==='undefined')return;
+    const params=new URLSearchParams(window.location.search);
+    const stage=params.get('stage');
+    const sQuery=params.get('search');
+    if(stage)setStageFilter(stage);
+    if(sQuery)setSearch(sQuery);
+  },[]);
   const [listFilter,setListFilter]=useState('');
   const [showModal,setShowModal]=useState(false);
   const [showCreateList,setShowCreateList]=useState(false);
@@ -267,11 +279,30 @@ export default function ContactsPage(){
     setForm({name:'',email:'',town:'',type:'Restaurant',website:'',phone:'',source:'manual',status:'not_contacted',notes:'',listId:''});
   }
 
+  // Maps a stage filter (from dashboard funnel links) to a predicate.
+  // Engagement stages (opened/clicked) cross-cut OUTREACH_STATUS, so they're
+  // attribute-based, not status-based.
+  function matchesStage(c:Contact):boolean{
+    if(!stageFilter)return true;
+    const a=c.attributes||{};
+    const status=a.OUTREACH_STATUS||'not_contacted';
+    if(stageFilter==='notContacted')return status==='not_contacted';
+    if(stageFilter==='sent')return ['email_sent','followed_up','final_nudge'].includes(status);
+    if(stageFilter==='opened')return !!a.LAST_OPENED_AT;
+    if(stageFilter==='clicked')return !!a.LAST_CLICKED_AT;
+    if(stageFilter==='listed')return status==='listed';
+    if(stageFilter==='cold')return status==='cold';
+    if(stageFilter==='responded')return status==='responded';
+    if(stageFilter==='bounced')return !!a.BOUNCED_AT;
+    return true;
+  }
+
   const filtered=contacts.filter(c=>{
     const q=search.toLowerCase();
     const name=(c.attributes?.BUSINESS_NAME||c.attributes?.FIRSTNAME||c.email||''). toLowerCase();
     const town=(c.attributes?.TOWN||''). toLowerCase();
     const email=(c.email||''). toLowerCase();
+    if(!matchesStage(c))return false;
     return(!q||name.includes(q)||town.includes(q)||email.includes(q))&&(!townFilter||c.attributes?.TOWN===townFilter);
   });
 
@@ -309,6 +340,16 @@ export default function ContactsPage(){
           onSync={()=>loadContacts(listFilter||undefined)}
         />
       </div>
+
+      {/* Stage filter indicator */}
+      {stageFilter&&(
+        <div style={{marginBottom:12,padding:'8px 14px',background:'#fbeaef',border:'1px solid #f4d8df',borderRadius:'var(--r-md)',display:'flex',alignItems:'center',gap:10}}>
+          <span style={{fontSize:11.5,fontWeight:600,color:'var(--ink-700)'}}>
+            Filtered by stage: <strong style={{color:'var(--maroon-700)'}}>{({notContacted:'Not contacted',sent:'Email sent',opened:'Opened',clicked:'Clicked',listed:'Listed',cold:'Cold',responded:'Responded',bounced:'Bounced'} as Record<string,string>)[stageFilter]||stageFilter}</strong>
+          </span>
+          <button onClick={()=>{setStageFilter('');if(typeof window!=='undefined'){const url=new URL(window.location.href);url.searchParams.delete('stage');window.history.replaceState({},'',url);}}} style={{marginLeft:'auto',padding:'4px 10px',background:'transparent',border:'1px solid var(--ink-200)',borderRadius:'var(--r-sm)',fontSize:11,fontWeight:600,color:'var(--ink-500)',cursor:'pointer'}}>Clear filter</button>
+        </div>
+      )}
 
       {/* Filter bar */}
       <div style={{display:'flex',gap:8,marginBottom:16,alignItems:'center'}} className="filter-bar">
