@@ -329,6 +329,11 @@ function AttentionCard({ title, subtitle, icon, accent, contacts, total, loading
                       </div>
                     )}
                     <div style={{ fontSize: 11, color: accent, marginTop: 4, fontWeight: 600 }}>{c.signal}</div>
+                    {c.replyPreview && (
+                      <div style={{ fontSize: 11, color: 'var(--ink-600)', marginTop: 6, padding: '6px 8px', background: 'var(--paper)', borderRadius: 'var(--r-sm)', fontStyle: 'italic', lineHeight: 1.4, display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                        {c.replyPreview}
+                      </div>
+                    )}
                   </div>
                   <div style={{ fontSize: 10.5, color: 'var(--ink-400)', whiteSpace: 'nowrap', fontWeight: 500 }}>
                     {timeAgo(c.signalAt)}
