@@ -141,3 +141,79 @@ export async function canWriteStatus(
     return true;
   }
 }
+
+/**
+ * Paginate through every contact in Brevo (or every contact in a single list).
+ *
+ * Brevo's /contacts endpoint caps each request at limit=1000. We loop until
+ * we've drained the list, with a hard ceiling at MAX_CONTACTS to avoid
+ * runaway pagination if Brevo's `count` field is inconsistent with the
+ * actual page returns.
+ *
+ * Returns:
+ *   - contacts: every contact (full attribute payload)
+ *   - totalInBrevo: Brevo's reported count (used by the dashboard for the
+ *     "of N contacts" stat — we want the real total, not the capped total)
+ *
+ * The /api/pipeline and /api/sequences routes both depend on this. Don't
+ * inline pagination back into them — keep this the single source of truth.
+ */
+const PAGE_SIZE = 1000;
+const MAX_CONTACTS = 25_000;
+
+export interface PaginatedContacts {
+  contacts: BrevoContactRecord[];
+  totalInBrevo: number;
+}
+
+export interface BrevoContactRecord {
+  id: number;
+  email: string;
+  attributes?: Record<string, string>;
+}
+
+export async function fetchAllContacts(
+  opts: { listId?: string | null } = {}
+): Promise<PaginatedContacts> {
+  const { listId } = opts;
+  const all: BrevoContactRecord[] = [];
+  let offset = 0;
+  let totalInBrevo = 0;
+  let pages = 0;
+
+  while (offset < MAX_CONTACTS) {
+    const path = listId
+      ? `/contacts/lists/${encodeURIComponent(listId)}/contacts?limit=${PAGE_SIZE}&offset=${offset}&sort=desc`
+      : `/contacts?limit=${PAGE_SIZE}&offset=${offset}&sort=desc`;
+
+    const data = await brevoFetch(path);
+    const page: BrevoContactRecord[] = data.contacts || [];
+    if (typeof data.count === 'number' && pages === 0) {
+      totalInBrevo = data.count;
+    }
+    all.push(...page);
+    pages++;
+
+    // Two ways to terminate: short page (Brevo gave us less than we asked
+    // for, so there's no more) OR we've reached the reported total.
+    if (page.length < PAGE_SIZE) break;
+    if (totalInBrevo > 0 && all.length >= totalInBrevo) break;
+
+    offset += PAGE_SIZE;
+  }
+
+  if (offset >= MAX_CONTACTS) {
+    console.warn(
+      `[fetchAllContacts] hit MAX_CONTACTS ceiling (${MAX_CONTACTS}); some contacts not fetched`
+    );
+  }
+
+  // If totalInBrevo wasn't returned (some Brevo responses omit it), fall
+  // back to the count we actually pulled.
+  if (!totalInBrevo) totalInBrevo = all.length;
+
+  console.log(
+    `[fetchAllContacts] ${pages} page(s), ${all.length} contacts${listId ? ` (list ${listId})` : ''}`
+  );
+  return { contacts: all, totalInBrevo };
+}

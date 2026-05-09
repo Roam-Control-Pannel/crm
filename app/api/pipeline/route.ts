@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { mostRecentReplyForContact } from '@/lib/replies';
+import { fetchAllContacts } from '@/lib/brevo';
 import type { AttentionContact } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
@@ -51,20 +52,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const path = listId
-      ? `/contacts/lists/${encodeURIComponent(listId)}/contacts?limit=500&sort=desc`
-      : '/contacts?limit=500&sort=desc';
-    const res = await fetch(`${BREVO_BASE}${path}`, {
-      headers: { 'api-key': process.env.BREVO_API_KEY, accept: 'application/json' },
-    });
-    if (!res.ok) {
-      const errorBody = await res.text();
-      console.error(`[pipeline] Brevo fetch ${res.status}: ${errorBody.slice(0, 500)}`);
-      return NextResponse.json({ error: 'Brevo fetch failed', status: res.status, details: errorBody.slice(0, 500) }, { status: 502 });
-    }
-    const data = await res.json();
-    const contacts: BrevoContact[] = data.contacts || [];
-    const totalInBrevo = typeof data.count === 'number' ? data.count : contacts.length;
+    const { contacts, totalInBrevo } = await fetchAllContacts({ listId });
     console.log(`[pipeline] fetched ${contacts.length} contacts in ${Date.now() - startedAt}ms`);
 
     const now = new Date();

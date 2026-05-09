@@ -5,7 +5,7 @@ import {
   DAILY_SEND_CAP,
   type CronRunRecord,
 } from '@/lib/cron-status';
-import { REPLY_TO_ADDRESS } from '@/lib/brevo';
+import { REPLY_TO_ADDRESS, fetchAllContacts } from '@/lib/brevo';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -135,13 +135,9 @@ export async function GET(req: NextRequest) {
   let capped = false;
 
   try {
-    // Pull a generous batch of contacts from Brevo. 500 is plenty for the
-    // single-user CRM scale; we can paginate when we outgrow it.
-    const path = listId
-      ? `/contacts/lists/${encodeURIComponent(listId)}/contacts?limit=500&sort=desc`
-      : '/contacts?limit=500&sort=desc';
-    const data = await brevoGet(path);
-    const contacts: BrevoContact[] = data.contacts || [];
+    // Pull every contact across all pages — sequences must reach the full
+    // 11k+ list, not just the most recent 500 (see lib/brevo.ts > fetchAllContacts).
+    const { contacts } = await fetchAllContacts({ listId });
     counts.processed = contacts.length;
 
     let alreadySent = await sendsToday();
