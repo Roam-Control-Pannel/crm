@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
-import { Flame, Clock, Snowflake, RefreshCw, ArrowRight, MapPin, Mail, MousePointerClick, CheckCircle, AlertCircle } from 'lucide-react';
+import { Flame, Clock, Snowflake, RefreshCw, ArrowRight, MapPin, Mail, MousePointerClick, CheckCircle, AlertCircle, MessageSquare } from 'lucide-react';
 
 interface PipelineStages {
   notContacted: number;
@@ -37,9 +37,11 @@ interface PipelineResponse {
     hottest: AttentionContact[];
     stuck: AttentionContact[];
     goingCold: AttentionContact[];
+    replied: AttentionContact[];
     hottestTotal: number;
     stuckTotal: number;
     goingColdTotal: number;
+    repliedTotal: number;
   };
   totals: { contactsInResults: number; contactsTotal: number };
 }
@@ -231,6 +233,16 @@ export default function Dashboard() {
           total={data?.attention.goingColdTotal || 0}
           loading={loading}
           empty="Nothing going cold this week."
+        />
+        <AttentionCard
+          title="Replied"
+          subtitle="Inbound reply received · needs follow-up"
+          icon={<MessageSquare size={14} color="#3a7a4d" />}
+          accent="#3a7a4d"
+          contacts={data?.attention.replied || []}
+          total={data?.attention.repliedTotal || 0}
+          loading={loading}
+          empty="No new replies. Send more outreach to spark conversations."
         />
       </div>
 
