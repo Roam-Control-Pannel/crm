@@ -65,6 +65,11 @@ const REQUIRED: RequiredAttribute[] = [
   { name: 'UNSUBSCRIBED_AT',     type: 'date',  description: 'Unsubscribe event timestamp' },
   { name: 'SPAM_AT',             type: 'date',  description: 'Spam complaint timestamp' },
   { name: 'BLOCKED_AT',          type: 'date',  description: 'Blocked event timestamp' },
+
+  // Inbound reply tracking — set by /api/brevo/inbound when a contact replies.
+  { name: 'LAST_REPLIED_AT',     type: 'date',  description: 'Most recent inbound reply timestamp' },
+  { name: 'LAST_REPLY_SUBJECT',  type: 'text',  description: 'Subject of the most recent inbound reply (for timeline/preview)' },
+  { name: 'REPLY_COUNT',         type: 'float', description: 'Total inbound replies received from this contact' },
 ];
 
 /**
