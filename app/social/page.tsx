@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { Plus, Sparkles, Calendar, List, ChevronLeft, ChevronRight, X, Edit3, Check, Clock, Image, Trash2, AlertTriangle } from 'lucide-react';
+import { Plus, Sparkles, Calendar, List, ChevronLeft, ChevronRight, X, Edit3, Check, Clock, Image, Trash2, AlertTriangle, Copy } from 'lucide-react';
 import { Brief, fetchBriefs } from '@/lib/briefs';
 import { GOAL_OPTIONS, getGoalLabel } from '@/lib/goals';
 import { SocialAccount, fetchRealAccounts, combineAccounts, fetchAccountMeta } from '@/lib/social-accounts';
@@ -235,6 +235,33 @@ export default function SocialPage() {
       if (next.getTime() === current.getTime()) return p;
       return { ...p, scheduledAt: next.toISOString() };
     }));
+  }
+
+  // DUPLICATE-POST-V1
+  // Clone a post into a fresh draft. Used by the Duplicate button on
+  // PostRow (list view). The clone keeps caption, accounts, image, brief,
+  // and town — but resets status to 'draft', clears any publish results,
+  // and sets scheduledAt to now so it visibly lands on today's calendar.
+  // User edits and reschedules from there.
+  function duplicatePost(post: SocialPost) {
+    const clone: SocialPost = {
+      id: 'p' + Date.now() + Math.random(),
+      briefId: post.briefId,
+      accountIds: [...post.accountIds],
+      caption: post.caption,
+      imageUrl: post.imageUrl,
+      imageCredit: post.imageCredit,
+      town: post.town,
+      scheduledAt: new Date().toISOString(),
+      status: 'draft',
+      createdAt: new Date().toISOString(),
+    };
+    updatePosts(prev => [clone, ...prev]);
+    addNotification({
+      type: 'success',
+      title: 'Post duplicated',
+      body: 'New draft created — edit and reschedule.',
+    });
   }
 
   function openComposer(p?: SocialPost) {
@@ -711,6 +738,8 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flexShrink: 0 }}>
           <button onClick={() => setSwappingPostId(post.id)} style={{ ...btnG, padding: '4px 10px', fontSize: 11 }} title="Swap image from Brain">🧠 Swap</button>
           <button onClick={() => openComposer(post)} style={{ ...btnG, padding: '4px 10px', fontSize: 11 }}><Edit3 size={11} /> Edit</button>
+            {/* DUPLICATE-POST-V1 button */}
+            <button onClick={() => duplicatePost(post)} style={{ ...btnG, padding: '4px 10px', fontSize: 11 }} title="Duplicate as new draft"><Copy size={11} /> Duplicate</button>
           {(post.status === 'draft' || post.status === 'scheduled') && <button onClick={() => setConfirmPublish(post)} style={{ ...btnP, padding: '4px 10px', fontSize: 11, background: '#0A66C2' }}>Publish</button>}
           <button onClick={() => deletePost(post.id)} style={{ ...btnG, padding: '4px 10px', fontSize: 11, color: 'var(--alert)' }}><Trash2 size={11} /></button>
         </div>
