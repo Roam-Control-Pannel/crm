@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { Plus, Sparkles, Calendar, List, ChevronLeft, ChevronRight, X, Edit3, Check, Clock, Image, Trash2, AlertTriangle, Copy } from 'lucide-react';
+import { Plus, Sparkles, Calendar, List, ChevronLeft, ChevronRight, X, Edit3, Check, Clock, Image, Trash2, AlertTriangle, Copy, RefreshCw } from 'lucide-react';
 import { Brief, fetchBriefs } from '@/lib/briefs';
 import { GOAL_OPTIONS, getGoalLabel } from '@/lib/goals';
 import { SocialAccount, fetchRealAccounts, combineAccounts, fetchAccountMeta } from '@/lib/social-accounts';
@@ -1042,7 +1042,7 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 5 }}>
                   <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-600)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Caption</label>
                   <button type="button" onClick={generateCaptionForComposer} disabled={generatingCaption || !form.briefId || form.accountIds.length === 0} style={{ background: 'none', border: 'none', fontSize: 11, color: !form.briefId || form.accountIds.length === 0 ? 'var(--ink-300)' : 'var(--maroon-700)', cursor: !form.briefId || form.accountIds.length === 0 ? 'not-allowed' : 'pointer', fontWeight: 600, padding: 0, display: 'flex', alignItems: 'center', gap: 4, fontFamily: 'inherit' }}>
-                    <Sparkles size={11} />{generatingCaption ? 'Generating…' : 'Generate with AI'}
+                    {/* REGENERATE-LABEL-V1 */}{generatingCaption ? <><Sparkles size={11} />Generating…</> : form.caption.trim() ? <><RefreshCw size={11} />Regenerate</> : <><Sparkles size={11} />Generate with AI</>}
                   </button>
                 </div>
                 <textarea value={form.caption} onChange={e => setForm({ ...form, caption: e.target.value })} placeholder="Write your post caption... or click Generate above" rows={4} style={{ ...inp, resize: 'vertical' }} />
