@@ -15,36 +15,10 @@ import { getStore } from '@netlify/blobs';
  * Single-user mode for now; multi-user will scope these per user.
  */
 
-export type NotificationType =
-  | 'email_sent'
-  | 'email_failed'
-  | 'contact_imported'
-  | 'list_created'
-  | 'listed'
-  | 'overdue'
-  | 'enriched'
-  | 'info'
-  | 'hot_lead'        // contact clicked a link
-  | 'engagement'      // contact opened (only sent for first-time opens)
-  | 'bounce'          // email hard-bounced
-  | 'unsubscribe'     // contact unsubscribed
-  | 'stuck'           // contact opened but didn't click after N days
-  | 'going_cold';     // contact about to be auto-marked cold
-
-export interface Notification {
-  id: string;
-  type: NotificationType;
-  title: string;
-  body: string;
-  time: string;       // ISO timestamp
-  read: boolean;
-  contactEmail?: string;  // when notification relates to a specific contact
-  href?: string;          // deep link to relevant page
-  // De-dup key — same key within a recent window collapses into one
-  // notification rather than spamming. e.g. "stuck:andy@x.com" only fires
-  // once per stuck contact, not every cron run.
-  dedupeKey?: string;
-}
+// SOCIAL-NOTIFS-V1: types live in lib/notification-types.ts so client code
+// can import them without pulling @netlify/blobs into the client bundle.
+export type { NotificationType, Notification } from './notification-types';
+import type { Notification } from './notification-types';
 
 const STORE_NAME = 'roam-system';
 const KEY = 'notifications';

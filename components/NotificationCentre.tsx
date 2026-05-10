@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import ReactDOM from 'react-dom';
-import { Bell, X, Mail, XCircle, Plus, List, Check, AlertTriangle, Sparkles, Info, Flame, Clock, Snowflake, MousePointerClick } from 'lucide-react';
+import { Bell, X, Mail, XCircle, Plus, List, Check, AlertTriangle, Sparkles, Info, Flame, Clock, Snowflake, MousePointerClick, Send, FileEdit, CalendarClock } from 'lucide-react';
 
 /**
  * Persistent notification centre.
@@ -16,21 +16,10 @@ import { Bell, X, Mail, XCircle, Plus, List, Check, AlertTriangle, Sparkles, Inf
  * keep the unread badge fresh.
  */
 
-export type NotificationType =
-  | 'email_sent' | 'email_failed' | 'contact_imported' | 'list_created'
-  | 'listed' | 'overdue' | 'enriched' | 'info'
-  | 'hot_lead' | 'engagement' | 'bounce' | 'unsubscribe' | 'stuck' | 'going_cold';
-
-export interface Notification {
-  id: string;
-  type: NotificationType;
-  title: string;
-  body: string;
-  time: string;
-  read: boolean;
-  contactEmail?: string;
-  href?: string;
-}
+// SOCIAL-NOTIFS-V1: types imported from lib/notification-types (single
+// source of truth, used by both server lib/notifications.ts and this file).
+import type { NotificationType, Notification } from '@/lib/notification-types';
+export type { NotificationType, Notification };
 
 /**
  * Convenience wrapper used by other client components to fire off a
@@ -61,6 +50,9 @@ const typeColor: Record<string, string> = {
   enriched: '#2f7a4f', info: '#7d6e70',
   hot_lead: '#b53939', engagement: '#2f7a4f', bounce: '#b53939',
   unsubscribe: '#7d6e70', stuck: '#c47a1a', going_cold: '#7d6e70',
+  // SOCIAL-NOTIFS-V1
+  social_published: '#2f7a4f', social_publish_failed: '#b53939',
+  social_drafted: '#7d6e70', social_scheduled: '#2a5fa4',
 };
 
 function TypeIcon({ type }: { type: string }) {
@@ -78,6 +70,11 @@ function TypeIcon({ type }: { type: string }) {
   if (type === 'bounce' || type === 'unsubscribe') return <XCircle size={size} color={color} />;
   if (type === 'stuck') return <Clock size={size} color={color} />;
   if (type === 'going_cold') return <Snowflake size={size} color={color} />;
+  // SOCIAL-NOTIFS-V1
+  if (type === 'social_published') return <Send size={size} color={color} />;
+  if (type === 'social_publish_failed') return <XCircle size={size} color={color} />;
+  if (type === 'social_drafted') return <FileEdit size={size} color={color} />;
+  if (type === 'social_scheduled') return <CalendarClock size={size} color={color} />;
   return <Info size={size} color={color} />;
 }
 

@@ -7,6 +7,9 @@ import { SocialAccount, fetchRealAccounts, combineAccounts, fetchAccountMeta } f
 import { loadWithMigration, saveRemote } from '@/lib/client-store';
 import BrainPicker from '@/components/BrainPicker';
 import type { BrainItem } from '@/lib/brain';
+// SOCIAL-NOTIFS-V1: persistent notifications for the bell + dashboard.
+// Aliased to avoid colliding with the local addNotification toast helper.
+import { addNotification as addPersistentNotification } from '@/components/NotificationCentre';
 
 // VOICE-RULES-V1: shared voice + format rules for AI post generation.
 // One source of truth so the modal-button prompt and the bulk-generate
@@ -262,6 +265,14 @@ export default function SocialPage() {
       title: 'Post duplicated',
       body: 'New draft created — edit and reschedule.',
     });
+    // SOCIAL-NOTIFS-V1
+    addPersistentNotification({
+      type: 'social_drafted',
+      title: 'Draft created (duplicated)',
+      body: clone.caption.trim().slice(0, 60) + (clone.caption.length > 60 ? '…' : ''),
+      href: '/social',
+      dedupeKey: 'social_drafted:' + clone.id,
+    });
   }
 
   function openComposer(p?: SocialPost) {
@@ -314,6 +325,25 @@ export default function SocialPage() {
         createdAt: new Date().toISOString(),
       };
       saveAndSet([np, ...posts]);
+      // SOCIAL-NOTIFS-V1: persistent notification for the bell.
+      const captionPreview = form.caption.trim().slice(0, 60) + (form.caption.length > 60 ? '…' : '');
+      if (form.status === 'scheduled') {
+        addPersistentNotification({
+          type: 'social_scheduled',
+          title: 'Post scheduled',
+          body: `${captionPreview} · ${new Date(scheduledAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`,
+          href: '/social',
+          dedupeKey: 'social_scheduled:' + np.id,
+        });
+      } else {
+        addPersistentNotification({
+          type: 'social_drafted',
+          title: 'Draft created',
+          body: captionPreview,
+          href: '/social',
+          dedupeKey: 'social_drafted:' + np.id,
+        });
+      }
     }
     setShowComposer(false);
   }
@@ -487,6 +517,36 @@ Return ONLY the caption text. No JSON, no markdown, no preamble. Just the captio
         : [updated, ...prev]
     );
 
+    // SOCIAL-NOTIFS-V1: persistent notification (one per post, not per account).
+    const successCount = allResults.filter(r => r.status === 'published').length;
+    const failCount = allResults.filter(r => r.status === 'failed').length;
+    const captionPreview = post.caption.trim().slice(0, 60) + (post.caption.length > 60 ? '…' : '');
+    if (finalStatus === 'published') {
+      addPersistentNotification({
+        type: 'social_published',
+        title: `Post published to ${successCount} account${successCount === 1 ? '' : 's'}`,
+        body: captionPreview,
+        href: '/social',
+        dedupeKey: 'social_published:' + post.id,
+      });
+    } else if (finalStatus === 'partial') {
+      addPersistentNotification({
+        type: 'social_publish_failed',
+        title: `Partial publish · ${successCount} ok, ${failCount} failed`,
+        body: captionPreview,
+        href: '/social',
+        dedupeKey: 'social_publish_failed:' + post.id,
+      });
+    } else {
+      addPersistentNotification({
+        type: 'social_publish_failed',
+        title: 'Publish failed',
+        body: captionPreview,
+        href: '/social',
+        dedupeKey: 'social_publish_failed:' + post.id,
+      });
+    }
+
     setPublishing(false);
     // Keep confirm modal open briefly so user sees results
     setTimeout(() => setConfirmPublish(null), 1800);
@@ -651,6 +711,15 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
         updatePosts(prev => [...newPosts, ...prev]);
       }
       addNotification({ type: 'info', title: 'Content generated', body: `${selectedAccounts.length} account${selectedAccounts.length === 1 ? '' : 's'} · theme: ${genForm.theme}` });
+      // SOCIAL-NOTIFS-V1: persistent summary notification for the bell.
+      // One per batch (not per post) — per-post would spam the centre.
+      addPersistentNotification({
+        type: 'social_drafted',
+        title: 'Bulk drafts created',
+        body: `${selectedAccounts.length} account${selectedAccounts.length === 1 ? '' : 's'} · theme: ${genForm.theme}`,
+        href: '/social',
+        dedupeKey: 'social_drafted_bulk:' + Date.now(),
+      });
       setShowGen(false);
     } catch (e: any) {
       addNotification({ type: 'email_failed', title: 'Generation failed', body: e?.message || 'Unknown error' });
