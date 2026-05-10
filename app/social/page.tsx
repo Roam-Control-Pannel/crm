@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { Plus, Sparkles, Calendar, List, ChevronLeft, ChevronRight, X, Edit3, Check, Clock, Image, Trash2, AlertTriangle, Copy, RefreshCw } from 'lucide-react';
+import { AlertTriangle, Calendar, Check, ChevronLeft, ChevronRight, Clock, Copy, Edit3, Image, List, Plus, RefreshCw, Settings, Sparkles, Trash2, X } from 'lucide-react';
 import { Brief, fetchBriefs } from '@/lib/briefs';
 import { GOAL_OPTIONS, getGoalLabel } from '@/lib/goals';
 import { SocialAccount, fetchRealAccounts, combineAccounts, fetchAccountMeta } from '@/lib/social-accounts';
@@ -854,6 +854,8 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
           <p style={{ fontSize: 12, color: 'var(--ink-400)', marginTop: 5, fontWeight: 500 }}>{scheduled.length} scheduled · {drafts.length} drafts · {published.length} published · {activeAccountCount} accounts</p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
+          {/* SOCIAL-SETTINGS-LINK-V1 */}
+          <a href="/social/settings" style={{ ...btnG, textDecoration: 'none' }} title="Posting times & themes"><Settings size={13} /> Settings</a>
           <button style={btnG} onClick={() => setShowGen(true)}><Sparkles size={13} /> Generate</button>
           <button style={btnP} onClick={() => openComposer()}><Plus size={13} /> New post</button>
         </div>
