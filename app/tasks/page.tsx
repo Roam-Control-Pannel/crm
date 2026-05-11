@@ -300,7 +300,7 @@ export default function TasksPage(){
                 <label style={{display:'block',fontSize:11,fontWeight:600,color:'var(--ink-600)',marginBottom:5,textTransform:'uppercase',letterSpacing:'0.06em'}}>Description</label>
                 <textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})} placeholder="Optional details..." rows={2} style={{...inp,resize:'vertical'}}/>
               </div>
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14}}>
+              <div className="form-grid">
                 <div>
                   <label style={{display:'block',fontSize:11,fontWeight:600,color:'var(--ink-600)',marginBottom:5,textTransform:'uppercase',letterSpacing:'0.06em'}}>Priority</label>
                   <select value={form.priority} onChange={e=>setForm({...form,priority:e.target.value as Task['priority']})} style={{...inp,cursor:'pointer'}}>
@@ -314,7 +314,7 @@ export default function TasksPage(){
                   </select>
                 </div>
               </div>
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14}}>
+              <div className="form-grid">
                 <div>
                   <label style={{display:'block',fontSize:11,fontWeight:600,color:'var(--ink-600)',marginBottom:5,textTransform:'uppercase',letterSpacing:'0.06em'}}>Assign to</label>
                   <select value={form.assignee} onChange={e=>setForm({...form,assignee:e.target.value})} style={{...inp,cursor:'pointer'}}>

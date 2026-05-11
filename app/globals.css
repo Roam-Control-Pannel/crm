@@ -56,6 +56,15 @@ button, input, select, textarea { font-family: var(--font-ui); }
 .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
 .pipeline-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; padding: 14px; }
 
+/* Two-column form grid (e.g. priority + category, business type + list).
+   Stacks to a single column on mobile so labels and selects stay readable.
+   Use this className anywhere we currently have inline gridTemplateColumns:'1fr 1fr'. */
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+
+/* Icon-only action buttons in tables (Send, Add-to-queue, View profile).
+   Bumped up on touch viewports to clear the ~44px tap-target guideline. */
+.icon-btn { width: 30px; height: 30px; border-radius: var(--r-xs); border: 1.5px solid var(--ink-200); background: var(--white); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+
 .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 table { width: 100%; border-collapse: collapse; min-width: 480px; }
 th { padding: 10px 16px; text-align: left; font-size: 9.5px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-400); border-bottom: 1.5px solid var(--ink-100); white-space: nowrap; }
@@ -89,8 +98,13 @@ tbody tr:hover td { background: var(--paper); }
   .page-wrap { padding: 14px 16px; }
   .page-header { flex-direction: column; align-items: flex-start; gap: 10px; margin-bottom: 14px; }
   .page-title { font-size: 22px; }
-  .btn-row { width: 100%; flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px; }
-  .btn-row .btn-ghost, .btn-row .btn-primary, .btn-row a { font-size: 11px !important; padding: 6px 11px !important; flex-shrink: 0; }
+  /* Wrap buttons onto the next line on mobile instead of horizontally
+     scrolling them off-screen — discoverability matters more than a single
+     row at this width. */
+  .btn-row { width: 100%; flex-wrap: wrap; row-gap: 6px; }
+  .btn-row .btn-ghost, .btn-row .btn-primary, .btn-row a { font-size: 11px !important; padding: 8px 12px !important; flex-shrink: 0; min-height: 36px; }
+  .form-grid { grid-template-columns: 1fr; gap: 12px; }
+  .icon-btn { width: 38px; height: 38px; }
   .stat-grid { grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
   .stat-card { padding: 12px; }
   .stat-num { font-size: 26px !important; }

@@ -531,9 +531,9 @@ export default function ContactsPage(){
                       </td>
                       <td style={{padding:'11px 16px'}}>
                         <div style={{display:'flex',gap:4}}>
-                          <button onClick={()=>sendEmail(c)} disabled={isQ} title="Send email" style={{width:30,height:30,borderRadius:'var(--r-xs)',border:'1.5px solid var(--ink-200)',background:'var(--white)',display:'flex',alignItems:'center',justifyContent:'center',cursor:isQ?'default':'pointer',color:'var(--maroon-700)'}}><Send size={12}/></button>
-                          <button onClick={()=>addToQueue(c)} disabled={isQ||isQd} title="Add to queue" style={{width:30,height:30,borderRadius:'var(--r-xs)',border:'1.5px solid var(--ink-200)',background:isQd?'#e8f5ee':'var(--white)',display:'flex',alignItems:'center',justifyContent:'center',cursor:isQ||isQd?'default':'pointer',color:isQd?'var(--ok)':'var(--ink-500)'}}>{isQd?<CheckCircle size={12}/>:<Plus size={12}/>}</button>
-                          <button onClick={()=>setSelectedContact(c)} title="View profile" style={{width:30,height:30,borderRadius:'var(--r-xs)',border:'1.5px solid var(--ink-200)',background:'var(--white)',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',color:'var(--ink-500)'}}><Info size={12}/></button>
+                          <button onClick={()=>sendEmail(c)} disabled={isQ} title="Send email" className="icon-btn" style={{cursor:isQ?'default':'pointer',color:'var(--maroon-700)'}}><Send size={12}/></button>
+                          <button onClick={()=>addToQueue(c)} disabled={isQ||isQd} title="Add to queue" className="icon-btn" style={{background:isQd?'#e8f5ee':'var(--white)',cursor:isQ||isQd?'default':'pointer',color:isQd?'var(--ok)':'var(--ink-500)'}}>{isQd?<CheckCircle size={12}/>:<Plus size={12}/>}</button>
+                          <button onClick={()=>setSelectedContact(c)} title="View profile" className="icon-btn" style={{color:'var(--ink-500)'}}><Info size={12}/></button>
                         </div>
                       </td>
                     </tr>
@@ -571,7 +571,7 @@ export default function ContactsPage(){
             {[{l:'Business Name *',k:'name',p:'e.g. The Harbour Arms'},{l:'Email Address *',k:'email',p:'hello@business.co.uk'},{l:'Town *',k:'town',p:'e.g. Whitstable'},{l:'Website',k:'website',p:'www.business.co.uk'},{l:'Phone',k:'phone',p:'01227 000 000'}].map(f=>(
               <div key={f.k}><label style={{display:'block',fontSize:11.5,fontWeight:600,color:'var(--ink-600)',marginBottom:5}}>{f.l}</label><input value={form[f.k as keyof typeof form]} onChange={e=>setForm({...form,[f.k]:e.target.value})} placeholder={f.p} style={inp}/></div>
             ))}
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14}}>
+            <div className="form-grid">
               <div><label style={{display:'block',fontSize:11.5,fontWeight:600,color:'var(--ink-600)',marginBottom:5}}>Business Type</label>
               <select value={form.type} onChange={e=>setForm({...form,type:e.target.value})} style={{...inp,cursor:'pointer'}}><option>Restaurant</option><option>Café / Coffee Shop</option><option>Pub / Bar</option><option>Retail / Shop</option><option>Accommodation</option><option>Activity / Experience</option><option>Other</option></select></div>
               <div><label style={{display:'block',fontSize:11.5,fontWeight:600,color:'var(--ink-600)',marginBottom:5}}>Add to List</label>

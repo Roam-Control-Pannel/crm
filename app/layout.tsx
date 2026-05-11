@@ -9,10 +9,10 @@ export const metadata: Metadata = {
   icons: { icon: '/logo-lionFav-icon.png', apple: '/logo-lionFav-icon.png' },
 };
 
+// maximumScale intentionally omitted so users can pinch-zoom (accessibility).
 export const viewport = {
   width: 'device-width',
   initialScale: 1,
-  maximumScale: 1,
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
