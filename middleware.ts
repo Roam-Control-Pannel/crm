@@ -46,6 +46,23 @@ export default withAuth(
         if (pathname.startsWith('/api/auth/')) return true;
         // Public, server-gated API routes (webhooks, cron, setup).
         if (isPublicApiRoute(pathname)) return true;
+        // CRON-AUTOGEN-V1: server-to-server internal calls.
+        // Background jobs and the run-now UI proxy attach
+        // x-internal-call with CRON_SECRET_V2 to authenticate
+        // server-to-server fetches into the app's own API. This
+        // lets the cron reach any route it needs without each one
+        // being individually allow-listed. Routes that want defence
+        // in depth can still validate the header on entry (the
+        // auto-generate route does — see app/api/social/auto-generate
+        // /route.ts).
+        const internalSecret = req.headers.get('x-internal-call');
+        if (
+          internalSecret &&
+          process.env.CRON_SECRET_V2 &&
+          internalSecret === process.env.CRON_SECRET_V2
+        ) {
+          return true;
+        }
         // Everything else (including /api/*) requires a session.
         return !!token;
       },
