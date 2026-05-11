@@ -38,7 +38,20 @@ export async function POST(req: NextRequest) {
       },
       body: JSON.stringify(lookaheadDays !== null ? { lookaheadDays } : {}),
     });
-    const data = await res.json();
+    // CRON-AUTOGEN-V1 hardened: read as text first so HTML responses (e.g. a NextAuth
+    // 307→/login that we forgot to allow-list) surface a real error instead of
+    // 'Unexpected token < in JSON at position 0'.
+    const raw = await res.text();
+    let data: any;
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      console.error('[auto-generate/run-now] upstream returned non-JSON (status ' + res.status + '):', raw.slice(0, 500));
+      return NextResponse.json(
+        { ok: false, error: 'Upstream returned non-JSON (status ' + res.status + '). Check function logs.' },
+        { status: 502 }
+      );
+    }
     return NextResponse.json(data, { status: res.status });
   } catch (err: any) {
     console.error('[auto-generate/run-now] proxy failed:', err);
