@@ -968,6 +968,11 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
               <button onClick={() => { if (calM === 11) { setCalM(0); setCalY(y => y + 1); } else setCalM(m => m + 1); }} style={{ ...btnG, padding: '5px 10px' }}><ChevronRight size={14} /></button>
             </div>
           </div>
+          {/* Horizontal scroll wrapper: 7 columns at <560px viewport gets
+              too cramped to tap reliably. Enforce a min-width so cells stay
+              usable; the outer div scrolls horizontally on small screens. */}
+          <div className="cal-scroll" style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+          <div style={{ minWidth: 560 }}>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', borderBottom: '1px solid var(--ink-100)' }}>
             {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => (
               <div key={d} style={{ padding: 8, textAlign: 'center', fontSize: 10, fontWeight: 600, color: 'var(--ink-400)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{d}</div>
@@ -1009,6 +1014,8 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
                 </div>
               );
             })}
+          </div>
+          </div>
           </div>
         </div>
       )}
@@ -1197,7 +1204,7 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
               })()}
 
               {/* Context + status */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div className="form-grid" style={{ gap: 12 }}>
                 <div>
                   <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--ink-500)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 5 }}>Context <span style={{ fontWeight: 400, color: 'var(--ink-400)' }}>(optional)</span></label>
                   <input value={form.town} onChange={e => setForm({ ...form, town: e.target.value })} placeholder="e.g. Whitstable" style={inp} />
@@ -1260,7 +1267,7 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
               </div>
 
               {/* Date / time */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div className="form-grid" style={{ gap: 12 }}>
                 <div>
                   <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--ink-600)', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Date</label>
                   <input type="date" value={form.scheduledDate} onChange={e => setForm({ ...form, scheduledDate: e.target.value })} style={inp} />
@@ -1360,7 +1367,7 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
               </div>
 
               {/* Schedule */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div className="form-grid" style={{ gap: 12 }}>
                 <div>
                   <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--ink-600)', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Posts per account</label>
                   <select value={genForm.postsPerAccount} onChange={e => setGenForm({ ...genForm, postsPerAccount: Number(e.target.value) })} style={{ ...inp, cursor: 'pointer' }}>
