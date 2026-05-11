@@ -34,6 +34,9 @@ export interface PostingTimes {
   linkedin: PostingTimeSlot[];
   facebook: PostingTimeSlot[];
   instagram: PostingTimeSlot[];
+  // CRON-AUTOGEN-V1: how many days ahead the auto-generate cron fills.
+  // Optional — falls back to DEFAULT_LOOKAHEAD_DAYS when undefined.
+  lookaheadDays?: number;
 }
 
 // ============================================================
@@ -83,6 +86,8 @@ export interface SocialSettingsBlob {
 export interface EffectiveSocialSettings {
   postingTimes: PostingTimes;
   themes: Theme[];          // seed + overrides applied + deletions filtered
+  // CRON-AUTOGEN-V1: resolved lookahead (always defined here)
+  lookaheadDays: number;
 }
 
 // ============================================================
@@ -131,3 +136,6 @@ export const EMPTY_OVERRIDES: ThemeOverrides = {
   additions: [],
   deletions: [],
 };
+
+// CRON-AUTOGEN-V1: default days-ahead window for the auto-generate cron.
+export const DEFAULT_LOOKAHEAD_DAYS = 14;

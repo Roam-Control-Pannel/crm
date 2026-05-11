@@ -152,6 +152,8 @@ export default function SocialPage() {
   });
 
   const [showGen, setShowGen] = useState(false);
+  // CRON-AUTOGEN-V1
+  const [fillingCalendar, setFillingCalendar] = useState(false);
   const [genForm, setGenForm] = useState({
     briefId: '', accountIds: [] as string[],
     theme: '', goal: '',
@@ -856,6 +858,27 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
         <div style={{ display: 'flex', gap: 8 }}>
           {/* SOCIAL-SETTINGS-LINK-V1 */}
           <a href="/social/settings" style={{ ...btnG, textDecoration: 'none' }} title="Posting times & themes"><Settings size={13} /> Settings</a>
+          <button style={btnG} onClick={async () => {
+            if (fillingCalendar) return;
+            setFillingCalendar(true);
+            try {
+              const res = await fetch('/api/social/auto-generate/run-now', { method: 'POST' });
+              const data = await res.json();
+              if (data.ok) {
+                alert(`Created ${data.createdCount} draft${data.createdCount === 1 ? '' : 's'} (skipped ${data.skippedCount}).`);
+                // Refresh posts list
+                const fresh = await loadWithMigration<SocialPost[]>('social_posts');
+                if (fresh) setPosts(fresh);
+              } else {
+                alert('Fill calendar failed: ' + (data.error || 'unknown error'));
+              }
+            } catch (err: any) {
+              alert('Fill calendar failed: ' + (err?.message || err));
+            } finally {
+              setFillingCalendar(false);
+            }
+          }}>{fillingCalendar ? 'Filling...' : 'Fill calendar'}</button>
+          {/* CRON-AUTOGEN-V1 Fill calendar button */}
           <button style={btnG} onClick={() => setShowGen(true)}><Sparkles size={13} /> Generate</button>
           <button style={btnP} onClick={() => openComposer()}><Plus size={13} /> New post</button>
         </div>

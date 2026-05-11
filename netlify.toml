@@ -11,3 +11,11 @@
 
 # Scheduled functions live in netlify/functions/*.mts and declare their own
 # cron schedule via `export const config = { schedule: '...' }`.
+
+# CRON-AUTOGEN-V1
+# Daily social calendar auto-generation. Runs at 04:00 UTC (~05:00 BST in
+# summer, 04:00 GMT in winter) to fill drafts before the user wakes up.
+# Adjust schedule below if a different cadence is preferred.
+[[scheduled.functions]]
+  path = "/api/social/auto-generate"
+  schedule = "0 4 * * *"
