@@ -411,6 +411,28 @@ export default function SocialSettingsPage() {
           <div>
             <h2 style={sectionTitle}>Posting times</h2>
             <p style={sectionSub}>Click a cell to toggle a slot. Auto-generated posts use these windows.</p>
+        {/* CRON-AUTOGEN-V1 lookahead control */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, marginBottom: 4 }}>
+          <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink-700)' }}>
+            Auto-fill calendar
+          </label>
+          <input
+            type="number"
+            min={1}
+            max={60}
+            value={(postingTimes as any).lookaheadDays || 14}
+            onChange={e => {
+              const n = parseInt(e.target.value, 10);
+              if (isNaN(n) || n < 1 || n > 60) return;
+              setPostingTimes({ ...postingTimes, lookaheadDays: n } as any);
+            }}
+            style={{ width: 64, padding: '4px 6px', border: '1px solid var(--ink-200)', borderRadius: 4, fontSize: 13 }}
+          />
+          <span style={{ fontSize: 12, color: 'var(--ink-500)' }}>
+            days ahead. Daily cron fills drafts for this window.
+          </span>
+        </div>
+
           </div>
           <button style={btnDanger} onClick={() => setConfirmResetTimes(true)}>
             <RotateCcw size={12} /> Reset times
