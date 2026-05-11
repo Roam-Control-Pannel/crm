@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
+
+// CRON-AUTOGEN-V1: postingTimes can now contain an optional `lookaheadDays`
+// number alongside the three platform arrays. The validation below only
+// inspects the three platform keys, so lookaheadDays passes through unchanged.
   readSettingsBlob,
   writeSettingsBlob,
   deleteSettingsBlob,
