@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { sendTransactionalEmail } from '@/lib/brevo';
+import { sendTransactionalEmail, updateContact } from '@/lib/brevo';
 
 const SENDER_NAME = 'Roam Local Team';
 const SENDER_EMAIL = 'hello@roam-everywhere.com';
@@ -65,19 +65,20 @@ export async function POST(req:NextRequest){
     if(!email||!businessName||!town) return NextResponse.json({error:'missing required fields'},{status:400});
     const {subject,htmlContent}=buildEmail(step||1,businessName,town,knownFor||'its independent spirit');
     await sendTransactionalEmail({to:[{email,name:businessName}],subject,htmlContent,senderName:SENDER_NAME,senderEmail:SENDER_EMAIL});
-    
-    // Update LAST_CONTACT_DATE so cron can calculate follow-up timing
-    const today = new Date().toISOString().split('T')[0];
-    await fetch(`https://api.brevo.com/v3/contacts/${encodeURIComponent(email)}`, {
-      method: 'PUT',
-      headers: {
-        'api-key': process.env.BREVO_API_KEY || '',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ attributes: { LAST_CONTACT_DATE: today } }),
-    });
 
-    return NextResponse.json({success:true,step,email});
+    // Update LAST_CONTACT_DATE so cron can calculate follow-up timing.
+    // Routed through lib/brevo so failures throw rather than silently
+    // breaking follow-up scheduling.
+    const today = new Date().toISOString().split('T')[0];
+    let contactUpdated = true;
+    try {
+      await updateContact(email, { LAST_CONTACT_DATE: today });
+    } catch (err) {
+      contactUpdated = false;
+      console.error('[brevo/send] failed to update LAST_CONTACT_DATE', err);
+    }
+
+    return NextResponse.json({success:true,step,email,contactUpdated});
   } catch(error:unknown){
     const message=error instanceof Error?error.message:'Failed to send email';
     return NextResponse.json({error:message},{status:500});

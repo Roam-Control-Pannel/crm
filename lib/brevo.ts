@@ -12,20 +12,44 @@ const BREVO_BASE = 'https://api.brevo.com/v3';
  */
 export const REPLY_TO_ADDRESS = 'replies@roam-everywhere.com';
 
+// Brevo's API can hang on slow incidents; cap each request so cron jobs and
+// UI calls don't sit on the Netlify function timeout (60s) waiting.
+const BREVO_TIMEOUT_MS = 15_000;
+
 async function brevoFetch(path: string, options: RequestInit = {}) {
-  const res = await fetch(`${BREVO_BASE}${path}`, {
-    ...options,
-    headers: {
-      'api-key': BREVO_API_KEY,
-      'Content-Type': 'application/json',
-      ...(options.headers || {}),
-    },
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), BREVO_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(`${BREVO_BASE}${path}`, {
+      ...options,
+      headers: {
+        'api-key': BREVO_API_KEY,
+        'Content-Type': 'application/json',
+        ...(options.headers || {}),
+      },
+      signal: controller.signal,
+    });
+  } catch (err: any) {
+    if (err?.name === 'AbortError') {
+      throw new Error(`Brevo API timeout after ${BREVO_TIMEOUT_MS}ms: ${path}`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
   if (!res.ok) {
     const err = await res.text();
     throw new Error(`Brevo API error ${res.status}: ${err}`);
   }
-  return res.json();
+  // PUT/DELETE responses can be empty; tolerate non-JSON success bodies.
+  const text = await res.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { raw: text };
+  }
 }
 
 export async function getContacts(limit = 50, offset = 0) {

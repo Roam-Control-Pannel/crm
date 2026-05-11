@@ -3,14 +3,34 @@ import { createContact, getContacts, updateContact } from '@/lib/brevo';
 
 const BREVO_API_KEY = process.env.BREVO_API_KEY!;
 
+function parseIntParam(raw: string | null, fallback: number, min: number, max: number): number | null {
+  if (raw === null) return fallback;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < min || n > max) return null;
+  return n;
+}
+
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
-    const limit = Number(searchParams.get('limit') || 500);
-    const offset = Number(searchParams.get('offset') || 0);
-    const listId = searchParams.get('listId');
+    // Brevo's /contacts endpoints cap at limit=1000; reject anything outside
+    // sensible bounds before paying the round-trip.
+    const limit = parseIntParam(searchParams.get('limit'), 500, 1, 1000);
+    const offset = parseIntParam(searchParams.get('offset'), 0, 0, 1_000_000);
+    if (limit === null || offset === null) {
+      return NextResponse.json({ error: 'invalid limit or offset' }, { status: 400 });
+    }
+    const listIdRaw = searchParams.get('listId');
+    let listId: number | null = null;
+    if (listIdRaw !== null) {
+      const n = Number(listIdRaw);
+      if (!Number.isInteger(n) || n < 1) {
+        return NextResponse.json({ error: 'invalid listId' }, { status: 400 });
+      }
+      listId = n;
+    }
 
-    if (listId) {
+    if (listId !== null) {
       const res = await fetch(
         `https://api.brevo.com/v3/contacts/lists/${listId}/contacts?limit=${limit}&offset=${offset}`,
         { headers: { 'api-key': BREVO_API_KEY, 'Content-Type': 'application/json' } }

@@ -72,9 +72,15 @@ Return ONLY the JSON, no markdown, no preamble.`,
       }),
     });
 
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      console.error(`[autoTag] anthropic ${res.status}: ${body.slice(0, 200)}`);
+      return { tags: [], description: '' };
+    }
     const data = await res.json();
-    const txt = data.content?.[0]?.text || '';
+    const txt: string = data.content?.[0]?.text || '';
     const cleaned = txt.replace(/```json|```/g, '').trim();
+    if (!cleaned) return { tags: [], description: '' };
     const parsed = JSON.parse(cleaned);
     return {
       tags: Array.isArray(parsed.tags) ? parsed.tags.slice(0, 8) : [],
