@@ -207,7 +207,7 @@ export default function BrainPage() {
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/*"
+            accept="image/*,application/pdf"
             multiple
             onChange={async e => {
               const files = e.target.files;
