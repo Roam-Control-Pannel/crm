@@ -77,6 +77,16 @@ async function updateContact(email: string, attributes: Record<string, any>): Pr
 
 function nowIso() { return new Date().toISOString(); }
 
+// Truncate the local part of an email for logging so we keep enough
+// information to correlate events without writing full PII into logs.
+function redactEmail(email: string): string {
+  const at = email.indexOf('@');
+  if (at < 1) return '***';
+  const local = email.slice(0, at);
+  const domain = email.slice(at);
+  return `${local.slice(0, 2)}***${domain}`;
+}
+
 export async function POST(req: NextRequest) {
   let payload: any;
   try {
@@ -85,10 +95,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
 
-  // Log every payload — events arrive in unpredictable shapes (single
-  // object vs array, field names vary by event type). Logging gives us a
-  // ground-truth record for debugging.
-  console.log('[webhook] payload received:', JSON.stringify(payload).slice(0, 500));
+  // Log a structural summary only — full payloads include contact email +
+  // attributes (PII). The per-event lines below already log redacted email
+  // + event type for debugging.
+  const summary = Array.isArray(payload)
+    ? { kind: 'array', count: payload.length, events: payload.map((e: any) => e?.event).filter(Boolean) }
+    : { kind: 'object', event: payload?.event };
+  console.log('[webhook] payload received:', JSON.stringify(summary));
 
   // Brevo posts events with shape:
   //   { event, email, ts, message-id, ... event-specific fields }
@@ -105,7 +118,7 @@ export async function POST(req: NextRequest) {
       results.skipped++;
       continue;
     }
-    console.log(`[webhook] processing event=${event} email=${email}`);
+    console.log(`[webhook] processing event=${event} email=${redactEmail(email)}`);
     results.processed++;
 
     // Pull current attrs so we can increment counters.

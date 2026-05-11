@@ -48,13 +48,6 @@ function authorize(req: NextRequest): { ok: boolean; reason?: string } {
   return { ok: false, reason: 'Unauthorized' };
 }
 
-async function brevoGet(path: string): Promise<any> {
-  const res = await fetch(`${BREVO_BASE}${path}`, {
-    headers: { 'api-key': process.env.BREVO_API_KEY || '', accept: 'application/json' },
-  });
-  return res.json();
-}
-
 async function sendFollowUp(
   contact: BrevoContact,
   step: 2 | 3
@@ -106,15 +99,26 @@ async function sendFollowUp(
   }
 }
 
-async function updateStatus(email: string, attrs: Record<string, string>) {
-  await fetch(`${BREVO_BASE}/contacts/${encodeURIComponent(email)}`, {
-    method: 'PUT',
-    headers: {
-      'api-key': process.env.BREVO_API_KEY || '',
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ attributes: attrs }),
-  });
+async function updateStatus(email: string, attrs: Record<string, string>): Promise<boolean> {
+  try {
+    const res = await fetch(`${BREVO_BASE}/contacts/${encodeURIComponent(email)}`, {
+      method: 'PUT',
+      headers: {
+        'api-key': process.env.BREVO_API_KEY || '',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ attributes: attrs }),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      console.error(`[sequences] updateStatus ${res.status} for ${email}: ${body.slice(0, 200)}`);
+      return false;
+    }
+    return true;
+  } catch (err: any) {
+    console.error(`[sequences] updateStatus threw for ${email}:`, err?.message);
+    return false;
+  }
 }
 
 export async function GET(req: NextRequest) {
@@ -160,12 +164,16 @@ export async function GET(req: NextRequest) {
         }
         const sent = await sendFollowUp(contact, 2);
         if (sent) {
-          await updateStatus(contact.email, {
+          // Send already happened; if the status update fails we MUST count
+          // this as an error — otherwise the next cron run sees the contact
+          // still in `email_sent` and re-sends day 2.
+          const statusOk = await updateStatus(contact.email, {
             OUTREACH_STATUS: 'followed_up',
             LAST_CONTACT_DATE: todayDate,
           });
           counts.day2++;
           alreadySent++;
+          if (!statusOk) counts.errors++;
         } else {
           counts.errors++;
         }
@@ -178,20 +186,22 @@ export async function GET(req: NextRequest) {
         }
         const sent = await sendFollowUp(contact, 3);
         if (sent) {
-          await updateStatus(contact.email, {
+          const statusOk = await updateStatus(contact.email, {
             OUTREACH_STATUS: 'final_nudge',
             LAST_CONTACT_DATE: todayDate,
           });
           counts.day7++;
           alreadySent++;
+          if (!statusOk) counts.errors++;
         } else {
           counts.errors++;
         }
       }
       // Day 14 — mark cold
       else if (status === 'final_nudge' && daysSince >= 14) {
-        await updateStatus(contact.email, { OUTREACH_STATUS: 'cold' });
-        counts.day14++;
+        const statusOk = await updateStatus(contact.email, { OUTREACH_STATUS: 'cold' });
+        if (statusOk) counts.day14++;
+        else counts.errors++;
       }
     }
 
