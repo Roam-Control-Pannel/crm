@@ -174,6 +174,11 @@ export default function SocialPage() {
 
   const [notifications, setNotifications] = useState<Notification[]>([]);
 
+  // BULK-SELECT-V1 — multi-select + bulk delete
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+
   function addNotification(n: Omit<Notification, 'id' | 'ts'>) {
     const note: Notification = { ...n, id: 't' + Date.now() + Math.random(), ts: Date.now() };
     setNotifications(ns => [note, ...ns].slice(0, 5));
@@ -796,7 +801,22 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
     const accs = post.accountIds.map(id => accounts.find(a => a.id === id)).filter(Boolean) as SocialAccount[];
     const brief = briefs.find(b => b.id === post.briefId);
     return (
-      <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--ink-100)', display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+      <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--ink-100)', display: 'flex', gap: 14, alignItems: 'flex-start', background: selectMode && selectedIds.has(post.id) ? 'var(--paper)' : 'transparent' }}>
+        {/* BULK-SELECT-V1 — checkbox */}
+        {selectMode && (
+          <input
+            type="checkbox"
+            checked={selectedIds.has(post.id)}
+            onChange={e => {
+              setSelectedIds(prev => {
+                const next = new Set(prev);
+                if (e.target.checked) next.add(post.id); else next.delete(post.id);
+                return next;
+              });
+            }}
+            style={{ width: 16, height: 16, marginTop: 4, flexShrink: 0, cursor: 'pointer', accentColor: 'var(--maroon-700)' }}
+          />
+        )}
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
             {brief && <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '2px 8px', borderRadius: 'var(--r-pill)', background: brief.color + '15', fontSize: 10, fontWeight: 600, color: brief.color }}><div style={{ width: 6, height: 6, borderRadius: '50%', background: brief.color }} />{brief.name}</div>}
@@ -856,6 +876,14 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
           <p style={{ fontSize: 12, color: 'var(--ink-400)', marginTop: 5, fontWeight: 500 }}>{scheduled.length} scheduled · {drafts.length} drafts · {published.length} published · {activeAccountCount} accounts</p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
+          {/* BULK-SELECT-V1 — select toggle button */}
+          <button
+            onClick={() => { setSelectMode(m => !m); setSelectedIds(new Set()); }}
+            style={{ ...(selectMode ? btnP : btnG) }}
+            title={selectMode ? 'Exit selection mode' : 'Select multiple posts'}
+          >
+            <Check size={13} /> {selectMode ? 'Done' : 'Select'}
+          </button>
           {/* SOCIAL-SETTINGS-LINK-V1 */}
           <a href="/social/settings" style={{ ...btnG, textDecoration: 'none' }} title="Posting times & themes"><Settings size={13} /> Settings</a>
           <button style={btnG} onClick={async () => {
@@ -996,10 +1024,62 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
               <button style={btnP} onClick={() => setShowGen(true)}><Sparkles size={13} /> Generate with AI</button>
             </div>
           ) : (<>
+            {/* BULK-SELECT-V1 — action bar (only when in select mode) */}
+            {selectMode && (
+              <div style={{ position: 'sticky', top: 0, zIndex: 10, padding: '10px 18px', background: 'var(--maroon-700)', color: 'var(--white)', borderBottom: '1px solid var(--ink-100)', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 13, fontWeight: 600 }}>{selectedIds.size} selected</span>
+                <button
+                  onClick={() => setSelectedIds(new Set(filtered.map(p => p.id)))}
+                  style={{ background: 'rgba(255,255,255,0.15)', color: 'var(--white)', border: 'none', padding: '5px 11px', borderRadius: 'var(--r-sm)', fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
+                >Select all visible ({filtered.length})</button>
+                <button
+                  onClick={() => setSelectedIds(new Set())}
+                  disabled={selectedIds.size === 0}
+                  style={{ background: 'rgba(255,255,255,0.15)', color: 'var(--white)', border: 'none', padding: '5px 11px', borderRadius: 'var(--r-sm)', fontSize: 11, fontWeight: 600, cursor: selectedIds.size === 0 ? 'not-allowed' : 'pointer', opacity: selectedIds.size === 0 ? 0.5 : 1, fontFamily: 'inherit' }}
+                >Clear</button>
+                <div style={{ flex: 1 }} />
+                <button
+                  onClick={() => setConfirmBulkDelete(true)}
+                  disabled={selectedIds.size === 0}
+                  style={{ background: selectedIds.size === 0 ? 'rgba(255,255,255,0.15)' : 'var(--alert)', color: 'var(--white)', border: 'none', padding: '6px 14px', borderRadius: 'var(--r-sm)', fontSize: 12, fontWeight: 600, cursor: selectedIds.size === 0 ? 'not-allowed' : 'pointer', opacity: selectedIds.size === 0 ? 0.5 : 1, display: 'flex', alignItems: 'center', gap: 6, fontFamily: 'inherit' }}
+                ><Trash2 size={12} /> Delete</button>
+                <button
+                  onClick={() => { setSelectMode(false); setSelectedIds(new Set()); }}
+                  style={{ background: 'transparent', color: 'var(--white)', border: '1px solid rgba(255,255,255,0.4)', padding: '5px 11px', borderRadius: 'var(--r-sm)', fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
+                >Cancel</button>
+              </div>
+            )}
             {scheduled.length > 0 && <><div style={{ padding: '9px 18px', background: '#e8f5ee', borderBottom: '1px solid var(--ink-100)', fontSize: 11, fontWeight: 600, color: 'var(--ok)', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'flex', alignItems: 'center', gap: 6 }}><Clock size={12} />Scheduled ({scheduled.length})</div>{scheduled.sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime()).map(p => <PostRow key={p.id} post={p} />)}</>}
             {drafts.length > 0 && <><div style={{ padding: '9px 18px', background: 'var(--paper)', borderBottom: '1px solid var(--ink-100)', fontSize: 11, fontWeight: 600, color: 'var(--warn)', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'flex', alignItems: 'center', gap: 6 }}><Edit3 size={12} />Drafts ({drafts.length})</div>{drafts.map(p => <PostRow key={p.id} post={p} />)}</>}
             {published.length > 0 && <><div style={{ padding: '9px 18px', background: 'var(--paper)', borderBottom: '1px solid var(--ink-100)', fontSize: 11, fontWeight: 600, color: 'var(--info)', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'flex', alignItems: 'center', gap: 6 }}><Check size={12} />Published ({published.length})</div>{published.map(p => <PostRow key={p.id} post={p} />)}</>}
           </>)}
+        </div>
+      )}
+
+      {/* BULK-SELECT-V1 — confirm bulk delete modal */}
+      {confirmBulkDelete && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(26,13,18,0.5)', zIndex: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} onClick={e => { if (e.target === e.currentTarget) setConfirmBulkDelete(false); }}>
+          <div style={{ background: 'var(--white)', borderRadius: 'var(--r-lg)', width: 'min(440px,100%)', padding: 24, boxShadow: 'var(--shadow-lg)' }}>
+            <h2 style={{ fontFamily: 'var(--font-display)', fontSize: 20, fontWeight: 700, marginBottom: 8, color: 'var(--ink-900)' }}>Delete {selectedIds.size} post{selectedIds.size === 1 ? '' : 's'}?</h2>
+            <p style={{ fontSize: 13, color: 'var(--ink-500)', marginBottom: 20 }}>This will permanently remove the selected post{selectedIds.size === 1 ? '' : 's'} from the calendar. Already-published posts on connected platforms are not affected.</p>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button onClick={() => setConfirmBulkDelete(false)} style={btnG}>Cancel</button>
+              <button
+                onClick={() => {
+                  const ids = selectedIds;
+                  setPosts(prev => {
+                    const next = prev.filter(p => !ids.has(p.id));
+                    savePosts(next);
+                    return next;
+                  });
+                  setSelectedIds(new Set());
+                  setConfirmBulkDelete(false);
+                  setSelectMode(false);
+                }}
+                style={{ ...btnP, background: 'var(--alert)' }}
+              ><Trash2 size={13} /> Delete</button>
+            </div>
+          </div>
         </div>
       )}
 
