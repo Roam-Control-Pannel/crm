@@ -150,15 +150,17 @@ export default function AccountsPage() {
   const totalPending = accounts.filter(a => a.pendingApproval).length;
 
   return (
-    <div style={{ padding: '24px 28px' }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20 }}>
+    <div className="page-wrap">
+      <div className="page-header" style={{ marginBottom: 20 }}>
         <div>
-          <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 28, fontWeight: 700, color: 'var(--ink-900)', lineHeight: 1 }}>Social Accounts</h1>
+          <h1 className="page-title" style={{ fontFamily: 'var(--font-display)', fontWeight: 700, color: 'var(--ink-900)', lineHeight: 1 }}>Social Accounts</h1>
           <p style={{ fontSize: 12, color: 'var(--ink-400)', marginTop: 5, fontWeight: 500 }}>
             {loading ? 'Loading…' : `${totalActive} active · ${accounts.length} total${totalPending ? ` · ${totalPending} pending` : ''} · auto-discovered from your connections`}
           </p>
         </div>
-        <button onClick={load} style={btnG}><RefreshCw size={13} /> Refresh</button>
+        <div className="btn-row">
+          <button onClick={load} style={btnG}><RefreshCw size={13} /> Refresh</button>
+        </div>
       </div>
 
       {loading ? (
@@ -291,22 +293,17 @@ export default function AccountsPage() {
         </div>
       )}
 
-      {/* Edit modal */}
+      {/* Edit modal — uses .soc-modal-* classes from globals.css so it
+          inherits the iOS-safe behaviour (100dvh on mobile + pinned
+          header/footer so the Save button doesn't get hidden under the
+          Safari URL bar). */}
       {editing && (
         <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(26,13,18,0.5)',
-            zIndex: 500,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: 16,
-          }}
+          className="soc-modal-overlay"
+          style={{ zIndex: 500 }}
           onClick={e => { if (e.target === e.currentTarget) setEditing(null); }}
         >
-          <div style={{ background: 'var(--white)', borderRadius: 'var(--r-xl)', width: 540, maxWidth: '100%', maxHeight: '90vh', overflowY: 'auto', boxShadow: 'var(--shadow-lg)' }}>
+          <div className="soc-modal-panel" style={{ width: 540 }}>
             <div style={{ padding: '18px 22px 14px', borderBottom: '1px solid var(--ink-100)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
                 <div style={{ fontFamily: 'var(--font-display)', fontSize: 20, color: 'var(--ink-900)' }}>Account settings</div>
@@ -315,7 +312,7 @@ export default function AccountsPage() {
               <button onClick={() => setEditing(null)} style={{ ...btnG, padding: '4px 8px' }}><X size={14} /></button>
             </div>
 
-            <div style={{ padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div style={{ padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 16, overflowY: 'auto', flex: 1 }}>
               <div>
                 <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--ink-600)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Brief</label>
                 <select value={editForm.briefId} onChange={e => setEditForm({ ...editForm, briefId: e.target.value })} style={{ ...inp, cursor: 'pointer' }}>

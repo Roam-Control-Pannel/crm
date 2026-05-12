@@ -165,7 +165,7 @@ export default function TasksPage(){
   );
 
   return(
-    <div style={{padding:'24px 28px'}}>
+    <div className="page-wrap">
       {/* Header */}
       <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',marginBottom:20}} className="page-header">
         <div>

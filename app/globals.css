@@ -216,6 +216,16 @@ tbody tr:hover td { background: var(--paper); }
 }
 
 /* ============================================================
+   Contacts page — slide-out contact profile panel.
+   Uses 100dvh on top of inline 100vh fallback. top:0 + bottom:0
+   on the panel itself would resolve against iOS Safari's *layout*
+   viewport (the larger one with URL bar collapsed), so the
+   footer's Send email button would sit hidden under the URL bar.
+   Pinning to dvh tracks the currently-visible area instead.
+   ============================================================ */
+.contact-panel { height: 100dvh; }
+
+/* ============================================================
    Brain page — mobile & tablet responsive refinements
    Used by app/brain/page.tsx. Same pattern as Channels above:
    page is built with inline styles, breakpoint classes override.

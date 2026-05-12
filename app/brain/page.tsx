@@ -370,13 +370,17 @@ export default function BrainPage() {
         </div>
       </div>
 
-      {/* Edit modal */}
+      {/* Edit modal — uses .soc-modal-* classes from globals.css so it
+          inherits the iOS-safe behaviour (100dvh on mobile + pinned
+          header/footer so the Save/Delete buttons don't get hidden under
+          the Safari URL bar). */}
       {editing && (
         <div
-          style={{ position: 'fixed', inset: 0, background: 'rgba(26,13,18,0.5)', zIndex: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+          className="soc-modal-overlay"
+          style={{ zIndex: 500 }}
           onClick={e => { if (e.target === e.currentTarget) setEditing(null); }}
         >
-          <div style={{ background: 'var(--white)', borderRadius: 'var(--r-xl)', width: 560, maxWidth: '100%', maxHeight: '90vh', display: 'flex', flexDirection: 'column', boxShadow: 'var(--shadow-lg)' }}>
+          <div className="soc-modal-panel" style={{ width: 560 }}>
             <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--ink-100)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div style={{ fontFamily: 'var(--font-display)', fontSize: 18, color: 'var(--ink-900)' }}>Edit item</div>
               <button onClick={() => setEditing(null)} style={{ ...btnG, padding: '4px 8px' }}><X size={13}/></button>

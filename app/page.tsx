@@ -168,7 +168,7 @@ export default function Dashboard() {
                   </div>
                 ))}
               </div>
-              <div style={{ display: 'flex', gap: 12, paddingTop: 14, borderTop: '1px solid var(--ink-100)' }}>
+              <div style={{ display: 'flex', gap: 12, paddingTop: 14, borderTop: '1px solid var(--ink-100)', flexWrap: 'wrap' }}>
                 <span style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--ink-400)', letterSpacing: '0.06em', textTransform: 'uppercase', alignSelf: 'center' }}>End states:</span>
                 {endStates.map(s => (
                   <Link key={s.key} href={`/contacts?stage=${s.key}`} style={{

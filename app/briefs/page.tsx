@@ -97,13 +97,15 @@ export default function BriefsPage() {
   }
 
   return (
-    <main style={{ padding: '24px 32px', maxWidth: 1100, margin: '0 auto' }}>
-      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 24 }}>
+    <main className="page-wrap" style={{ maxWidth: 1100, margin: '0 auto' }}>
+      <div className="page-header" style={{ marginBottom: 24 }}>
         <div>
-          <h1 style={{ fontSize: 28, fontWeight: 700, fontFamily: 'var(--font-serif)', color: 'var(--ink-900)' }}>Briefs</h1>
+          <h1 className="page-title" style={{ fontWeight: 700, fontFamily: 'var(--font-serif)', color: 'var(--ink-900)' }}>Briefs</h1>
           <p style={{ fontSize: 13, color: 'var(--ink-500)', marginTop: 6 }}>Strategic content tracks. Each brief targets one or more social accounts and defines the voice for posts under it.</p>
         </div>
-        <button style={btnP} onClick={openNew}><Plus size={13} /> New brief</button>
+        <div className="btn-row">
+          <button style={btnP} onClick={openNew}><Plus size={13} /> New brief</button>
+        </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 16 }}>

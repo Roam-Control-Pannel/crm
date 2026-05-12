@@ -189,7 +189,11 @@ function ContactPanel({contact,onClose,onSend,onReset}:{contact:Contact;onClose:
   return(
     <>
       <div onClick={onClose} style={{position:'fixed',inset:0,background:'rgba(26,13,18,0.45)',zIndex:200}}/>
-      <div style={{position:'fixed',top:0,right:0,bottom:0,width:'min(440px,100vw)',background:'var(--white)',zIndex:201,display:'flex',flexDirection:'column',boxShadow:'-4px 0 24px rgba(26,18,19,0.15)',animation:'slideInRight 0.22s cubic-bezier(0.4,0,0.2,1)'}}>
+      {/* contact-panel class adds height: 100dvh on top of the inline
+          100vh fallback — iOS Safari's URL bar otherwise hides the
+          footer's Send email button (the layout viewport top:0+bottom:0
+          would use refers to the larger viewport with URL bar collapsed). */}
+      <div className="contact-panel" style={{position:'fixed',top:0,right:0,height:'100vh',width:'min(440px,100vw)',background:'var(--white)',zIndex:201,display:'flex',flexDirection:'column',boxShadow:'-4px 0 24px rgba(26,18,19,0.15)',animation:'slideInRight 0.22s cubic-bezier(0.4,0,0.2,1)'}}>
 
         {/* Header */}
         <div style={{padding:'14px 16px',borderBottom:'1px solid var(--ink-100)',display:'flex',alignItems:'center',gap:10,flexShrink:0}}>
@@ -505,7 +509,7 @@ export default function ContactsPage(){
   const btnG:React.CSSProperties={display:'inline-flex',alignItems:'center',gap:6,padding:'8px 14px',borderRadius:'var(--r-md)',background:'var(--white)',color:'var(--ink-700)',fontSize:12.5,fontWeight:600,border:'1.5px solid var(--ink-200)',cursor:'pointer'};
 
   return(
-    <div style={{padding:'24px 28px'}}>
+    <div className="page-wrap">
       {toast&&<div style={{position:'fixed',bottom:24,right:24,background:'var(--ink-900)',color:'white',padding:'12px 20px',borderRadius:'var(--r-md)',fontSize:13,fontWeight:500,zIndex:1000,boxShadow:'var(--shadow-lg)'}}>{toast}</div>}
 
       {/* Contact profile panel */}

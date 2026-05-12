@@ -60,7 +60,7 @@ export default function QueuePage(){
   const btnStyle=(st:Status):React.CSSProperties=>({display:'inline-flex',alignItems:'center',gap:5,background:st==='done'?'linear-gradient(135deg,#1a5c36,#2d7a4f)':st==='error'?'#c0392b':'linear-gradient(135deg,#6B1230,#8B1A3A)',color:'#fff',fontSize:11,fontWeight:700,padding:'6px 16px',borderRadius:6,border:'none',cursor:st==='idle'?'pointer':'default',fontFamily:'Nunito Sans,sans-serif'});
 
   return (
-    <div style={{padding:'22px 24px'}}>
+    <div className="page-wrap">
       <div style={{marginBottom:14}}>
         <h1 style={{fontFamily:'Nunito,sans-serif',fontSize:22,fontWeight:900,color:'#1a0d12',margin:0}}>Today's Queue</h1>
         <p style={{fontSize:12,color:'#9e7e88',margin:'3px 0 0',fontWeight:500}}>{loading?'Loading…':`${allItems.length} items awaiting approval · nothing sends without your sign-off`}</p>
@@ -87,7 +87,7 @@ export default function QueuePage(){
                   <div style={{fontSize:13,fontWeight:700,marginBottom:3}}>{item.title}</div>
                   <div style={{fontSize:11,color:'#9e7e88',fontWeight:500,marginBottom:4}}>{item.desc}</div>
                   {item.type==='email'&&item.email&&<div style={{fontSize:11,color:'#1a6b9a',fontWeight:600,marginBottom:8}}>→ {item.email} · Step {item.step} of 3</div>}
-                  <div style={{display:'flex',gap:8}}>
+                  <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
                     <button onClick={()=>approve(item)} disabled={status!=='idle'} style={btnStyle(status)}>
                       {status==='idle'&&'✓ Approve & Send'}
                       {status==='sending'&&'⟳ Sending…'}

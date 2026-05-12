@@ -112,11 +112,13 @@ export default function FindPage() {
   const selectedListObj=lists.find(l=>l.id===Number(selectedList));
 
   return (
-    <div style={{padding:'24px 28px'}}>
+    <div className="page-wrap">
       {/* Header */}
-      <div style={{marginBottom:20}}>
-        <h1 style={{fontFamily:'var(--font-display)',fontSize:28,fontWeight:400,color:'var(--ink-900)',lineHeight:1}}>Find Businesses</h1>
-        <p style={{fontSize:12,color:'var(--ink-400)',marginTop:5,fontWeight:500}}>Search Google Places · enrich with phone, website and email · import to Brevo</p>
+      <div className="page-header" style={{marginBottom:20}}>
+        <div>
+          <h1 className="page-title" style={{fontFamily:'var(--font-display)',fontWeight:400,color:'var(--ink-900)',lineHeight:1}}>Find Businesses</h1>
+          <p style={{fontSize:12,color:'var(--ink-400)',marginTop:5,fontWeight:500}}>Search Google Places · enrich with phone, website and email · import to Brevo</p>
+        </div>
       </div>
 
       {/* Search card */}
