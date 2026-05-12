@@ -21,6 +21,15 @@ function uniqueTowns(contacts:Contact[]):string[]{const seen:Record<string,boole
 function getInitials(name:string):string{return name.split(' ').map((w:string)=>w[0]).join('').slice(0,2).toUpperCase();}
 function timeAgo(d:Date):string{const s=Math.floor((Date.now()-d.getTime())/1000);if(s<60)return 'just now';if(s<3600)return Math.floor(s/60)+'m ago';if(s<86400)return Math.floor(s/3600)+'h ago';return Math.floor(s/86400)+'d ago';}
 
+// Brevo's date attrs (LAST_OPENED_AT etc.) come back as ISO strings when
+// set, empty string when cleared. Empty/missing parses to NaN — guard for
+// it so we don't render "Invalid Date" tiles.
+function parseAttrDate(v:string|undefined):Date|null{
+  if(!v)return null;
+  const t=Date.parse(v);
+  return Number.isNaN(t)?null:new Date(t);
+}
+
 function buildTimeline(contact:Contact,replies:StoredReply[]=[]):TimelineEvent[]{
   const events:TimelineEvent[]=[];const attrs=contact.attributes||{};
   events.push({id:'created',type:'created',title:'Contact created',body:`Imported via ${attrs.SOURCE||'manual'} · ${attrs.TOWN||'unknown town'}`,timestamp:new Date(Date.now()-7*86400000)});
@@ -30,8 +39,60 @@ function buildTimeline(contact:Contact,replies:StoredReply[]=[]):TimelineEvent[]
     events.push({id:'email1',type:'email_sent',title:'Step 1 outreach sent via Brevo',body:`Subject: "Free listing for ${attrs.BUSINESS_NAME||'your business'} on Roam"`,timestamp:new Date(Date.now()-4*86400000),meta:{personalised:'true'}});
   }
   if(['followed_up','responded','listed'].includes(attrs.OUTREACH_STATUS||'')){
-    events.push({id:'opened',type:'email_opened',title:'Email opened × 2',body:'Strong engagement signal',timestamp:new Date(Date.now()-3*86400000)});
     events.push({id:'email2',type:'email_sent',title:'Step 2 follow-up sent via Brevo',body:`Subject: "Just checking in — ${attrs.TOWN||'your area'} on Roam"`,timestamp:new Date(Date.now()-2*86400000)});
+  }
+
+  // Engagement events sourced from real Brevo attributes (set by the
+  // /api/brevo/webhook handler on opened/click events). These cross-cut
+  // OUTREACH_STATUS — a contact can be opened/clicked even though we've
+  // never updated their stage (e.g. status was reset, or they opened a
+  // one-off send that didn't move them through the sequence). Driving the
+  // timeline off OUTREACH_STATUS alone meant the engagement notification
+  // ("X opened your email") would fire but the panel would show 0 opens.
+  const openedAt=parseAttrDate(attrs.LAST_OPENED_AT);
+  const openCount=Number(attrs.OPEN_COUNT||0);
+  if(openedAt&&openCount>0){
+    events.push({
+      id:'opened',
+      type:'email_opened',
+      title:openCount===1?'Email opened':`Email opened × ${openCount}`,
+      body:openCount>=3?'Strong engagement signal':'They are reading.',
+      timestamp:openedAt,
+    });
+  }
+  const clickedAt=parseAttrDate(attrs.LAST_CLICKED_AT);
+  const clickCount=Number(attrs.CLICK_COUNT||0);
+  if(clickedAt&&clickCount>0){
+    events.push({
+      id:'clicked',
+      type:'email_opened', // reuse opened styling until we add a dedicated click icon
+      title:clickCount===1?'Link clicked — hot lead':`Link clicked × ${clickCount} — hot lead`,
+      body:'Follow up while interest is fresh.',
+      timestamp:clickedAt,
+    });
+  }
+  // Bounce/unsubscribe visibility — same reasoning: the webhook stamps
+  // these attrs but the timeline previously had no way to surface them.
+  const bouncedAt=parseAttrDate(attrs.BOUNCED_AT);
+  if(bouncedAt){
+    events.push({id:'bounced',type:'bounced',title:`Email ${attrs.BOUNCE_TYPE||'hard'}-bounced`,body:'Address rejected by recipient server.',timestamp:bouncedAt});
+  }
+  const unsubAt=parseAttrDate(attrs.UNSUBSCRIBED_AT);
+  if(unsubAt){
+    events.push({id:'unsub',type:'unsub',title:'Unsubscribed',body:'No further emails will be sent.',timestamp:unsubAt});
+  }
+
+  // If we have evidence of a real send (Brevo confirmed delivery, or we
+  // stamped LAST_CONTACT_DATE on send) but OUTREACH_STATUS didn't trigger
+  // the synthetic email_sent above, surface a generic "sent" event so the
+  // SENT stat is non-zero. Avoid double-counting when the synthetic events
+  // already fired.
+  const hasSyntheticSend=events.some(e=>e.type==='email_sent');
+  const deliveredAt=parseAttrDate(attrs.LAST_DELIVERED_AT);
+  const lastContactDate=parseAttrDate(attrs.LAST_CONTACT_DATE);
+  const realSentAt=deliveredAt||lastContactDate;
+  if(!hasSyntheticSend&&realSentAt){
+    events.push({id:'email-real',type:'email_sent',title:'Email sent via Brevo',body:deliveredAt?'Delivered to recipient.':'Send recorded.',timestamp:realSentAt});
   }
   if(replies.length>0){
     for(const r of replies){
@@ -141,9 +202,13 @@ function ContactPanel({contact,onClose,onSend,onReset}:{contact:Contact;onClose:
           <button onClick={onClose} style={{width:28,height:28,borderRadius:'var(--r-xs)',border:'1.5px solid var(--ink-200)',background:'var(--white)',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',flexShrink:0}}><X size={14} color="var(--ink-500)"/></button>
         </div>
 
-        {/* Stats */}
+        {/* Stats — Opens/Replies are sourced from Brevo attrs (set by the
+            webhook). Sent is derived from the timeline since we don't have
+            a dedicated SENT_COUNT attribute; the timeline now includes a
+            real send event when LAST_DELIVERED_AT/LAST_CONTACT_DATE exist,
+            so this stays accurate when OUTREACH_STATUS hasn't been moved. */}
         <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',borderBottom:'1px solid var(--ink-100)',flexShrink:0}}>
-          {[{label:'Sent',value:timeline.filter(e=>e.type==='email_sent').length,color:'var(--maroon-600)'},{label:'Opens',value:timeline.some(e=>e.type==='email_opened')?2:0,color:'var(--info)'},{label:'Replies',value:timeline.filter(e=>e.type==='reply').length,color:'var(--ok)'},{label:'AI',value:aiScore,color:'var(--maroon-500)'}].map((s,i)=>(
+          {[{label:'Sent',value:timeline.filter(e=>e.type==='email_sent').length,color:'var(--maroon-600)'},{label:'Opens',value:Number(attrs.OPEN_COUNT||0),color:'var(--info)'},{label:'Replies',value:timeline.filter(e=>e.type==='reply'||e.type==='auto_reply').length,color:'var(--ok)'},{label:'AI',value:aiScore,color:'var(--maroon-500)'}].map((s,i)=>(
             <div key={s.label} style={{padding:'10px 8px',textAlign:'center',borderRight:i<3?'1px solid var(--ink-100)':'none'}}>
               <div style={{fontSize:20,fontFamily:'var(--font-display)',color:s.color,lineHeight:1}}>{s.value}</div>
               <div style={{fontSize:10,color:'var(--ink-400)',textTransform:'uppercase',letterSpacing:'0.06em',marginTop:2}}>{s.label}</div>
