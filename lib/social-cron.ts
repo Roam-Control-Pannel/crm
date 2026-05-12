@@ -39,6 +39,12 @@ interface SocialPostDraft {
   caption: string;
   imageUrl?: string;
   imageCredit?: string;
+  // Unsplash attribution fields, carried through to publish time where
+  // the caption-credit suffix is built from them.
+  imageCreditUrl?: string;
+  imagePhotoUrl?: string;
+  imageUnsplashUrl?: string;
+  imageSocialHandles?: { instagram?: string|null; twitter?: string|null; unsplash?: string|null };
   scheduledAt: string;
   status: 'draft';
   town?: string;
@@ -164,14 +170,28 @@ export function pickBrainImage(
 }
 
 /**
- * Search Unsplash via the existing /api/images/search proxy.
- * Returns { url, credit } or null on failure.
+ * Search Unsplash via the existing /api/images/search proxy and (when an
+ * image is selected) ping the Unsplash download-tracking endpoint. Both
+ * are compliance requirements for keeping production Unsplash access.
+ *
+ * Returns the full attribution payload — photographer name, profile URL
+ * with UTM, photo URL, social handles — which the caller stores on the
+ * draft post so the credit can be appended to the caption at publish
+ * time (Unsplash requires crediting in the post text itself, not just
+ * inside the CRM UI).
  */
 export async function pickUnsplashImage(
   origin: string,
   query: string,
   internalSecret: string
-): Promise<{ url: string; credit: string } | null> {
+): Promise<{
+  url: string;
+  credit: string;
+  creditUrl?: string;
+  photoUrl?: string;
+  unsplashUrl?: string;
+  socialHandles?: { instagram?: string|null; twitter?: string|null; unsplash?: string|null };
+} | null> {
   try {
     const url = `${origin}/api/images/search?q=${encodeURIComponent(query)}&perPage=1`;
     const res = await fetch(url, {
@@ -181,9 +201,26 @@ export async function pickUnsplashImage(
     const data: any = await res.json();
     const first = data?.results?.[0] || data?.images?.[0];
     if (!first || !first.url) return null;
+
+    // Fire the Unsplash download-tracking ping for this photo. Required
+    // by their guidelines whenever a photo is "used" — which includes
+    // automated selection for a draft. Fire-and-forget; ping failures
+    // shouldn't block draft creation.
+    if (first.downloadLocation) {
+      fetch(`${origin}/api/images/track-download`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-internal-call': internalSecret },
+        body: JSON.stringify({ downloadLocation: first.downloadLocation }),
+      }).catch(err => console.warn('[social-cron] Unsplash download ping failed:', err));
+    }
+
     return {
       url: first.url,
       credit: first.credit || first.attribution || '',
+      creditUrl: first.creditUrl,
+      photoUrl: first.photoUrl,
+      unsplashUrl: first.unsplashUrl,
+      socialHandles: first.socialHandles,
     };
   } catch (err) {
     console.error('[social-cron] Unsplash fetch failed:', err);
@@ -401,6 +438,10 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
         // Image — Brain first, then Unsplash
         let imageUrl: string | undefined;
         let imageCredit: string | undefined;
+        let imageCreditUrl: string | undefined;
+        let imagePhotoUrl: string | undefined;
+        let imageUnsplashUrl: string | undefined;
+        let imageSocialHandles: SocialPostDraft['imageSocialHandles'] | undefined;
         const brain = pickBrainImage(brainItems, theme);
         if (brain) {
           imageUrl = brain.url;
@@ -411,6 +452,10 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
           if (unsplash) {
             imageUrl = unsplash.url;
             imageCredit = unsplash.credit;
+            imageCreditUrl = unsplash.creditUrl;
+            imagePhotoUrl = unsplash.photoUrl;
+            imageUnsplashUrl = unsplash.unsplashUrl;
+            imageSocialHandles = unsplash.socialHandles;
           }
         }
 
@@ -421,6 +466,10 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
           caption,
           imageUrl,
           imageCredit,
+          imageCreditUrl,
+          imagePhotoUrl,
+          imageUnsplashUrl,
+          imageSocialHandles,
           scheduledAt: iso,
           status: 'draft',
           createdAt: new Date().toISOString(),

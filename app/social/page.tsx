@@ -60,6 +60,14 @@ interface SocialPost {
   caption: string;
   imageUrl?: string;
   imageCredit?: string;
+  // Full Unsplash attribution captured at photo-pick time. These survive
+  // draft persistence so they can be appended to the caption at publish
+  // time — Unsplash requires both photographer + Unsplash crediting *in
+  // the post text* on social re-posts.
+  imageCreditUrl?: string;     // photographer's Unsplash profile (with UTM)
+  imageUnsplashUrl?: string;   // https://unsplash.com (with UTM)
+  imagePhotoUrl?: string;      // link to the specific photo on Unsplash (with UTM)
+  imageSocialHandles?: { instagram?: string | null; twitter?: string | null; unsplash?: string | null };
   scheduledAt: string;          // ISO
   status: 'draft' | 'scheduled' | 'publishing' | 'published' | 'partial' | 'failed';
   results?: Record<string, PostResult>;
@@ -146,6 +154,12 @@ export default function SocialPage() {
     briefId: '', accountIds: [] as string[],
     caption: '', town: '',
     imageUrl: '', imageCredit: '',
+    // Full Unsplash attribution fields carried through the composer so the
+    // download ping fires at pick-time and the credit is preserved through
+    // save → publish (Unsplash compliance — photographer profile + Unsplash
+    // links with UTMs, plus social handles for @-tagging at publish).
+    imageCreditUrl: '', imageUnsplashUrl: '', imagePhotoUrl: '',
+    imageSocialHandles: {} as { instagram?: string|null; twitter?: string|null; unsplash?: string|null },
     scheduledDate: today.toISOString().split('T')[0],
     scheduledTime: '10:00',
     status: 'draft' as SocialPost['status'],
@@ -165,7 +179,16 @@ export default function SocialPage() {
   const [showBrainPicker, setShowBrainPicker] = useState(false);
   const [swappingPostId, setSwappingPostId] = useState<string | null>(null);
 
-  const [unsplash, setUnsplash] = useState<{ url: string; thumb: string; credit: string }[]>([]);
+  const [unsplash, setUnsplash] = useState<{
+    url: string;
+    thumb: string;
+    credit: string;
+    creditUrl?: string;
+    photoUrl?: string;
+    unsplashUrl?: string;
+    downloadLocation?: string;
+    socialHandles?: { instagram?: string|null; twitter?: string|null; unsplash?: string|null };
+  }[]>([]);
   const [unsplashQuery, setUnsplashQuery] = useState('');
   const [searchingImgs, setSearchingImgs] = useState(false);
 
@@ -219,6 +242,67 @@ export default function SocialPage() {
     finally { setSearchingImgs(false); }
   }
 
+  /**
+   * Build the credit suffix that gets appended to the caption when a post
+   * with an Unsplash photo is published. Required by Unsplash compliance
+   * for social re-posts: photographer name + Unsplash mention in the
+   * actual post text (not just the CRM UI).
+   *
+   * Platform-aware: Instagram/Twitter prefer @-tagged handles when
+   * available; LinkedIn/Facebook get a plain text credit with the photo
+   * URL since they don't recognise Unsplash usernames as @-mentions.
+   *
+   * Returns an empty string when the post is from Brain / own upload
+   * (no Unsplash attribution present) — those are non-Unsplash images
+   * and don't need crediting.
+   */
+  function buildUnsplashCredit(post: { imageCredit?: string; imageCreditUrl?: string; imagePhotoUrl?: string; imageSocialHandles?: { instagram?: string|null; twitter?: string|null; unsplash?: string|null } }, platform: string): string {
+    if (!post.imageCredit || !post.imageCreditUrl) return '';
+    const handles = post.imageSocialHandles || {};
+    if (platform === 'instagram' && handles.instagram) {
+      return `\n\n📸 by @${handles.instagram} via Unsplash`;
+    }
+    if (platform === 'twitter' && handles.twitter) {
+      return `\n\n📸 by @${handles.twitter} via Unsplash`;
+    }
+    // LinkedIn / Facebook / fallback — plain text with the photo link so
+    // it remains attributable even though we can't tag the photographer.
+    return `\n\n📸 Photo by ${post.imageCredit} on Unsplash: ${post.imagePhotoUrl || post.imageCreditUrl}`;
+  }
+
+  /**
+   * Called when the user actually selects a photo from the Unsplash grid.
+   * Fires the Unsplash download-tracking ping (compliance requirement —
+   * Unsplash needs to count "uses" against the photographer) and stores
+   * the full attribution payload in the form so it survives draft save
+   * and reaches the publish step where it gets appended to the caption.
+   *
+   * The download ping is fire-and-forget — failures don't block the
+   * user's selection; the photo is still usable, we just won't have
+   * credited that download.
+   */
+  function pickUnsplashPhoto(img: typeof unsplash[number]) {
+    setForm({
+      ...form,
+      imageUrl: img.url,
+      imageCredit: img.credit,
+      imageCreditUrl: img.creditUrl || '',
+      imagePhotoUrl: img.photoUrl || '',
+      imageUnsplashUrl: img.unsplashUrl || '',
+      imageSocialHandles: img.socialHandles || {},
+    });
+    setUnsplash([]);
+    setUnsplashQuery('');
+    if (img.downloadLocation) {
+      // No await — keep the picker responsive.
+      fetch('/api/images/track-download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ downloadLocation: img.downloadLocation }),
+      }).catch(err => console.warn('[unsplash] download ping failed:', err));
+    }
+  }
+
   function saveAndSet(next: SocialPost[]) {
     setPosts(next);
     savePosts(next);
@@ -261,6 +345,15 @@ export default function SocialPage() {
       caption: post.caption,
       imageUrl: post.imageUrl,
       imageCredit: post.imageCredit,
+      // Carry the Unsplash attribution forward — the duplicate represents
+      // a *re-use* of the same photo, which is itself a download event,
+      // but Unsplash counts the original pick-time ping. We don't re-ping
+      // here (would inflate counts) but we keep the credit so it still
+      // gets appended to the caption at publish.
+      imageCreditUrl: post.imageCreditUrl,
+      imagePhotoUrl: post.imagePhotoUrl,
+      imageUnsplashUrl: post.imageUnsplashUrl,
+      imageSocialHandles: post.imageSocialHandles,
       town: post.town,
       scheduledAt: new Date().toISOString(),
       status: 'draft',
@@ -293,6 +386,10 @@ export default function SocialPage() {
         town: p.town || '',
         imageUrl: p.imageUrl || '',
         imageCredit: p.imageCredit || '',
+        imageCreditUrl: p.imageCreditUrl || '',
+        imagePhotoUrl: p.imagePhotoUrl || '',
+        imageUnsplashUrl: p.imageUnsplashUrl || '',
+        imageSocialHandles: p.imageSocialHandles || {},
         scheduledDate: d.toISOString().split('T')[0],
         scheduledTime: d.toTimeString().slice(0, 5),
         status: p.status,
@@ -302,6 +399,7 @@ export default function SocialPage() {
       setForm({
         briefId: '', accountIds: [], caption: '', town: '',
         imageUrl: '', imageCredit: '',
+        imageCreditUrl: '', imagePhotoUrl: '', imageUnsplashUrl: '', imageSocialHandles: {},
         scheduledDate: today.toISOString().split('T')[0],
         scheduledTime: '10:00',
         status: 'draft',
@@ -326,6 +424,10 @@ export default function SocialPage() {
         caption: form.caption,
         imageUrl: form.imageUrl,
         imageCredit: form.imageCredit,
+        imageCreditUrl: form.imageCreditUrl,
+        imagePhotoUrl: form.imagePhotoUrl,
+        imageUnsplashUrl: form.imageUnsplashUrl,
+        imageSocialHandles: form.imageSocialHandles,
         town: form.town,
         scheduledAt,
         status: form.status,
@@ -370,7 +472,9 @@ export default function SocialPage() {
       const data = await res.json();
       if (data.ok && data.url) {
         const absUrl = data.url.startsWith('http') ? data.url : window.location.origin + data.url;
-        setForm(f => ({ ...f, imageUrl: absUrl, imageCredit: 'Your upload' }));
+        // Own upload — clear any prior Unsplash attribution so we don't
+        // accidentally credit Unsplash for the user's own image.
+        setForm(f => ({ ...f, imageUrl: absUrl, imageCredit: 'Your upload', imageCreditUrl: '', imagePhotoUrl: '', imageUnsplashUrl: '', imageSocialHandles: {} }));
         setUnsplash([]);
         setUnsplashQuery('');
         addNotification({ type: 'success', title: 'Image uploaded' });
@@ -386,16 +490,20 @@ export default function SocialPage() {
   function pickFromBrain(item: BrainItem) {
     const absUrl = window.location.origin + '/api/images/' + item.blobId;
     if (swappingPostId) {
-      // Swap mode — update the specific post directly
+      // Swap mode — update the specific post directly. Clear any prior
+      // Unsplash attribution since this image is from the user's Brain,
+      // not Unsplash.
       const next = posts.map(p =>
-        p.id === swappingPostId ? { ...p, imageUrl: absUrl, imageCredit: 'From Brain' } : p
+        p.id === swappingPostId
+          ? { ...p, imageUrl: absUrl, imageCredit: 'From Brain', imageCreditUrl: undefined, imagePhotoUrl: undefined, imageUnsplashUrl: undefined, imageSocialHandles: undefined }
+          : p
       );
       saveAndSet(next);
       setSwappingPostId(null);
       addNotification({ type: 'success', title: 'Image swapped' });
     } else {
-      // Composer mode — update the form
-      setForm(f => ({ ...f, imageUrl: absUrl, imageCredit: 'From Brain' }));
+      // Composer mode — update the form. Same clear-out rationale.
+      setForm(f => ({ ...f, imageUrl: absUrl, imageCredit: 'From Brain', imageCreditUrl: '', imagePhotoUrl: '', imageUnsplashUrl: '', imageSocialHandles: {} }));
       setUnsplash([]);
       setUnsplashQuery('');
       addNotification({ type: 'success', title: 'Image attached from Brain' });
@@ -486,13 +594,19 @@ Return ONLY the caption text. No JSON, no markdown, no preamble. Just the captio
       setConfirmPublish(c => c ? { ...c, results: { ...results } } : c);
 
       try {
+        // Append Unsplash credit to the caption if the post uses an
+        // Unsplash photo — Unsplash compliance requires the credit in the
+        // post text itself (not just the CRM UI). buildUnsplashCredit
+        // returns '' for non-Unsplash images so this is a no-op for own
+        // uploads and Brain images.
+        const captionWithCredit = post.caption + buildUnsplashCredit(post, acc.platform);
         const res = await fetch('/api/social/publish', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             accountId,
             platform: acc.platform,
-            caption: post.caption,
+            caption: captionWithCredit,
             imageUrl: post.imageUrl,
           }),
         });
@@ -1246,12 +1360,22 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
                 </div>
                 {form.imageUrl && <div style={{ marginBottom: 8, position: 'relative' }}>
                   <img src={form.imageUrl} style={{ width: '100%', height: 140, objectFit: 'cover', borderRadius: 'var(--r-md)', border: '1px solid var(--ink-100)', display: 'block' }} alt="" />
-                  <button onClick={() => setForm({ ...form, imageUrl: '', imageCredit: '' })} style={{ position: 'absolute', top: 6, right: 6, width: 22, height: 22, borderRadius: '50%', background: 'rgba(0,0,0,0.5)', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white' }}><X size={11} /></button>
-                  {form.imageCredit && <div style={{ fontSize: 10, color: 'var(--ink-400)', marginTop: 3 }}>Photo by {form.imageCredit} on Unsplash</div>}
+                  <button onClick={() => setForm({ ...form, imageUrl: '', imageCredit: '', imageCreditUrl: '', imagePhotoUrl: '', imageUnsplashUrl: '', imageSocialHandles: {} })} style={{ position: 'absolute', top: 6, right: 6, width: 22, height: 22, borderRadius: '50%', background: 'rgba(0,0,0,0.5)', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white' }}><X size={11} /></button>
+                  {/* Credit line per Unsplash attribution guidelines:
+                      photographer name + Unsplash both link out, with UTMs
+                      already baked into creditUrl/unsplashUrl by the search
+                      API route. */}
+                  {form.imageCredit && form.imageCreditUrl ? (
+                    <div style={{ fontSize: 10, color: 'var(--ink-400)', marginTop: 3 }}>
+                      Photo by <a href={form.imageCreditUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--ink-600)', textDecoration: 'underline' }}>{form.imageCredit}</a> on <a href={form.imageUnsplashUrl || ('https://unsplash.com?utm_source=roam_growth_engine&utm_medium=referral')} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--ink-600)', textDecoration: 'underline' }}>Unsplash</a>
+                    </div>
+                  ) : form.imageCredit && (
+                    <div style={{ fontSize: 10, color: 'var(--ink-400)', marginTop: 3 }}>Photo by {form.imageCredit}</div>
+                  )}
                 </div>}
                 {unsplash.length > 0 && <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 6, marginBottom: 8 }}>
                   {unsplash.map((img, i) => (
-                    <div key={i} onClick={() => { setForm({ ...form, imageUrl: img.url, imageCredit: img.credit }); setUnsplash([]); setUnsplashQuery(''); }} style={{ cursor: 'pointer', borderRadius: 'var(--r-sm)', overflow: 'hidden', border: '2px solid ' + (form.imageUrl === img.url ? 'var(--maroon-700)' : 'transparent'), position: 'relative' }}>
+                    <div key={i} onClick={() => pickUnsplashPhoto(img)} style={{ cursor: 'pointer', borderRadius: 'var(--r-sm)', overflow: 'hidden', border: '2px solid ' + (form.imageUrl === img.url ? 'var(--maroon-700)' : 'transparent'), position: 'relative' }}>
                       <img src={img.thumb} style={{ width: '100%', height: 65, objectFit: 'cover', display: 'block' }} alt="" />
                       <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: '2px 5px', background: 'rgba(0,0,0,0.5)', fontSize: 9, color: 'white', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{img.credit}</div>
                     </div>
