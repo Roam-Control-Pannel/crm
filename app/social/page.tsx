@@ -801,7 +801,7 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
     const accs = post.accountIds.map(id => accounts.find(a => a.id === id)).filter(Boolean) as SocialAccount[];
     const brief = briefs.find(b => b.id === post.briefId);
     return (
-      <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--ink-100)', display: 'flex', gap: 14, alignItems: 'flex-start', background: selectMode && selectedIds.has(post.id) ? 'var(--paper)' : 'transparent' }}>
+      <div className="soc-postrow" style={{ background: selectMode && selectedIds.has(post.id) ? 'var(--paper)' : 'transparent' }}>
         {/* BULK-SELECT-V1 — checkbox */}
         {selectMode && (
           <input
@@ -817,7 +817,7 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
             style={{ width: 16, height: 16, marginTop: 4, flexShrink: 0, cursor: 'pointer', accentColor: 'var(--maroon-700)' }}
           />
         )}
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div className="soc-postrow-content">
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
             {brief && <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '2px 8px', borderRadius: 'var(--r-pill)', background: brief.color + '15', fontSize: 10, fontWeight: 600, color: brief.color }}><div style={{ width: 6, height: 6, borderRadius: '50%', background: brief.color }} />{brief.name}</div>}
             {accs.map(a => <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: 'var(--ink-600)' }}><PlatformIcon platform={a.platform} size={10} color={a.color} />{a.handle}</div>)}
@@ -826,7 +826,7 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
           <div style={{ fontSize: 13, color: 'var(--ink-800)', lineHeight: 1.5, marginBottom: 6, whiteSpace: 'pre-wrap' }}>{post.caption.length > 240 ? post.caption.slice(0, 240) + '…' : post.caption}</div>
           {post.imageUrl && <img src={post.imageUrl} alt="" style={{ width: 100, height: 60, objectFit: 'cover', borderRadius: 'var(--r-sm)' }} />}
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flexShrink: 0 }}>
+        <div className="soc-postrow-actions">
           <button onClick={() => setSwappingPostId(post.id)} style={{ ...btnG, padding: '4px 10px', fontSize: 11 }} title="Swap image from Brain">🧠 Swap</button>
           <button onClick={() => openComposer(post)} style={{ ...btnG, padding: '4px 10px', fontSize: 11 }}><Edit3 size={11} /> Edit</button>
             {/* DUPLICATE-POST-V1 button */}
@@ -858,7 +858,7 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
   const genLinkedAccounts = genBrief ? accounts.filter(a => a.briefId === genBrief.id && a.active && a.capabilities.canPost) : [];
 
   return (
-    <div style={{ padding: '24px 28px' }}>
+    <div className="page-wrap">
       {/* Notifications */}
       {notifications.length > 0 && <div style={{ position: 'fixed', top: 16, right: 16, zIndex: 1000, display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 360 }}>
         {notifications.map(n => (
@@ -870,12 +870,12 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
       </div>}
 
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20 }}>
+      <div className="soc-header">
         <div>
           <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 28, fontWeight: 700, color: 'var(--ink-900)', lineHeight: 1 }}>Social Calendar</h1>
           <p style={{ fontSize: 12, color: 'var(--ink-400)', marginTop: 5, fontWeight: 500 }}>{scheduled.length} scheduled · {drafts.length} drafts · {published.length} published · {activeAccountCount} accounts</p>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div className="soc-header-actions">
           {/* BULK-SELECT-V1 — select toggle button */}
           <button
             onClick={() => { setSelectMode(m => !m); setSelectedIds(new Set()); }}
@@ -923,7 +923,7 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
       )}
 
       {/* Stats */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10, marginBottom: 16 }}>
+      <div className="soc-stat-grid">
         {[
           { label: 'Scheduled', value: scheduled.length, color: 'var(--ok)' },
           { label: 'Drafts', value: drafts.length, color: 'var(--warn)' },
@@ -938,13 +938,13 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
       </div>
 
       {/* Tabs + filters */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
-        <div style={{ display: 'flex', gap: 2, background: 'var(--ink-100)', borderRadius: 'var(--r-md)', padding: 3 }}>
+      <div className="soc-toolbar">
+        <div className="soc-tabs">
           {([['calendar', 'Calendar', <Calendar key="c" size={13} />], ['list', 'List', <List key="l" size={13} />]] as [string, string, React.ReactNode][]).map(([id, label, icon]) => (
             <button key={id} onClick={() => setTab(id as 'calendar' | 'list')} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 'var(--r-sm)', background: tab === id ? 'var(--white)' : 'transparent', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: tab === id ? 600 : 400, color: tab === id ? 'var(--ink-900)' : 'var(--ink-500)', boxShadow: tab === id ? 'var(--shadow-sm)' : 'none' }}>{icon}{label}</button>
           ))}
         </div>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div className="soc-filters">
           <select value={platFilter} onChange={e => { setPlatFilter(e.target.value); setAcctFilter('all'); }} style={{ ...inp, width: 'auto', fontSize: 11, padding: '4px 10px', cursor: 'pointer' }}>
             {platforms.map(p => <option key={p} value={p}>{pNames[p]} platforms</option>)}
           </select>
@@ -972,7 +972,7 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
               too cramped to tap reliably. Enforce a min-width so cells stay
               usable; the outer div scrolls horizontally on small screens. */}
           <div className="cal-scroll" style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-          <div style={{ minWidth: 560 }}>
+          <div className="soc-cal-min">
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', borderBottom: '1px solid var(--ink-100)' }}>
             {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => (
               <div key={d} style={{ padding: 8, textAlign: 'center', fontSize: 10, fontWeight: 600, color: 'var(--ink-400)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{d}</div>
@@ -986,6 +986,7 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
               return (
                 <div
                   key={i}
+                  className="soc-cal-cell"
                   onDragOver={day ? (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (dragOverIdx !== i) setDragOverIdx(i); } : undefined}
                   onDragLeave={day ? (e) => { if (dragOverIdx === i) setDragOverIdx(null); } : undefined}
                   onDrop={day ? (e) => {
@@ -995,7 +996,6 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
                     if (postId) movePost(postId, calY, calM, day);
                   } : undefined}
                   style={{
-                    minHeight: 88, padding: 5,
                     borderRight: i % 7 !== 6 ? '1px solid var(--ink-100)' : 'none',
                     borderBottom: i < 35 ? '1px solid var(--ink-100)' : 'none',
                     background: isDropTarget ? 'var(--maroon-100, #f5e6e8)' : (isToday ? 'var(--maroon-50)' : 'var(--white)'),
@@ -1132,8 +1132,8 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
 
       {/* Composer modal */}
       {showComposer && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(26,13,18,0.5)', zIndex: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} onClick={e => { if (e.target === e.currentTarget) setShowComposer(false); }}>
-          <div style={{ background: 'var(--white)', borderRadius: 'var(--r-xl)', width: 580, maxWidth: '100%', maxHeight: '90vh', display: 'flex', flexDirection: 'column', boxShadow: 'var(--shadow-lg)' }}>
+        <div className="soc-modal-overlay" style={{ zIndex: 500 }} onClick={e => { if (e.target === e.currentTarget) setShowComposer(false); }}>
+          <div className="soc-modal-panel" style={{ width: 580 }}>
             <div style={{ padding: '18px 22px 14px', borderBottom: '1px solid var(--ink-100)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div style={{ fontFamily: 'var(--font-display)', fontSize: 20, color: 'var(--ink-900)' }}>{editPost ? 'Edit post' : 'New post'}</div>
               <button onClick={() => setShowComposer(false)} style={{ ...btnG, padding: '4px 8px' }}><X size={14} /></button>
@@ -1298,8 +1298,8 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
 
       {/* Generator modal */}
       {showGen && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(26,13,18,0.5)', zIndex: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} onClick={e => { if (e.target === e.currentTarget) setShowGen(false); }}>
-          <div style={{ background: 'var(--white)', borderRadius: 'var(--r-xl)', width: 500, maxWidth: '100%', maxHeight: '90vh', display: 'flex', flexDirection: 'column', boxShadow: 'var(--shadow-lg)' }}>
+        <div className="soc-modal-overlay" style={{ zIndex: 500 }} onClick={e => { if (e.target === e.currentTarget) setShowGen(false); }}>
+          <div className="soc-modal-panel" style={{ width: 500 }}>
             <div style={{ padding: '18px 22px 14px', borderBottom: '1px solid var(--ink-100)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Sparkles size={16} color="var(--maroon-600)" /><div style={{ fontFamily: 'var(--font-display)', fontSize: 20, color: 'var(--ink-900)' }}>Generate with AI</div></div>
               <button onClick={() => setShowGen(false)} style={{ ...btnG, padding: '4px 8px' }}><X size={14} /></button>
