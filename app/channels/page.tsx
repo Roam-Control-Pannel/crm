@@ -214,12 +214,12 @@ export default function ChannelsPage() {
   // Render
   // ==========================================================================
   return (
-    <div style={S.page}>
+    <div className="chn-page" style={S.page}>
       {/* Hero */}
       <header style={S.header}>
         <div>
           <div style={S.eyebrow}>Channels</div>
-          <h1 style={S.headline}>Where your stories <em style={S.emItalic}>go</em></h1>
+          <h1 className="chn-headline" style={S.headline}>Where your stories <em style={S.emItalic}>go</em></h1>
           <p style={S.subhead}>
             Connect the accounts you publish from. Posts scheduled in your calendar will go out via the channels you authorise here.
           </p>
@@ -239,7 +239,7 @@ export default function ChannelsPage() {
       )}
 
       {/* Stat band */}
-      <section style={S.stats}>
+      <section className="chn-stats" style={S.stats}>
         <StatTile
           label="Channels live"
           value={loading ? '—' : String(summary.connected)}
@@ -311,9 +311,9 @@ function ChannelHeader({
     idle: { bg: 'var(--ink-100)', fg: 'var(--ink-500)' },
   };
   return (
-    <div style={S.channelHead}>
+    <div className="chn-channel-head" style={S.channelHead}>
       <div style={S.channelGlyph}>{glyph}</div>
-      <div style={{ flex: 1, minWidth: 0 }}>
+      <div className="chn-channel-text" style={{ flex: 1, minWidth: 0 }}>
         <div style={S.channelTitle}>{title}</div>
         <div style={S.channelSub}>{subtitle}</div>
       </div>
@@ -348,7 +348,7 @@ function AccountRow({
     idle: { bg: 'var(--ink-100)', fg: 'var(--ink-500)' },
   };
   return (
-    <div style={S.accRow}>
+    <div className="chn-acc-row" style={S.accRow}>
       {avatar}
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={S.accName}>{name}</div>
@@ -424,7 +424,7 @@ function MetaCard({ meta, posts, loading }: { meta: MetaStatus; posts: SocialPos
           : 'Connect a Facebook account to link all Pages and linked Instagram Business accounts in one click'}
         status={headerStatus}
         action={connected ? (
-          <div style={S.actionGroup}>
+          <div className="chn-action-group" style={S.actionGroup}>
             <button onClick={connectMeta} style={S.btnGhost}><RefreshCw size={12} />Reconnect</button>
             <button onClick={disconnectMeta} style={S.btnDanger}>Disconnect</button>
           </div>
@@ -513,7 +513,7 @@ function LinkedInCard({ linkedin, posts, loading }: { linkedin: LinkedInStatus; 
           : 'Connect to publish to your personal feed and any Company Pages you administer'}
         status={headerStatus}
         action={connected ? (
-          <div style={S.actionGroup}>
+          <div className="chn-action-group" style={S.actionGroup}>
             <button onClick={connectLI} style={S.btnGhost}><RefreshCw size={12} />Reconnect</button>
             <button onClick={disconnectLI} style={S.btnDanger}>Disconnect</button>
           </div>

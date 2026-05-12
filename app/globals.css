@@ -164,3 +164,30 @@ tbody tr:hover td { background: var(--paper); }
   .soc-modal-overlay { padding: 0; align-items: stretch; }
   .soc-modal-panel { width: 100% !important; max-width: 100% !important; max-height: 100vh !important; height: 100vh; border-radius: 0 !important; }
 }
+
+/* ============================================================
+   Channels page — mobile & tablet responsive refinements
+   Used by app/channels/page.tsx. The page builds desktop look
+   from an inline `S` style object; these classes layer
+   breakpoint overrides on top via !important.
+   ============================================================ */
+@media (max-width: 1024px) and (min-width: 641px) {
+  .chn-page { padding: 24px 20px 56px !important; }
+  .chn-headline { font-size: 36px !important; }
+  .chn-stats { grid-template-columns: repeat(3, 1fr) !important; gap: 10px !important; }
+}
+
+@media (max-width: 640px) {
+  .chn-page { padding: 18px 16px 48px !important; }
+  .chn-headline { font-size: 30px !important; margin-bottom: 8px !important; line-height: 1.1 !important; }
+  .chn-stats { grid-template-columns: 1fr !important; gap: 10px !important; margin-bottom: 18px !important; }
+  /* Channel card header: wrap status pill + action buttons below the
+     title row on phones so 5 buttons don't squeeze the title. */
+  .chn-channel-head { flex-wrap: wrap !important; padding: 14px !important; row-gap: 8px !important; }
+  .chn-channel-head > .chn-channel-text { flex: 1 1 calc(100% - 58px) !important; min-width: 0; }
+  .chn-channel-head > .chn-action-group,
+  .chn-channel-head > button { width: 100%; justify-content: center !important; }
+  .chn-action-group { width: 100%; flex-wrap: wrap; }
+  .chn-action-group > button { flex: 1 1 auto; justify-content: center; }
+  .chn-acc-row { padding: 12px 14px !important; flex-wrap: wrap; gap: 10px !important; }
+}
