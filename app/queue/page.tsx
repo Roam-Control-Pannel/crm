@@ -81,27 +81,36 @@ export default function QueuePage(){
           {allItems.map((item,i)=>{
             const status=statuses[item.id]||'idle';
             return (
-              <div key={item.id} style={{display:'flex',alignItems:'flex-start',gap:14,padding:'16px 20px',borderBottom:i<allItems.length-1?'1px solid #e4d8dc':'none',opacity:status==='done'?0.4:1,transition:'opacity 0.3s',background:item.overdue?'#fffaf9':'#fff'}}>
-                <div style={{width:38,height:38,borderRadius:10,background:item.type==='email'?'#fdf0e4':'#f9eaee',display:'flex',alignItems:'center',justifyContent:'center',fontSize:17,flexShrink:0}}>{item.icon}</div>
-                <div style={{flex:1}}>
-                  <div style={{fontSize:13,fontWeight:700,marginBottom:3}}>{item.title}</div>
+              <div key={item.id} className="qq-row" style={{display:'flex',alignItems:'flex-start',gap:14,padding:'16px 20px',borderBottom:i<allItems.length-1?'1px solid #e4d8dc':'none',opacity:status==='done'?0.4:1,transition:'opacity 0.3s',background:item.overdue?'#fffaf9':'#fff'}}>
+                <div className="qq-icon" style={{width:38,height:38,borderRadius:10,background:item.type==='email'?'#fdf0e4':'#f9eaee',display:'flex',alignItems:'center',justifyContent:'center',fontSize:17,flexShrink:0}}>{item.icon}</div>
+                <div className="qq-body" style={{flex:1,minWidth:0}}>
+                  <div className="qq-title" style={{fontSize:13,fontWeight:700,marginBottom:3}}>{item.title}</div>
                   <div style={{fontSize:11,color:'#9e7e88',fontWeight:500,marginBottom:4}}>{item.desc}</div>
-                  {item.type==='email'&&item.email&&<div style={{fontSize:11,color:'#1a6b9a',fontWeight:600,marginBottom:8}}>→ {item.email} · Step {item.step} of 3</div>}
-                  <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
-                    <button onClick={()=>approve(item)} disabled={status!=='idle'} style={btnStyle(status)}>
+                  {item.type==='email'&&item.email&&<div className="qq-email" style={{fontSize:11,color:'#1a6b9a',fontWeight:600,marginBottom:8,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>→ {item.email} · Step {item.step} of 3</div>}
+                  {/* qq-meta-inline: only renders on mobile via CSS (display:none
+                      on desktop). Mirrors the desktop right-column so users
+                      don't lose town/time context when the right column is
+                      hidden at narrow widths. */}
+                  <div className="qq-meta-inline" style={{display:'none',fontSize:10,fontWeight:600,marginBottom:8,gap:6,alignItems:'center'}}>
+                    <span style={{color:'#8B1A3A',fontWeight:800}}>{item.town}</span>
+                    <span style={{color:'#d4c0c6'}}>·</span>
+                    <span style={{color:item.overdue?'#8B1A3A':'#9e7e88'}}>{item.time}</span>
+                  </div>
+                  <div className="qq-actions" style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                    <button onClick={()=>approve(item)} disabled={status!=='idle'} className="qq-btn-primary" style={btnStyle(status)}>
                       {status==='idle'&&'✓ Approve & Send'}
                       {status==='sending'&&'⟳ Sending…'}
                       {status==='done'&&'✓ Sent!'}
                       {status==='error'&&'✕ Failed'}
                     </button>
                     {status==='idle'&&<>
-                      <button style={{fontSize:11,fontWeight:700,color:'#9e7e88',padding:'6px 12px',borderRadius:6,border:'1.5px solid #e4d8dc',background:'transparent',cursor:'pointer',fontFamily:'Nunito Sans,sans-serif'}}>✎ Edit</button>
-                      <button onClick={()=>setDismissed(d=>[...d,item.id])} style={{fontSize:11,fontWeight:700,color:'#9e7e88',padding:'6px 12px',borderRadius:6,border:'1.5px solid #e4d8dc',background:'transparent',cursor:'pointer',fontFamily:'Nunito Sans,sans-serif'}}>✕ Skip</button>
+                      <button className="qq-btn-secondary" style={{fontSize:11,fontWeight:700,color:'#9e7e88',padding:'6px 12px',borderRadius:6,border:'1.5px solid #e4d8dc',background:'transparent',cursor:'pointer',fontFamily:'Nunito Sans,sans-serif'}}>✎ Edit</button>
+                      <button onClick={()=>setDismissed(d=>[...d,item.id])} className="qq-btn-secondary" style={{fontSize:11,fontWeight:700,color:'#9e7e88',padding:'6px 12px',borderRadius:6,border:'1.5px solid #e4d8dc',background:'transparent',cursor:'pointer',fontFamily:'Nunito Sans,sans-serif'}}>✕ Skip</button>
                     </>}
-                    {status==='error'&&<button onClick={()=>setStatuses(s=>({...s,[item.id]:'idle'}))} style={{fontSize:11,fontWeight:700,color:'#8B1A3A',padding:'6px 12px',borderRadius:6,border:'1.5px solid #e4d8dc',background:'transparent',cursor:'pointer',fontFamily:'Nunito Sans,sans-serif'}}>↻ Retry</button>}
+                    {status==='error'&&<button onClick={()=>setStatuses(s=>({...s,[item.id]:'idle'}))} className="qq-btn-secondary" style={{fontSize:11,fontWeight:700,color:'#8B1A3A',padding:'6px 12px',borderRadius:6,border:'1.5px solid #e4d8dc',background:'transparent',cursor:'pointer',fontFamily:'Nunito Sans,sans-serif'}}>↻ Retry</button>}
                   </div>
                 </div>
-                <div style={{flexShrink:0,textAlign:'right'}}>
+                <div className="qq-meta" style={{flexShrink:0,textAlign:'right'}}>
                   <div style={{fontSize:11,fontWeight:800,color:'#8B1A3A'}}>{item.town}</div>
                   <div style={{fontSize:10,color:item.overdue?'#8B1A3A':'#9e7e88',fontWeight:600,marginTop:2}}>{item.time}</div>
                 </div>
