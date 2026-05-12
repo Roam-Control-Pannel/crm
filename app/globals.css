@@ -230,29 +230,35 @@ tbody tr:hover td { background: var(--paper); }
    Used by app/queue/page.tsx. Each queue row is a 3-column flex
    (icon · body · right meta). At narrow widths the right meta
    eats horizontal space that the title needs, so we hide it on
-   mobile and surface the same town/time as an inline chip line
-   inside the body instead.
-   ============================================================ */
-@media (max-width: 1024px) and (min-width: 641px) {
-  .qq-row { padding: 14px 16px !important; }
-}
+   mobile/tablet and surface the same town/time as an inline chip
+   line inside the body instead.
 
-@media (max-width: 640px) {
-  .qq-row { padding: 14px !important; gap: 12px !important; }
-  /* Hide the desktop right column — town/time appears inline inside
-     the body via qq-meta-inline below. */
+   Even on desktop the right column needs a hard width cap — long
+   location strings like "Bangor, county down, Northern Ireland"
+   would otherwise force-grow it and squeeze the title.
+   ============================================================ */
+.qq-meta { max-width: 140px; }
+.qq-meta > div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+@media (max-width: 1024px) {
+  /* At tablet widths and below the right column doesn't earn its
+     space — even with truncation, 140px of meta is a chunk of row
+     better given to title/actions. Mirror the mobile treatment:
+     hide right meta, show inline chip, stretch the action buttons. */
+  .qq-row { padding: 14px 16px !important; }
   .qq-row > .qq-meta { display: none !important; }
-  .qq-row > .qq-icon { width: 34px !important; height: 34px !important; }
-  /* qq-body has flex:1 inline; on mobile it also needs min-width:0
-     applied here (defensive) so long emails/titles wrap instead of
-     forcing the row to overflow. */
   .qq-body { min-width: 0; }
   .qq-meta-inline { display: flex !important; }
-  /* Action button row: primary button takes full width and stacks
-     above the secondaries; Edit + Skip share the row below it. */
   .qq-actions { gap: 6px !important; }
   .qq-btn-primary { flex: 1 1 100%; justify-content: center; min-height: 38px; }
   .qq-btn-secondary { flex: 1 1 calc(50% - 3px); justify-content: center; min-height: 36px; }
+}
+
+@media (max-width: 640px) {
+  /* Mobile-only tweaks on top of the ≤1024px rules above: tighter
+     padding, smaller icon to claw back a few more pixels for content. */
+  .qq-row { padding: 14px !important; gap: 12px !important; }
+  .qq-row > .qq-icon { width: 34px !important; height: 34px !important; }
 }
 
 /* ============================================================
