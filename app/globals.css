@@ -137,8 +137,16 @@ tbody tr:hover td { background: var(--paper); }
 .soc-postrow { padding: 14px 18px; border-bottom: 1px solid var(--ink-100); display: flex; gap: 14px; align-items: flex-start; }
 .soc-postrow-content { flex: 1; min-width: 0; }
 .soc-postrow-actions { display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; }
-.soc-modal-overlay { position: fixed; inset: 0; background: rgba(26,13,18,0.5); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.soc-modal-overlay { position: fixed; inset: 0; background: rgba(26,13,18,0.5); display: flex; align-items: center; justify-content: center; padding: 16px; overflow-y: auto; }
 .soc-modal-panel { background: var(--white); border-radius: var(--r-xl); max-width: 100%; max-height: 90vh; display: flex; flex-direction: column; box-shadow: var(--shadow-lg); }
+/* Header and footer inside .soc-modal-panel must never compress — when the
+   panel is height-constrained (mobile, or short windows), only the middle
+   scroll area should shrink. Without this, on iOS the footer's "Generate"
+   button can get squeezed out of view. Targets the panel's direct flex
+   children — the middle scroll area gets flex:1 inline so this rule only
+   pins the rigid header/footer rows. */
+.soc-modal-panel > :first-child,
+.soc-modal-panel > :last-child { flex-shrink: 0; }
 
 @media (max-width: 1024px) and (min-width: 641px) {
   .soc-stat-grid { grid-template-columns: repeat(4, 1fr); }
@@ -162,7 +170,14 @@ tbody tr:hover td { background: var(--paper); }
   .soc-postrow-actions { flex-direction: row; flex-wrap: wrap; width: 100%; gap: 6px; }
   .soc-postrow-actions > button { flex: 1 1 auto; min-width: 0; justify-content: center; }
   .soc-modal-overlay { padding: 0; align-items: stretch; }
+  /* Use 100dvh (dynamic viewport height) on mobile so iOS Safari's
+     collapsible URL bar doesn't hide the footer's primary button. 100vh
+     refers to the largest possible viewport (URL bar collapsed), so a
+     panel pinned to 100vh extends *under* the URL bar when it's visible.
+     100dvh tracks the currently-visible area. Fall back to 100vh for
+     browsers that don't support dvh (pre-2022). */
   .soc-modal-panel { width: 100% !important; max-width: 100% !important; max-height: 100vh !important; height: 100vh; border-radius: 0 !important; }
+  .soc-modal-panel { max-height: 100dvh !important; height: 100dvh; }
 }
 
 /* ============================================================
