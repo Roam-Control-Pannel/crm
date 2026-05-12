@@ -184,7 +184,15 @@ tbody tr:hover td { background: var(--paper); }
   /* Channel card header: wrap status pill + action buttons below the
      title row on phones so 5 buttons don't squeeze the title. */
   .chn-channel-head { flex-wrap: wrap !important; padding: 14px !important; row-gap: 8px !important; }
-  .chn-channel-head > .chn-channel-text { flex: 1 1 calc(100% - 58px) !important; min-width: 0; }
+  /* Force exact width — flex-shrink:0 — so the status pill + action
+     buttons drop to a new row instead of squeezing the title/subtitle.
+     Write longhands so !important survives postcss shorthand expansion. */
+  .chn-channel-head > .chn-channel-text {
+    flex-grow: 0 !important;
+    flex-shrink: 0 !important;
+    flex-basis: calc(100% - 58px) !important;
+    min-width: 0;
+  }
   .chn-channel-head > .chn-action-group,
   .chn-channel-head > button { width: 100%; justify-content: center !important; }
   .chn-action-group { width: 100%; flex-wrap: wrap; }
