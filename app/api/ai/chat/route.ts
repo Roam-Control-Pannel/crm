@@ -26,7 +26,12 @@ export async function POST(req: NextRequest) {
       body: JSON.stringify({
         // Default to current Sonnet (best price/perf). Caller can override.
         model: model || 'claude-sonnet-4-6',
-        max_tokens: maxTokens || 1024,
+        // 4096 default — enough for ~3 LinkedIn-length posts wrapped in
+        // JSON. Sonnet 4.6 produces meaningfully longer output than the
+        // older Sonnet 4 we used to call, and 1024 was getting truncated
+        // mid-JSON on social bulk generation, causing every account batch
+        // to fail JSON parsing (drafts silently dropped).
+        max_tokens: maxTokens || 4096,
         system: systemPrompt,
         messages,
       }),

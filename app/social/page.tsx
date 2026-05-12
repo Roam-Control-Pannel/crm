@@ -696,6 +696,12 @@ Return ONLY the caption text. No JSON, no markdown, no preamble. Just the captio
     const goalLabel = getGoalLabel(genForm.goal);
 
     try {
+      // GENERATE-ACCURACY-V1: Track posts actually created across all
+      // accounts. Previously we fired a misleading "Content generated"
+      // toast at the end of the loop regardless of whether any drafts
+      // had been saved — so a fully-truncated response would close the
+      // modal, claim success, and silently leave the calendar empty.
+      let createdCount = 0;
       for (const acc of selectedAccounts) {
         const audience = acc.toneOverride || brief?.audience || '';
         const tone = acc.toneOverride || brief?.tone || '';
@@ -728,7 +734,11 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
         const res = await fetch('/api/ai/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ messages: [{ role: 'user', content: prompt }] }),
+          // Pass maxTokens explicitly so this caller doesn't depend on
+          // the route default. 4096 fits ~3 LinkedIn-length posts wrapped
+          // in JSON without truncation. If we ever want to support
+          // postsPerAccount > 3 we'll need to bump this further.
+          body: JSON.stringify({ messages: [{ role: 'user', content: prompt }], maxTokens: 4096 }),
         });
         const data = await res.json();
         const txt = typeof data.content === 'string' ? data.content : (data.content?.[0]?.text || data.text || '');
@@ -771,10 +781,17 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
         // calendar with raw-JSON-string drafts (the original bug).
         if (!parsed) {
           console.error('[social-generate] failed to parse AI response for', acc.handle, '— raw:', txt.slice(0, 300));
+          // If the response ended mid-token (no closing bracket), the
+          // model probably ran out of max_tokens. Tell the user that
+          // specifically so they don't waste time retrying with the same
+          // settings.
+          const looksTruncated = txt.length > 100 && !txt.trim().endsWith(']') && !txt.trim().endsWith('}');
           addNotification({
             type: 'email_failed',
             title: 'Generation skipped for ' + acc.handle,
-            body: 'AI response was not valid JSON. Try generating again.',
+            body: looksTruncated
+              ? 'AI response was cut short. Try fewer posts per account.'
+              : 'AI response was not valid JSON. Try generating again.',
           });
           continue;
         }
@@ -830,18 +847,37 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
         });
 
         updatePosts(prev => [...newPosts, ...prev]);
+        createdCount += newPosts.length;
       }
-      addNotification({ type: 'info', title: 'Content generated', body: `${selectedAccounts.length} account${selectedAccounts.length === 1 ? '' : 's'} · theme: ${genForm.theme}` });
-      // SOCIAL-NOTIFS-V1: persistent summary notification for the bell.
-      // One per batch (not per post) — per-post would spam the centre.
-      addPersistentNotification({
-        type: 'social_drafted',
-        title: 'Bulk drafts created',
-        body: `${selectedAccounts.length} account${selectedAccounts.length === 1 ? '' : 's'} · theme: ${genForm.theme}`,
-        href: '/social',
-        dedupeKey: 'social_drafted_bulk:' + Date.now(),
-      });
-      setShowGen(false);
+      // GENERATE-ACCURACY-V1: Only fire the success toast and close the
+      // modal if drafts actually got created. If every account batch
+      // failed (truncation, parse errors, etc.) the per-account error
+      // toasts have already fired — surface a clear overall failure and
+      // leave the modal open so the user can retry without re-entering
+      // everything.
+      if (createdCount === 0) {
+        addNotification({
+          type: 'email_failed',
+          title: 'Generation failed',
+          body: 'No drafts were created. See per-account notifications above.',
+        });
+      } else {
+        addNotification({
+          type: 'info',
+          title: 'Content generated',
+          body: `${createdCount} draft${createdCount === 1 ? '' : 's'} created · theme: ${genForm.theme}`,
+        });
+        // SOCIAL-NOTIFS-V1: persistent summary notification for the bell.
+        // One per batch (not per post) — per-post would spam the centre.
+        addPersistentNotification({
+          type: 'social_drafted',
+          title: 'Bulk drafts created',
+          body: `${createdCount} draft${createdCount === 1 ? '' : 's'} · theme: ${genForm.theme}`,
+          href: '/social',
+          dedupeKey: 'social_drafted_bulk:' + Date.now(),
+        });
+        setShowGen(false);
+      }
     } catch (e: any) {
       addNotification({ type: 'email_failed', title: 'Generation failed', body: e?.message || 'Unknown error' });
     } finally {
