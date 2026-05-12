@@ -187,10 +187,10 @@ export default function BrainPage() {
   }
 
   return (
-    <div style={{ padding: '24px 28px' }}>
+    <div className="brain-page" style={{ padding: '24px 28px' }}>
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20, gap: 16 }}>
-        <div>
+      <div className="brain-header" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20, gap: 16 }}>
+        <div className="brain-header-text">
           <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 28, fontWeight: 700, color: 'var(--ink-900)', lineHeight: 1, display: 'flex', alignItems: 'center', gap: 10 }}>
             <BrainIcon size={26} color="var(--maroon-700)"/>
             Roam-io Brain
@@ -199,7 +199,7 @@ export default function BrainPage() {
             Your knowledge base. Upload images and Roam-io will tag them automatically. The richer the brain, the smarter the AI generation.
           </p>
         </div>
-        <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+        <div className="brain-header-actions" style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
           <button onClick={() => setCreatingFolder(true)} style={btnG}><FolderPlus size={13}/> New folder</button>
           <button onClick={() => fileInputRef.current?.click()} style={btnP} disabled={uploading > 0}>
             {uploading > 0 ? <><Loader size={13} className="spin"/> Uploading {uploading}…</> : <><Upload size={13}/> Upload</>}
@@ -220,9 +220,9 @@ export default function BrainPage() {
       </div>
 
       {/* Body: 2-column grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: '240px 1fr', gap: 20 }}>
+      <div className="brain-layout" style={{ display: 'grid', gridTemplateColumns: '240px 1fr', gap: 20 }}>
         {/* LEFT: Folder tree */}
-        <div style={{ background: 'var(--white)', borderRadius: 'var(--r-lg)', padding: 12, boxShadow: 'var(--shadow-sm)', height: 'fit-content', position: 'sticky', top: 20 }}>
+        <div className="brain-sidebar" style={{ background: 'var(--white)', borderRadius: 'var(--r-lg)', padding: 12, boxShadow: 'var(--shadow-sm)', height: 'fit-content', position: 'sticky', top: 20 }}>
           {/* Root selector */}
           <div
             style={{
@@ -332,16 +332,17 @@ export default function BrainPage() {
               )}
             </div>
           ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12 }}>
+            <div className="brain-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12 }}>
               {visibleItems.map(item => (
                 <div
                   key={item.id}
                   onClick={() => openEdit(item)}
+                  className="brain-card"
                   style={{ background: 'var(--white)', borderRadius: 'var(--r-md)', overflow: 'hidden', cursor: 'pointer', boxShadow: 'var(--shadow-sm)', transition: 'transform 0.15s' }}
                   onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; }}
                   onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; }}
                 >
-                  <div style={{ width: '100%', height: 130, background: 'var(--paper)', position: 'relative' }}>
+                  <div className="brain-card-image" style={{ width: '100%', height: 130, background: 'var(--paper)', position: 'relative' }}>
                     {item.mime?.startsWith('image/')
                       ? <img src={imageUrl(item)} alt={item.description} style={{ width: '100%', height: '100%', objectFit: 'cover' }}/>
                       : <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#fef2f2', color: '#dc2626', gap: 6 }}>

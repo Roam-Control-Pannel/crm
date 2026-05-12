@@ -214,3 +214,36 @@ tbody tr:hover td { background: var(--paper); }
   .chn-action-group > button { flex: 1 1 auto; justify-content: center; }
   .chn-acc-row { padding: 12px 14px !important; flex-wrap: wrap; gap: 10px !important; }
 }
+
+/* ============================================================
+   Brain page — mobile & tablet responsive refinements
+   Used by app/brain/page.tsx. Same pattern as Channels above:
+   page is built with inline styles, breakpoint classes override.
+   Without these, the 240px sidebar + grid layout collapses to
+   ~100px of usable item-grid width on a phone, and the sticky
+   folder panel hogs the top half of the viewport.
+   ============================================================ */
+@media (max-width: 1024px) and (min-width: 641px) {
+  .brain-page { padding: 20px 20px 48px !important; }
+  /* Narrow the sidebar a touch on tablets to give the grid more room. */
+  .brain-layout { grid-template-columns: 200px 1fr !important; }
+}
+
+@media (max-width: 640px) {
+  .brain-page { padding: 16px 14px 48px !important; }
+  /* Stack the layout: folder list above, item grid below. Drop the
+     sticky positioning so the folder card doesn't pin to the top of
+     the viewport and eat scroll space. */
+  .brain-layout { grid-template-columns: 1fr !important; gap: 14px !important; }
+  .brain-sidebar { position: static !important; top: auto !important; }
+  /* Header: title block sits on top, action buttons go full-width below
+     and split the row 50/50 instead of being squeezed next to the title. */
+  .brain-header { flex-wrap: wrap; gap: 12px !important; margin-bottom: 14px !important; }
+  .brain-header-text { flex: 1 1 100%; min-width: 0; }
+  .brain-header-actions { width: 100%; }
+  .brain-header-actions > button { flex: 1 1 0; justify-content: center; }
+  /* Two cards per row on phones at a sensible card size; reduce the
+     image area so two rows fit on screen without endless scrolling. */
+  .brain-grid { grid-template-columns: repeat(2, 1fr) !important; gap: 10px !important; }
+  .brain-card-image { height: 110px !important; }
+}
