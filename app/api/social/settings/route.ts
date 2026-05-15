@@ -57,7 +57,12 @@ export async function GET() {
 
 export async function PUT(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => ({}));
+    let body: any;
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
+    }
     const incomingTimes: PostingTimes | undefined = body.postingTimes;
     const incomingOverrides: ThemeOverrides | undefined = body.themeOverrides;
     // MULTI-BRIEF-V1: optional weights map.
