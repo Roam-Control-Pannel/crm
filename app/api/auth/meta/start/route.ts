@@ -3,7 +3,11 @@ import { randomBytes } from 'crypto';
 
 export const dynamic = 'force-dynamic';
 
-const REDIRECT_URI = 'https://roam-crm-platform.netlify.app/api/auth/meta/callback';
+// Must match callback route's redirectUri exactly (and what's registered
+// with Meta). Keep both in sync via the same env var.
+const REDIRECT_URI =
+  process.env.META_REDIRECT_URI ||
+  'https://roam-crm-platform.netlify.app/api/auth/meta/callback';
 // Scopes required for connecting Facebook Pages + Instagram Business accounts
 // and publishing on the user's behalf. `email` and `public_profile` are NOT
 // required for this flow and `email` is rejected by the OAuth dialog without

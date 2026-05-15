@@ -17,18 +17,16 @@
   "devDependencies": {
     "@netlify/plugin-nextjs": "^5.15.10",
     "@types/mailparser": "^3.4.6",
-    "@types/node": "^25.6.0",
-    "@types/react": "^19.2.14",
-    "@types/react-dom": "^19.2.3",
-    "autoprefixer": "^10.5.0",
-    "postcss": "^8.5.12",
-    "tailwindcss": "^4.2.4",
-    "typescript": "^6.0.3"
+    "@types/node": "^20.14.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "typescript": "^5.6.3"
   },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit"
   }
 }

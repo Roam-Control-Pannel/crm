@@ -6,6 +6,7 @@ import {
   type CronRunRecord,
 } from '@/lib/cron-status';
 import { REPLY_TO_ADDRESS, fetchAllContacts } from '@/lib/brevo';
+import { safeEqual } from '@/lib/safe-equal';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -36,15 +37,24 @@ interface BrevoContact {
 const BREVO_BASE = 'https://api.brevo.com/v3';
 const SENDER = { name: 'Roam Local Team', email: 'hello@roam-everywhere.com' };
 
+function redactEmail(email: string): string {
+  const at = email.indexOf('@');
+  if (at < 1) return '***';
+  return `${email.slice(0, 2)}***${email.slice(at)}`;
+}
+
 function authorize(req: NextRequest): { ok: boolean; reason?: string } {
   const secret = process.env.CRON_SECRET_V2;
   if (!secret) {
     return { ok: false, reason: 'CRON_SECRET_V2 not configured' };
   }
-  const auth = req.headers.get('authorization');
-  if (auth === `Bearer ${secret}`) return { ok: true };
+  const auth = req.headers.get('authorization') || '';
+  if (auth.startsWith('Bearer ') && safeEqual(auth.slice(7), secret)) {
+    return { ok: true };
+  }
   // Allow same-origin internal proxy call (run-now button)
-  if (req.headers.get('x-internal-call') === secret) return { ok: true };
+  const internal = req.headers.get('x-internal-call');
+  if (internal && safeEqual(internal, secret)) return { ok: true };
   return { ok: false, reason: 'Unauthorized' };
 }
 
@@ -111,12 +121,12 @@ async function updateStatus(email: string, attrs: Record<string, string>): Promi
     });
     if (!res.ok) {
       const body = await res.text().catch(() => '');
-      console.error(`[sequences] updateStatus ${res.status} for ${email}: ${body.slice(0, 200)}`);
+      console.error(`[sequences] updateStatus ${res.status} for ${redactEmail(email)}: ${body.slice(0, 200)}`);
       return false;
     }
     return true;
   } catch (err: any) {
-    console.error(`[sequences] updateStatus threw for ${email}:`, err?.message);
+    console.error(`[sequences] updateStatus threw for ${redactEmail(email)}:`, err?.message);
     return false;
   }
 }

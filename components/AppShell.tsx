@@ -59,8 +59,13 @@ function Sidebar({ onClose, isOpen }: { onClose?: () => void; isOpen?: boolean }
         <NotificationCentre />
         {/* Close button on mobile */}
         {onClose && (
-          <button onClick={onClose} style={{ background: 'rgba(255,255,255,0.08)', border: 'none', borderRadius: 'var(--r-sm)', width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'rgba(255,255,255,0.7)', flexShrink: 0 }}>
-            <X size={16}/>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close navigation"
+            style={{ background: 'rgba(255,255,255,0.08)', border: 'none', borderRadius: 'var(--r-sm)', width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'rgba(255,255,255,0.7)', flexShrink: 0 }}
+          >
+            <X size={16} aria-hidden="true"/>
           </button>
         )}
       </div>
@@ -142,7 +147,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="app-layout">
       {/* Mobile overlay */}
-      <div className={`sidebar-overlay${mobileOpen ? ' open' : ''}`} onClick={() => setMobileOpen(false)} style={{WebkitBackdropFilter:'none',backdropFilter:'none',willChange:'opacity'}}/>
+      <div
+        className={`sidebar-overlay${mobileOpen ? ' open' : ''}`}
+        onClick={() => setMobileOpen(false)}
+        aria-hidden="true"
+        style={{WebkitBackdropFilter:'none',backdropFilter:'none',willChange:'opacity'}}
+      />
 
       {/* Sidebar */}
       <Sidebar onClose={() => setMobileOpen(false)} isOpen={mobileOpen}/>
@@ -151,8 +161,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       <main className="app-main" style={{}}>
         {/* Mobile top bar */}
         <div className="mobile-header">
-          <button className="mobile-menu-btn" onClick={() => setMobileOpen(true)}>
-            <Menu size={18}/>
+          <button
+            type="button"
+            className="mobile-menu-btn"
+            onClick={() => setMobileOpen(true)}
+            aria-label="Open navigation"
+            aria-expanded={mobileOpen}
+          >
+            <Menu size={18} aria-hidden="true"/>
           </button>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
             <div style={{ width: 24, height: 24, borderRadius: 6, overflow: 'hidden', background: 'var(--white)' }}>

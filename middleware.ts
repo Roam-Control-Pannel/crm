@@ -1,5 +1,6 @@
 import { withAuth } from 'next-auth/middleware';
 import { NextResponse } from 'next/server';
+import { safeEqual } from '@/lib/safe-equal';
 
 /**
  * Public API routes — these gate themselves server-side via a bearer
@@ -59,7 +60,7 @@ export default withAuth(
         if (
           internalSecret &&
           process.env.CRON_SECRET_V2 &&
-          internalSecret === process.env.CRON_SECRET_V2
+          safeEqual(internalSecret, process.env.CRON_SECRET_V2)
         ) {
           return true;
         }

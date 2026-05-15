@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { runAutoGenerate } from '@/lib/social-cron';
+import { safeEqual } from '@/lib/safe-equal';
 
 // CRON-AUTOGEN-V1
 // Auto-generate social posts cron endpoint.
@@ -32,7 +33,7 @@ async function handle(req: NextRequest) {
   }
 
   const provided = req.headers.get('x-internal-call');
-  if (provided !== secret) {
+  if (!provided || !safeEqual(provided, secret)) {
     return NextResponse.json(
       { ok: false, error: 'Unauthorized' },
       { status: 401 }

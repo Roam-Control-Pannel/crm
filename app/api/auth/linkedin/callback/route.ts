@@ -24,7 +24,11 @@ export async function GET(req: NextRequest) {
 
     const clientId = process.env.LINKEDIN_CLIENT_ID;
     const clientSecret = process.env.LINKEDIN_CLIENT_SECRET;
-    const redirectUri = 'https://roam-crm-platform.netlify.app/api/auth/linkedin/callback';
+    // Must match the URL registered in the LinkedIn app. Env override is
+    // there for staging / non-prod deploys; falls back to the production URL.
+    const redirectUri =
+      process.env.LINKEDIN_REDIRECT_URI ||
+      'https://roam-crm-platform.netlify.app/api/auth/linkedin/callback';
 
     // Exchange code for access token
     const tokenRes = await fetch('https://www.linkedin.com/oauth/v2/accessToken', {

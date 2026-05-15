@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { safeEqual } from '@/lib/safe-equal';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -24,7 +25,7 @@ export async function GET(req: NextRequest) {
   const secret = searchParams.get('secret');
   const email = searchParams.get('email');
 
-  if (!process.env.CRON_SECRET_V2 || secret !== process.env.CRON_SECRET_V2) {
+  if (!process.env.CRON_SECRET_V2 || !secret || !safeEqual(secret, process.env.CRON_SECRET_V2)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
   if (!email) {
