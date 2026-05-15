@@ -8,7 +8,14 @@ interface Message {
   role:'user'|'assistant';
   content:string;
   timestamp:Date;
+  // Legacy string-CONFIRM action (kept for back-compat with old saved chats).
   confirmAction?:{type:string;label:string;detail:string;};
+  // New: structured tool call awaiting confirmation. Survives reload because
+  // it's persisted alongside the message in hub_chats.
+  pendingTool?:{name:string;input:any;tool_use_id:string;assistantContent:any[];};
+  // New: tools that already ran this turn (no confirm needed) — shown as
+  // small "✓ Created task: …" chips beneath the message.
+  executedTools?:{name:string;input:any}[];
   confirmed?:boolean;
   cancelled?:boolean;
 }
@@ -59,41 +66,67 @@ function groupChats(chats:Chat[]):{label:string;chats:Chat[]}[]{
   return g;
 }
 
-async function callRoamio(messages:{role:string;content:string}[],docs?:RoamDoc[]):Promise<{text:string;confirmAction?:{type:string;label:string;detail:string;}}>{
+interface RoamioResult{
+  text:string;
+  pendingTool?:{name:string;input:any;tool_use_id:string;assistantContent:any[];};
+  executedTools?:{name:string;input:any}[];
+}
+
+async function callRoamio(messages:{role:string;content:string}[],docs?:RoamDoc[],pendingConfirm?:any):Promise<RoamioResult>{
+  const today=new Date().toISOString().split('T')[0];
   const system=`You are Roam-io, the AI growth assistant for Roam Local — a free local business discovery app. You help the Roam team run their business outreach CRM.
 
 Your personality: warm, encouraging and conversational — like a smart, enthusiastic colleague. But also precise, efficient and action-oriented.
 
-You have access to: contacts in Brevo CRM, Google Places for finding businesses, Brevo for sending personalised emails, city page data (known_for, history, local_tip) for personalisation, and social media channels.
+Today's date is ${today}. When the user says "today", "tomorrow", "Friday" etc., resolve to an ISO yyyy-mm-dd date.
+
+You have access to TOOLS for managing the user's task list (create_task, list_tasks, complete_task, update_task, delete_task). Use them whenever the user asks to add a task, see what's on their list, mark something done, or change/remove a task. Don't ask the user to do these things manually — call the tool.
+
+You also have read-only context about: contacts in Brevo CRM, Google Places for finding businesses, social media channels, and city page data (known_for, history, local_tip). For now, only the task tools execute live — everything else is conversational.
 
 RULES:
-1. ALWAYS ask for confirmation before taking any action
-2. Be specific with numbers and data
-3. Keep responses concise — use bullet points
-4. When suggesting an action that needs confirmation, end your message with exactly this on a new line:
-CONFIRM:{"type":"action","label":"Brief action label","detail":"Full detail of what will happen"}`;
+1. Be specific with numbers and data
+2. Keep responses concise — use bullet points where useful
+3. When a tool returns a result, summarise it briefly in your reply ("Added: Follow up with Dún Laoghaire BID, due Friday")
+4. If a tool fails, explain plainly what went wrong
+5. Don't pretend to do things you don't have tools for — say what you'd do and offer to walk through it`;
 
-  const docCtx=docs&&docs.length>0?docs.map(d=>`[DOC: ${d.name}]\n${d.content}`).join("\n\n"):"";  try{
+  const docCtx=docs&&docs.length>0?docs.map(d=>`[DOC: ${d.name}]\n${d.content}`).join("\n\n"):"";
+  try{
+    const body:any={
+      systemPrompt:system+(docCtx?"\n\nKNOWLEDGE BASE:\n"+docCtx:""),
+      messages:messages.map(m=>({role:m.role,content:m.content})),
+      tools:['tasks'],
+    };
+    if(pendingConfirm)body.pendingConfirm=pendingConfirm;
     const res=await fetch('/api/ai/chat',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
-        systemPrompt:system+(docCtx?"\n\nKNOWLEDGE BASE:\n"+docCtx:""),
-        messages:messages.map(m=>({role:m.role,content:m.content})),
-      }),
+      body:JSON.stringify(body),
     });
     const data=await res.json();
     if(data.error){return{text:'I am having trouble right now: '+data.error};}
-    const raw=data.content||'Sorry, I could not process that. Please try again.';
-    const confirmMatch=raw.match(/CONFIRM:({[^}]+})/);
-    let confirmAction;let text=raw;
-    if(confirmMatch){
-      try{confirmAction=JSON.parse(confirmMatch[1]);}catch(e){}
-      text=raw.split('CONFIRM:')[0].trim();
-    }
-    return{text,confirmAction};
+    return{
+      text:data.content||'',
+      pendingTool:data.pendingTool,
+      executedTools:data.executedTools,
+    };
   }catch(e){
     return{text:'I am having trouble connecting right now. Please check the ANTHROPIC_API_KEY is set in Netlify environment variables and try again.'};
+  }
+}
+
+// Human-readable label + detail for a tool call — used by both the confirm
+// card (for tools that require confirmation) and the "executed" chips
+// (for tools that ran silently).
+function describeToolCall(name:string,input:any):{label:string;detail:string}{
+  switch(name){
+    case 'create_task':return{label:'Created task',detail:`"${input.title}" — ${input.priority} priority, ${input.category}, due ${input.dueDate}`};
+    case 'list_tasks':return{label:'Listed tasks',detail:input.filter?`Filter: ${input.filter}`:'All open tasks'};
+    case 'complete_task':return{label:'Marked complete',detail:`Task ${input.id}`};
+    case 'update_task':return{label:'Update task',detail:`Task ${input.id} — ${Object.keys(input).filter(k=>k!=='id').join(', ')}`};
+    case 'delete_task':return{label:'Delete task',detail:`Permanently remove task ${input.id}`};
+    default:return{label:name,detail:JSON.stringify(input)};
   }
 }
 
@@ -172,13 +205,26 @@ export default function HubPage(){
     const newMsgs=[...chat.messages,userMsg];
     updateChat(chat.id,newMsgs,title);
 
-    const{text:aiText,confirmAction}=await callRoamio(newMsgs.map(m=>({role:m.role,content:m.content})),docs);
-    const aiMsg:Message={id:(Date.now()+1).toString(),role:'assistant',content:aiText,timestamp:new Date(),confirmAction};
+    const result=await callRoamio(newMsgs.map(m=>({role:m.role,content:m.content})),docs);
+    const aiMsg:Message={
+      id:(Date.now()+1).toString(),
+      role:'assistant',
+      content:result.text||(result.pendingTool?'':'(no response)'),
+      timestamp:new Date(),
+      pendingTool:result.pendingTool?{...result.pendingTool,assistantContent:(result as any).assistantContent||(result.pendingTool as any).assistantContent||[]}:undefined,
+      executedTools:result.executedTools,
+    };
+    // If the server sent assistantContent at the top level (it does), attach it.
+    if((result as any).assistantContent&&result.pendingTool){
+      aiMsg.pendingTool!.assistantContent=(result as any).assistantContent;
+    }
     updateChat(chat.id,[...newMsgs,aiMsg],title);
     setLoading(false);
     setTimeout(()=>inputRef.current?.focus(),100);
   }
 
+  // Legacy CONFIRM:{...} flow — kept so any saved chats still work, but new
+  // sessions go through handleToolConfirm instead.
   async function handleConfirm(chatId:string,msgId:string,action:{type:string;label:string;detail:string;}){
     const chat=chats.find(c=>c.id===chatId)||activeChat;
     if(!chat)return;
@@ -190,6 +236,39 @@ export default function HubPage(){
     const confirmMsg:Message={id:Date.now().toString(),role:'user',content:`Confirmed: ${action.label}`,timestamp:new Date()};
     const responseMsg:Message={id:(Date.now()+1).toString(),role:'assistant',content:text,timestamp:new Date()};
     updateChat(chatId,[...updated,confirmMsg,responseMsg]);
+    setLoading(false);
+  }
+
+  // New structured tool-confirm flow. Server re-runs the tool with the
+  // user's blessing and returns a fresh natural-language reply.
+  async function handleToolConfirm(chatId:string,msgId:string,pending:{name:string;input:any;tool_use_id:string;assistantContent:any[]}){
+    const chat=chats.find(c=>c.id===chatId)||activeChat;
+    if(!chat)return;
+    const updated=chat.messages.map(m=>m.id===msgId?{...m,confirmed:true,pendingTool:undefined}:m);
+    updateChat(chatId,updated);
+    setLoading(true);
+    // Send up to and INCLUDING the pre-tool assistant message — the server
+    // will append the tool_result and the new assistant reply.
+    const history=updated.filter(m=>m.id!==msgId).map(m=>({role:m.role,content:m.content}));
+    // Also include the original assistant text that preceded the tool call
+    // so Claude has context. Empty content is fine.
+    const lastAssistantText=chat.messages.find(m=>m.id===msgId)?.content||'';
+    if(lastAssistantText)history.push({role:'assistant',content:lastAssistantText});
+
+    const result=await callRoamio(history,docs,{
+      name:pending.name,
+      input:pending.input,
+      tool_use_id:pending.tool_use_id,
+      assistant_content:pending.assistantContent,
+    });
+    const responseMsg:Message={
+      id:Date.now().toString(),
+      role:'assistant',
+      content:result.text||'Done.',
+      timestamp:new Date(),
+      executedTools:result.executedTools||[{name:pending.name,input:pending.input}],
+    };
+    updateChat(chatId,[...updated,responseMsg]);
     setLoading(false);
   }
 
@@ -385,7 +464,32 @@ export default function HubPage(){
                       </div>
                     </div>
                   )}
-                  {m.confirmed&&<div style={{marginTop:6,display:'flex',alignItems:'center',gap:5,fontSize:11,color:'var(--ok)'}}><Check size={11}/> Action confirmed</div>}
+                  {m.pendingTool&&!m.confirmed&&!m.cancelled&&(()=>{
+                    const d=describeToolCall(m.pendingTool!.name,m.pendingTool!.input);
+                    return(
+                      <div style={{marginTop:10,background:'var(--white)',border:'1.5px solid var(--warn)',borderRadius:'var(--r-md)',padding:'12px 14px'}}>
+                        <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:6}}><AlertTriangle size={13} color="var(--warn)"/><span style={{fontSize:12,fontWeight:600,color:'var(--warn)'}}>{d.label}</span></div>
+                        <div style={{fontSize:12,color:'var(--ink-600)',lineHeight:1.5,marginBottom:10}}>{d.detail}</div>
+                        <div style={{display:'flex',gap:8}}>
+                          <button onClick={()=>activeChat&&handleToolConfirm(activeChat.id,m.id,m.pendingTool!)} style={{flex:1,fontSize:12,padding:'8px 0',background:'var(--maroon-700)',color:'white',border:'none',borderRadius:'var(--r-sm)',cursor:'pointer',fontWeight:500,display:'flex',alignItems:'center',justifyContent:'center',gap:6}}><Check size={12}/> Confirm</button>
+                          <button onClick={()=>activeChat&&handleCancel(activeChat.id,m.id)} style={{flex:1,fontSize:12,padding:'8px 0',border:'1.5px solid var(--ink-200)',background:'var(--white)',borderRadius:'var(--r-sm)',cursor:'pointer',color:'var(--ink-600)'}}>Cancel</button>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  {m.executedTools&&m.executedTools.length>0&&(
+                    <div style={{marginTop:6,display:'flex',flexDirection:'column',gap:4}}>
+                      {m.executedTools.map((t,i)=>{
+                        const d=describeToolCall(t.name,t.input);
+                        return(
+                          <div key={i} style={{display:'flex',alignItems:'center',gap:5,fontSize:11,color:'var(--ok)'}}>
+                            <Check size={11}/> {d.label}: <span style={{color:'var(--ink-500)'}}>{d.detail}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {m.confirmed&&!m.executedTools&&<div style={{marginTop:6,display:'flex',alignItems:'center',gap:5,fontSize:11,color:'var(--ok)'}}><Check size={11}/> Action confirmed</div>}
                   {m.cancelled&&<div style={{marginTop:6,fontSize:11,color:'var(--ink-400)'}}>Action cancelled</div>}
                 </div>
               </div>
