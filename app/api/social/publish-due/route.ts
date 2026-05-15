@@ -29,7 +29,12 @@ function platformFromAccountId(accountId: string): PublishPlatform | null {
 //
 // Behaviour:
 //   1. Load social_posts.
-//   2. Pick posts where status ∈ {'draft','scheduled'} AND scheduledAt <= now.
+//   2. Pick posts where status === 'scheduled' AND scheduledAt <= now.
+//      Drafts are excluded by design — a post must be explicitly scheduled
+//      (status === 'scheduled' with a scheduledAt time) to auto-publish.
+//      The "Publish now" button in the UI bypasses this entirely by
+//      calling /api/social/publish directly, so it works on any post
+//      regardless of status.
 //   3. For each due post, mark 'publishing' and persist, then iterate
 //      accountIds and call publishToAccount(). Track per-account results
 //      and roll up to a final status (published / partial / failed).
@@ -39,7 +44,7 @@ function platformFromAccountId(accountId: string): PublishPlatform | null {
 // re-attempted if its publishingStartedAt is older than STALE_PUBLISHING_MS.
 //
 // Per-run cap: MAX_POSTS_PER_RUN keeps each invocation under the function
-// timeout. The 5-minute cadence means up to MAX_POSTS_PER_RUN * 12 posts/hr.
+// timeout. The 1-minute cadence means up to MAX_POSTS_PER_RUN * 60 posts/hr.
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -91,10 +96,18 @@ async function handle(req: NextRequest) {
   const duePosts = posts.filter(p => {
     const due = new Date(p.scheduledAt).getTime() <= now;
     if (!due) return false;
-    if (p.status === 'draft' || p.status === 'scheduled') return true;
+    // Only posts the user has explicitly scheduled fire on the cron.
+    // Drafts stay drafts until the user either schedules them or hits
+    // "Publish now" (which routes through /api/social/publish and
+    // overrides any status check).
+    if (p.status === 'scheduled') return true;
+    // Re-attempt posts stuck in 'publishing' past the stale threshold
+    // — likely a prior cron run crashed mid-publish. Only do this for
+    // posts that were originally 'scheduled' (publishingStartedAt is
+    // only set by this cron, not by ad-hoc UI publishes).
     if (p.status === 'publishing') {
       const startedAt = p.publishingStartedAt ? new Date(p.publishingStartedAt).getTime() : 0;
-      return now - startedAt > STALE_PUBLISHING_MS;
+      return startedAt > 0 && now - startedAt > STALE_PUBLISHING_MS;
     }
     return false;
   });
