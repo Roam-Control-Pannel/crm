@@ -65,6 +65,24 @@ export async function POST(req: NextRequest) {
       }, { status: 404 });
     }
 
+    // MULTI-BRIEF-V1: if the account is assigned multiple briefs and the
+    // caller didn't specify which one, the route will end up using the
+    // caller-supplied briefId regardless. (Roam-io picks the brief
+    // upstream — this route just executes.) But we DO validate that the
+    // brief is one of the briefs the account is configured for. Saves
+    // accidentally posting Roam Local content from a Roam NI account.
+    const metaCol = (await getCollection<any[]>(DEFAULT_USER_ID, 'account_meta')) || [];
+    const accountMeta = metaCol.find((m: any) => m.accountId === accountId);
+    const accountBriefIds: string[] = (Array.isArray(accountMeta?.briefIds) && accountMeta.briefIds.length > 0)
+      ? accountMeta.briefIds
+      : (accountMeta?.briefId ? [accountMeta.briefId] : []);
+    if (accountBriefIds.length > 0 && !accountBriefIds.includes(briefId)) {
+      return NextResponse.json({
+        ok: false,
+        error: `Brief ${briefId} not assigned to account ${accountId}. Account briefs: ${accountBriefIds.join(', ')}`,
+      }, { status: 400 });
+    }
+
     // 2. Resolve theme (pick random enabled if not specified)
     const { themes } = await getEffectiveSettings();
     const candidates = themes.filter(t => t.enabled && t.briefIds.includes(briefId));
@@ -89,8 +107,17 @@ export async function POST(req: NextRequest) {
         error: `Account ${accountId} not found. Available: ${availableIds.join(', ') || '(none returned)'}`,
       }, { status: 404 });
     }
-    const metaCol = (await getCollection<any[]>(DEFAULT_USER_ID, 'account_meta')) || [];
-    const meta = metaCol.find((m: any) => m.accountId === accountId) || { accountId, briefId };
+    // Build a meta view that reflects this brief's per-brief override
+    // (falling back to legacy flat overrides for single-brief accounts).
+    const perBrief = accountMeta?.perBriefOverrides?.[briefId];
+    const meta = accountMeta ? {
+      accountId,
+      briefId,
+      toneOverride: perBrief?.tone || accountMeta.toneOverride,
+      hashtagsOverride: perBrief?.hashtags || accountMeta.hashtagsOverride,
+      contentBriefOverride: perBrief?.contentBrief || accountMeta.contentBriefOverride,
+      active: accountMeta.active,
+    } : { accountId, briefId };
 
     // 4. Generate caption (unless override provided)
     let caption = captionOverride;

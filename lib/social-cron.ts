@@ -60,8 +60,12 @@ interface RealAccountLite {
   capabilities: { canPost: boolean };
 }
 
+// MULTI-BRIEF-V1: extended with briefIds + perBriefOverrides. Legacy
+// briefId/flat-overrides kept for back-compat with pre-patch data.
 interface AccountMetaLite {
   accountId: string;
+  briefIds?: string[];
+  perBriefOverrides?: Record<string, { tone?: string; hashtags?: string; contentBrief?: string }>;
   briefId?: string;
   toneOverride?: string;
   hashtagsOverride?: string;
@@ -119,6 +123,31 @@ export function expandSlots(
 // ----------------------------------------------------------------------------
 // Theme picker — random from enabled themes for this brief
 // ----------------------------------------------------------------------------
+
+/**
+ * MULTI-BRIEF-V1: pick one brief from a list, weighted by briefWeights.
+ * Briefs not in the weight map default to weight 1. If all weights are
+ * zero (or list is empty), falls back to the first brief in the list.
+ */
+export function pickWeightedBrief(
+  briefIds: string[],
+  weights: Record<string, number> | undefined,
+): string {
+  if (briefIds.length === 0) return '';
+  if (briefIds.length === 1) return briefIds[0];
+  const w = briefIds.map(id => {
+    const v = weights?.[id];
+    return typeof v === 'number' && v > 0 ? v : 1;
+  });
+  const total = w.reduce((a, b) => a + b, 0);
+  if (total <= 0) return briefIds[0];
+  let r = Math.random() * total;
+  for (let i = 0; i < briefIds.length; i++) {
+    r -= w[i];
+    if (r < 0) return briefIds[i];
+  }
+  return briefIds[briefIds.length - 1];
+}
 
 export function pickTheme(themes: Theme[], briefId: string): Theme | null {
   const eligible = themes.filter(t => t.enabled && t.briefIds.includes(briefId));
@@ -394,18 +423,29 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
     for (const account of realAccounts) {
       if (!account.capabilities?.canPost) continue;
       const meta = accountMetas.find(m => m.accountId === account.id);
-      if (!meta || !meta.briefId) continue;
+      // MULTI-BRIEF-V1: resolve effective brief list (new shape with
+      // legacy fallback). Skip account if it has no briefs assigned.
+      const effectiveBriefIds: string[] = (Array.isArray(meta?.briefIds) && meta!.briefIds!.length > 0)
+        ? meta!.briefIds!
+        : (meta?.briefId ? [meta.briefId] : []);
+      if (!meta || effectiveBriefIds.length === 0) continue;
       if (meta.active === false) continue;
 
-      const brief = briefs.find(b => b.id === meta.briefId);
-      if (!brief || !brief.active) continue;
+      // Filter to only briefs that are active. If none active, skip account.
+      const activeBriefIds = effectiveBriefIds.filter(id => {
+        const b = briefs.find(x => x.id === id);
+        return b && b.active;
+      });
+      if (activeBriefIds.length === 0) continue;
 
       const slots = settings.postingTimes[account.platform] || [];
       const datetimes = expandSlots(slots, now, lookaheadDays);
 
       const acctResult: AutoGenerateAccountResult = {
         accountId: account.id,
-        briefId: meta.briefId,
+        // For multi-brief accounts this just shows the first assigned brief
+        // — purely informational for the run report.
+        briefId: activeBriefIds[0],
         created: 0,
         skipped: 0,
         themeIdsUsed: [],
@@ -424,16 +464,48 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
           continue;
         }
 
-        const theme = pickTheme(settings.themes, meta.briefId);
+        // MULTI-BRIEF-V1: weighted-random pick of one brief for THIS slot.
+        // Weights come from settings.briefWeights; any brief missing from
+        // the map defaults to weight 1 (equal).
+        let slotBriefId = pickWeightedBrief(activeBriefIds, settings.briefWeights);
+        let slotBrief = briefs.find(b => b.id === slotBriefId);
+        let theme: Theme | null = slotBrief ? pickTheme(settings.themes, slotBriefId) : null;
+
+        // If the picked brief has no enabled themes, try the others in
+        // the account's list before giving up. Avoids the whole account
+        // stalling because one of its briefs has no themes configured.
         if (!theme) {
-          // No enabled theme for this brief — skip the rest of this account
+          for (const altBriefId of activeBriefIds) {
+            if (altBriefId === slotBriefId) continue;
+            const altBrief = briefs.find(b => b.id === altBriefId);
+            const altTheme = altBrief ? pickTheme(settings.themes, altBriefId) : null;
+            if (altTheme) {
+              slotBriefId = altBriefId;
+              slotBrief = altBrief;
+              theme = altTheme;
+              break;
+            }
+          }
+        }
+        if (!slotBrief || !theme) {
           result.skippedNoThemes += 1;
           break;
         }
         acctResult.themeIdsUsed.push(theme.id);
 
-        // Caption
-        const caption = await generateCaption(input.origin, brief, theme, meta, account);
+        // MULTI-BRIEF-V1: caption gen now uses the slot's picked brief and
+        // a synthesised meta where the override fields reflect that brief's
+        // per-brief override (falling back to the legacy flat fields).
+        const overrides = (meta!.perBriefOverrides && meta!.perBriefOverrides[slotBriefId]) || {};
+        const metaForCaption: AccountMetaLite = {
+          accountId: meta!.accountId,
+          briefId: slotBriefId,
+          toneOverride: overrides.tone || meta!.toneOverride,
+          hashtagsOverride: overrides.hashtags || meta!.hashtagsOverride,
+          contentBriefOverride: overrides.contentBrief || meta!.contentBriefOverride,
+          active: meta!.active,
+        };
+        const caption = await generateCaption(input.origin, slotBrief, theme, metaForCaption, account);
 
         // Image — Brain first, then Unsplash
         let imageUrl: string | undefined;
@@ -461,7 +533,7 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
 
         const post: SocialPostDraft = {
           id: 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-          briefId: meta.briefId,
+          briefId: slotBriefId,  // MULTI-BRIEF-V1: the brief picked for THIS post
           accountIds: [account.id],
           caption,
           imageUrl,

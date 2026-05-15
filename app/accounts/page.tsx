@@ -84,11 +84,17 @@ export default function AccountsPage() {
   const [accountMeta, setAccountMeta] = useState<AccountMeta[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<SocialAccount | null>(null);
-  const [editForm, setEditForm] = useState({
-    briefId: '',
-    toneOverride: '',
-    hashtagsOverride: '',
-    contentBriefOverride: '',
+  // MULTI-BRIEF-V1: editForm tracks multiple briefIds + per-brief overrides.
+  // Legacy flat tone/hashtags/content fields are still here so a single-brief
+  // account upgrade saves both shapes (forwards + backwards compat).
+  const [editForm, setEditForm] = useState<{
+    briefIds: string[];
+    perBriefOverrides: Record<string, { tone: string; hashtags: string; contentBrief: string }>;
+    expandedBriefId: string | null;
+  }>({
+    briefIds: [],
+    perBriefOverrides: {},
+    expandedBriefId: null,
   });
 
   async function load() {
@@ -111,22 +117,67 @@ export default function AccountsPage() {
 
   function openEdit(a: SocialAccount) {
     setEditing(a);
+    // Hydrate per-brief overrides for every brief currently assigned.
+    // For each brief, prefer perBriefOverrides[id], fall back to the
+    // legacy flat fields (which only meaningfully apply to brief 0).
+    const perBrief: Record<string, { tone: string; hashtags: string; contentBrief: string }> = {};
+    const briefIds = a.briefIds || [];
+    briefIds.forEach((id, idx) => {
+      const fromMap = a.perBriefOverrides?.[id];
+      if (fromMap) {
+        perBrief[id] = {
+          tone: fromMap.tone || '',
+          hashtags: fromMap.hashtags || '',
+          contentBrief: fromMap.contentBrief || '',
+        };
+      } else if (idx === 0) {
+        // Legacy: flat overrides only describe the first brief.
+        perBrief[id] = {
+          tone: a.toneOverride || '',
+          hashtags: a.hashtagsOverride || '',
+          contentBrief: a.contentBriefOverride || '',
+        };
+      } else {
+        perBrief[id] = { tone: '', hashtags: '', contentBrief: '' };
+      }
+    });
     setEditForm({
-      briefId: a.briefId || '',
-      toneOverride: a.toneOverride || '',
-      hashtagsOverride: a.hashtagsOverride || '',
-      contentBriefOverride: a.contentBriefOverride || '',
+      briefIds,
+      perBriefOverrides: perBrief,
+      expandedBriefId: briefIds[0] || null,
     });
   }
 
   async function saveEdit() {
     if (!editing) return;
+    // Strip empty per-brief overrides so we don't store noise.
+    const cleanedOverrides: Record<string, { tone?: string; hashtags?: string; contentBrief?: string }> = {};
+    for (const id of editForm.briefIds) {
+      const o = editForm.perBriefOverrides[id];
+      if (!o) continue;
+      const trimmed = {
+        tone: o.tone?.trim() || undefined,
+        hashtags: o.hashtags?.trim() || undefined,
+        contentBrief: o.contentBrief?.trim() || undefined,
+      };
+      if (trimmed.tone || trimmed.hashtags || trimmed.contentBrief) {
+        cleanedOverrides[id] = trimmed;
+      }
+    }
+    // MULTI-BRIEF-V1: write new shape (briefIds + perBriefOverrides)
+    // AND legacy mirror (briefId + flat fields from brief[0]) so a
+    // rollback of this patch wouldn't corrupt anything.
+    const firstId = editForm.briefIds[0];
+    const firstOverride = firstId ? cleanedOverrides[firstId] : undefined;
     const updated = await upsertAccountMeta({
       accountId: editing.id,
-      briefId: editForm.briefId || undefined,
-      toneOverride: editForm.toneOverride || undefined,
-      hashtagsOverride: editForm.hashtagsOverride || undefined,
-      contentBriefOverride: editForm.contentBriefOverride || undefined,
+      briefIds: editForm.briefIds.length > 0 ? editForm.briefIds : undefined,
+      perBriefOverrides: Object.keys(cleanedOverrides).length > 0 ? cleanedOverrides : undefined,
+      // Legacy mirrors:
+      briefId: firstId || undefined,
+      toneOverride: firstOverride?.tone,
+      hashtagsOverride: firstOverride?.hashtags,
+      contentBriefOverride: firstOverride?.contentBrief,
     });
     setAccountMeta(updated);
     setAccounts(combineAccounts(realAccounts, briefs, updated));
@@ -228,12 +279,16 @@ export default function AccountsPage() {
                 </div>
               </div>
 
-              {/* Brief assignment */}
+              {/* MULTI-BRIEF-V1: show all assigned brief chips */}
               <div style={{ marginBottom: 10 }}>
-                {a.brief ? (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: 'var(--r-sm)', background: a.brief.color + '12', border: `1px solid ${a.brief.color}33` }}>
-                    <div style={{ width: 8, height: 8, borderRadius: '50%', background: a.brief.color }} />
-                    <div style={{ fontSize: 11, fontWeight: 600, color: a.brief.color }}>{a.brief.name}</div>
+                {a.briefs.length > 0 ? (
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {a.briefs.map(b => (
+                      <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 9px', borderRadius: 'var(--r-sm)', background: b.color + '12', border: `1px solid ${b.color}33` }}>
+                        <div style={{ width: 7, height: 7, borderRadius: '50%', background: b.color }} />
+                        <div style={{ fontSize: 11, fontWeight: 600, color: b.color }}>{b.name}</div>
+                      </div>
+                    ))}
                   </div>
                 ) : (
                   <div style={{ fontSize: 11, color: 'var(--ink-400)', fontStyle: 'italic', padding: '6px 10px' }}>
@@ -252,7 +307,7 @@ export default function AccountsPage() {
               {/* Action buttons */}
               <div style={{ display: 'flex', gap: 6, marginTop: 'auto' }}>
                 <button onClick={() => openEdit(a)} disabled={a.pendingApproval} style={{ ...btnG, flex: 1, opacity: a.pendingApproval ? 0.5 : 1 }}>
-                  <Edit3 size={11} /> {a.briefId ? 'Edit' : 'Assign brief'}
+                  <Edit3 size={11} /> {a.briefIds.length > 0 ? 'Edit' : 'Assign brief'}
                 </button>
                 {!a.pendingApproval && (
                   <button onClick={() => toggleActive(a)} style={btnG}>
@@ -313,45 +368,131 @@ export default function AccountsPage() {
             </div>
 
             <div style={{ padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 16, overflowY: 'auto', flex: 1 }}>
+              {/* MULTI-BRIEF-V1: checkbox multi-select for briefs */}
               <div>
-                <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--ink-600)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Brief</label>
-                <select value={editForm.briefId} onChange={e => setEditForm({ ...editForm, briefId: e.target.value })} style={{ ...inp, cursor: 'pointer' }}>
-                  <option value="">— Unassigned —</option>
-                  {briefs.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-                </select>
-                {editForm.briefId && (() => {
-                  const b = briefs.find(x => x.id === editForm.briefId);
-                  if (!b) return null;
-                  return (
-                    <div style={{ marginTop: 8, padding: '10px 12px', background: b.color + '0a', borderRadius: 'var(--r-sm)', fontSize: 11, color: 'var(--ink-600)', lineHeight: 1.5 }}>
-                      <div style={{ marginBottom: 4 }}><strong>Audience:</strong> {b.audience}</div>
-                      <div style={{ marginBottom: 4 }}><strong>Tone:</strong> {b.tone}</div>
-                      <div><strong>Content:</strong> {b.contentBrief}</div>
-                    </div>
-                  );
-                })()}
+                <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--ink-600)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                  Briefs <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0, color: 'var(--ink-400)' }}>(pick one or more)</span>
+                </label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {briefs.map(b => {
+                    const selected = editForm.briefIds.includes(b.id);
+                    return (
+                      <label
+                        key={b.id}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 10,
+                          padding: '9px 12px',
+                          borderRadius: 'var(--r-sm)',
+                          background: selected ? b.color + '12' : 'var(--white)',
+                          border: `1.5px solid ${selected ? b.color + '55' : 'var(--ink-200)'}`,
+                          cursor: 'pointer',
+                          transition: 'background 0.15s, border-color 0.15s',
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selected}
+                          onChange={() => {
+                            setEditForm(prev => {
+                              const nextIds = selected
+                                ? prev.briefIds.filter(id => id !== b.id)
+                                : [...prev.briefIds, b.id];
+                              const nextOverrides = { ...prev.perBriefOverrides };
+                              if (selected) {
+                                delete nextOverrides[b.id];
+                              } else if (!nextOverrides[b.id]) {
+                                nextOverrides[b.id] = { tone: '', hashtags: '', contentBrief: '' };
+                              }
+                              return {
+                                briefIds: nextIds,
+                                perBriefOverrides: nextOverrides,
+                                expandedBriefId: prev.expandedBriefId || nextIds[0] || null,
+                              };
+                            });
+                          }}
+                          style={{ width: 16, height: 16, cursor: 'pointer', flexShrink: 0 }}
+                        />
+                        <div style={{ width: 8, height: 8, borderRadius: '50%', background: b.color, flexShrink: 0 }} />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink-900)' }}>{b.name}</div>
+                          <div style={{ fontSize: 11, color: 'var(--ink-500)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.description}</div>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
               </div>
 
-              <div style={{ height: 1, background: 'var(--ink-100)' }} />
+              {editForm.briefIds.length > 0 && (
+                <>
+                  <div style={{ height: 1, background: 'var(--ink-100)' }} />
 
-              <div style={{ fontSize: 11, color: 'var(--ink-500)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600 }}>
-                Account-level overrides <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0, color: 'var(--ink-400)' }}>(optional)</span>
-              </div>
+                  <div style={{ fontSize: 11, color: 'var(--ink-500)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600 }}>
+                    Account-level overrides <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0, color: 'var(--ink-400)' }}>(optional, per brief)</span>
+                  </div>
 
-              <div>
-                <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--ink-600)', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Tone override</label>
-                <input value={editForm.toneOverride} onChange={e => setEditForm({ ...editForm, toneOverride: e.target.value })} placeholder="Leave blank to use brief's tone" style={inp} />
-              </div>
+                  {/* MULTI-BRIEF-V1: collapsible per-brief override sections */}
+                  {editForm.briefIds.map(briefId => {
+                    const b = briefs.find(x => x.id === briefId);
+                    if (!b) return null;
+                    const expanded = editForm.expandedBriefId === briefId;
+                    const o = editForm.perBriefOverrides[briefId] || { tone: '', hashtags: '', contentBrief: '' };
+                    return (
+                      <div key={briefId} style={{ border: '1px solid var(--ink-100)', borderRadius: 'var(--r-sm)', overflow: 'hidden' }}>
+                        <button
+                          type="button"
+                          onClick={() => setEditForm(prev => ({ ...prev, expandedBriefId: expanded ? null : briefId }))}
+                          style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', background: b.color + '08', border: 'none', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}
+                        >
+                          <div style={{ width: 7, height: 7, borderRadius: '50%', background: b.color }} />
+                          <div style={{ fontSize: 12, fontWeight: 600, color: b.color, flex: 1 }}>{b.name}</div>
+                          <div style={{ fontSize: 10, color: 'var(--ink-500)' }}>{expanded ? 'Hide' : 'Show'} overrides</div>
+                        </button>
+                        {expanded && (
+                          <div style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 12, background: 'var(--white)' }}>
+                            <div style={{ padding: '8px 10px', background: b.color + '0a', borderRadius: 'var(--r-sm)', fontSize: 11, color: 'var(--ink-600)', lineHeight: 1.5 }}>
+                              <div style={{ marginBottom: 3 }}><strong>Audience:</strong> {b.audience}</div>
+                              <div style={{ marginBottom: 3 }}><strong>Tone:</strong> {b.tone}</div>
+                              <div><strong>Content:</strong> {b.contentBrief}</div>
+                            </div>
 
-              <div>
-                <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--ink-600)', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Hashtags override</label>
-                <input value={editForm.hashtagsOverride} onChange={e => setEditForm({ ...editForm, hashtagsOverride: e.target.value })} placeholder="Leave blank to use brief defaults" style={inp} />
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--ink-600)', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Content brief override</label>
-                <textarea value={editForm.contentBriefOverride} onChange={e => setEditForm({ ...editForm, contentBriefOverride: e.target.value })} rows={3} placeholder="Leave blank to use brief's content guidance" style={{ ...inp, resize: 'vertical' }} />
-              </div>
+                            <div>
+                              <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--ink-600)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Tone override</label>
+                              <input
+                                value={o.tone}
+                                onChange={e => setEditForm(prev => ({ ...prev, perBriefOverrides: { ...prev.perBriefOverrides, [briefId]: { ...o, tone: e.target.value } } }))}
+                                placeholder="Leave blank to use brief's tone"
+                                style={inp}
+                              />
+                            </div>
+                            <div>
+                              <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--ink-600)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Hashtags override</label>
+                              <input
+                                value={o.hashtags}
+                                onChange={e => setEditForm(prev => ({ ...prev, perBriefOverrides: { ...prev.perBriefOverrides, [briefId]: { ...o, hashtags: e.target.value } } }))}
+                                placeholder="Leave blank to use brief defaults"
+                                style={inp}
+                              />
+                            </div>
+                            <div>
+                              <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--ink-600)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Content brief override</label>
+                              <textarea
+                                value={o.contentBrief}
+                                onChange={e => setEditForm(prev => ({ ...prev, perBriefOverrides: { ...prev.perBriefOverrides, [briefId]: { ...o, contentBrief: e.target.value } } }))}
+                                rows={3}
+                                placeholder="Leave blank to use brief's content guidance"
+                                style={{ ...inp, resize: 'vertical' }}
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </>
+              )}
             </div>
 
             <div style={{ padding: '14px 22px', borderTop: '1px solid var(--ink-100)', display: 'flex', gap: 8, justifyContent: 'flex-end' }}>

@@ -558,13 +558,20 @@ export async function executeTool(name: string, input: any): Promise<any> {
       const metaCol = (await getCollection<any[]>(DEFAULT_USER_ID, 'account_meta')) || [];
       const result = realAccounts.map((a: any) => {
         const meta = metaCol.find((m: any) => m.accountId === a.id);
+        // MULTI-BRIEF-V1: return the full briefIds list, with the legacy
+        // single briefId kept (= briefIds[0]) for any Roam-io memories
+        // saved before this patch that reference the old shape.
+        const briefIds: string[] = (Array.isArray(meta?.briefIds) && meta.briefIds.length > 0)
+          ? meta.briefIds
+          : (meta?.briefId ? [meta.briefId] : []);
         return {
           id: a.id,
           platform: a.platform,
           type: a.type,
           handle: a.handle,
           region: a.region,
-          briefId: meta?.briefId,
+          briefIds,
+          briefId: briefIds[0],
           active: meta?.active !== false,
           canPost: !!a.capabilities?.canPost,
         };
