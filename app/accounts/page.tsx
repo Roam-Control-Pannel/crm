@@ -367,7 +367,7 @@ export default function AccountsPage() {
               <button onClick={() => setEditing(null)} style={{ ...btnG, padding: '4px 8px' }}><X size={14} /></button>
             </div>
 
-            <div style={{ padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 16, overflowY: 'auto', flex: 1 }}>
+            <div style={{ padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 16, overflowY: 'auto', flex: 1, minHeight: 0 }}>
               {/* MULTI-BRIEF-V1: checkbox multi-select for briefs */}
               <div>
                 <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--ink-600)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
@@ -425,6 +425,29 @@ export default function AccountsPage() {
                 </div>
               </div>
 
+              {editForm.briefIds.length > 1 && (
+                <a
+                  href="/social/settings#brief-weights"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    padding: '10px 12px',
+                    borderRadius: 'var(--r-sm)',
+                    background: 'var(--paper)',
+                    border: '1px solid var(--ink-200)',
+                    textDecoration: 'none',
+                    color: 'var(--ink-700)',
+                    fontSize: 12,
+                    lineHeight: 1.5,
+                  }}
+                >
+                  <div style={{ flex: 1 }}>
+                    With {editForm.briefIds.length} briefs assigned, the cron mixes them per post.
+                    Default is equal weighting. <strong style={{ color: 'var(--maroon-700)' }}>Edit ratios in Social Settings →</strong>
+                  </div>
+                </a>
+              )}
               {editForm.briefIds.length > 0 && (
                 <>
                   <div style={{ height: 1, background: 'var(--ink-100)' }} />
