@@ -1,7 +1,7 @@
 'use client';
 import {useState,useEffect,useRef} from 'react';
-import {Plus,Send,Sparkles,X,Check,AlertTriangle,MessageSquare,Brain,Paperclip,Trash2,FileText,Bookmark,BookmarkCheck} from 'lucide-react';
-import {saveTextToBrain} from '@/lib/brain';
+import {Plus,Send,Sparkles,X,Check,AlertTriangle,MessageSquare,Brain,Paperclip,Trash2,FileText,Bookmark,BookmarkCheck,Image as ImageIcon,Camera} from 'lucide-react';
+import {saveTextToBrain,uploadChatImage} from '@/lib/brain';
 import {loadWithMigration, saveRemote} from '@/lib/client-store';
 
 interface Message {
@@ -22,6 +22,9 @@ interface Message {
   // Set true once this message has been saved to Brain via the bookmark.
   // Persisted so the bookmark stays "saved" across reloads.
   savedToBrain?:boolean;
+  // Image attachments — references to Brain items, NOT base64. Keeps the
+  // hub_chats JSON small; we render via /api/images/[blobId].
+  attachments?:{blobId:string;mime:string;description?:string}[];
 }
 
 interface Chat {
@@ -76,7 +79,12 @@ interface RoamioResult{
   executedTools?:{name:string;input:any}[];
 }
 
-async function callRoamio(messages:{role:string;content:string}[],docs?:RoamDoc[],pendingConfirm?:any):Promise<RoamioResult>{
+// Message shape going to the API: content may be either a plain string
+// (most turns) or an array of content blocks (when the user attached
+// images — Claude vision requires the structured form).
+type ApiMessage={role:string;content:string|any[]};
+
+async function callRoamio(messages:ApiMessage[],docs?:RoamDoc[],pendingConfirm?:any):Promise<RoamioResult>{
   const today=new Date().toISOString().split('T')[0];
   const system=`You are Roam-io, the AI growth assistant for Roam Local — a free local business discovery app. You help the Roam team run their business outreach CRM.
 
@@ -95,12 +103,14 @@ RULES:
 2. Keep responses concise — use bullet points where useful
 3. When a tool returns a result, summarise it briefly in your reply ("Added: Follow up with Dún Laoghaire BID, due Friday")
 4. If a tool fails, explain plainly what went wrong
-5. Don't pretend to do things you don't have tools for — say what you'd do and offer to walk through it`;
+5. Don't pretend to do things you don't have tools for — say what you'd do and offer to walk through it
+6. When the user shares an image, respond naturally and conversationally about what you see — don't dump structured analysis unless asked. Tie it back to their work (high streets, partnerships, branding, social content) where it's relevant.`;
 
   const docCtx=docs&&docs.length>0?docs.map(d=>`[DOC: ${d.name}]\n${d.content}`).join("\n\n"):"";
   try{
     const body:any={
       systemPrompt:system+(docCtx?"\n\nKNOWLEDGE BASE:\n"+docCtx:""),
+      // Pass content through verbatim — may be string or content-block array.
       messages:messages.map(m=>({role:m.role,content:m.content})),
       tools:['tasks','brain'],
     };
@@ -150,7 +160,14 @@ export default function HubPage(){
   const [savingMsgId,setSavingMsgId]=useState<string|null>(null);
   const [savingChat,setSavingChat]=useState(false);
   const [toast,setToast]=useState<string|null>(null);
+  // Pending image attachments — uploaded to Brain on send, never persisted
+  // in state across renders if the user navigates away mid-compose.
+  const [pendingAttachments,setPendingAttachments]=useState<{file:File;preview:string}[]>([]);
+  const [showAttachMenu,setShowAttachMenu]=useState(false);
+  const [uploadingImage,setUploadingImage]=useState(false);
   const fileInputRef=useRef<HTMLInputElement>(null);
+  const imageInputRef=useRef<HTMLInputElement>(null);
+  const cameraInputRef=useRef<HTMLInputElement>(null);
   const messagesEndRef=useRef<HTMLDivElement>(null);
   const inputRef=useRef<HTMLTextAreaElement>(null);
 
@@ -158,6 +175,46 @@ export default function HubPage(){
   function showToast(text:string){
     setToast(text);
     setTimeout(()=>setToast(null),2400);
+  }
+
+  function handleImagePicked(e:React.ChangeEvent<HTMLInputElement>){
+    const files=Array.from(e.target.files||[]);
+    if(files.length===0)return;
+    const valid=files.filter(f=>f.type.startsWith('image/')&&f.size<=8*1024*1024);
+    if(valid.length<files.length){
+      showToast('Some files skipped (not an image or > 8MB)');
+    }
+    const newOnes=valid.map(file=>({file,preview:URL.createObjectURL(file)}));
+    setPendingAttachments(prev=>[...prev,...newOnes]);
+    setShowAttachMenu(false);
+    e.target.value='';
+  }
+
+  function removePendingAttachment(idx:number){
+    setPendingAttachments(prev=>{
+      const next=[...prev];
+      const removed=next.splice(idx,1)[0];
+      if(removed)URL.revokeObjectURL(removed.preview);
+      return next;
+    });
+  }
+
+  // Read a File as base64 for sending to the vision model. We need this
+  // even though we ALSO upload the image to Brain, because the Brain item
+  // returns a blobId, not raw bytes. Cheaper to do it once here than to
+  // re-download the image from /api/images on the server.
+  function fileToBase64(file:File):Promise<string>{
+    return new Promise((resolve,reject)=>{
+      const reader=new FileReader();
+      reader.onload=()=>{
+        const result=reader.result as string;
+        // dataURL is "data:<mime>;base64,<payload>" — strip the header.
+        const comma=result.indexOf(',');
+        resolve(comma>=0?result.slice(comma+1):result);
+      };
+      reader.onerror=()=>reject(reader.error);
+      reader.readAsDataURL(file);
+    });
   }
 
   // Per-message save: bundle ±2 turns of context around the target message.
@@ -255,8 +312,11 @@ export default function HubPage(){
   }
 
   async function send(text?:string){
-    const msg=(text||input).trim();
-    if(!msg||loading)return;
+    const rawMsg=(text||input).trim();
+    const hasAttachments=pendingAttachments.length>0;
+    // Allow send if there's either text OR images. Empty everything stays blocked.
+    if((!rawMsg&&!hasAttachments)||loading)return;
+    const msg=rawMsg||(hasAttachments?'(image)':'');
     setInput('');
 
     let chat=activeChat;
@@ -266,12 +326,77 @@ export default function HubPage(){
     }
 
     setLoading(true);
-    const userMsg:Message={id:Date.now().toString(),role:'user',content:msg,timestamp:new Date()};
+
+    // Snapshot attachments so we can clear pending state before the slow
+    // upload — UI feels snappier even though the network calls run on.
+    const attachmentsToSend=pendingAttachments;
+    setPendingAttachments([]);
+
+    // Step 1: upload every image to Brain in parallel. Each gives us a
+    // blobId we can reference in chat history. If any single upload fails
+    // we still send the others and the text — partial success is OK.
+    let attachmentRefs:{blobId:string;mime:string;description?:string}[]=[];
+    let visionBlocks:any[]=[];
+    if(attachmentsToSend.length>0){
+      setUploadingImage(true);
+      try{
+        const results=await Promise.all(attachmentsToSend.map(async a=>{
+          try{
+            const [item,b64]=await Promise.all([
+              uploadChatImage(a.file),
+              fileToBase64(a.file),
+            ]);
+            return{
+              ref:item?{blobId:item.blobId,mime:item.mime,description:item.description}:null,
+              base64:b64,
+              mime:a.file.type||'image/jpeg',
+            };
+          }catch(err){
+            console.error('image upload failed',err);
+            return null;
+          }
+        }));
+        for(const r of results){
+          if(!r)continue;
+          if(r.ref)attachmentRefs.push(r.ref);
+          visionBlocks.push({type:'image',source:{type:'base64',media_type:r.mime,data:r.base64}});
+        }
+      }finally{
+        setUploadingImage(false);
+        // Release object URLs we created for previews
+        attachmentsToSend.forEach(a=>URL.revokeObjectURL(a.preview));
+      }
+    }
+
+    const userMsg:Message={
+      id:Date.now().toString(),
+      role:'user',
+      content:msg,
+      timestamp:new Date(),
+      attachments:attachmentRefs.length>0?attachmentRefs:undefined,
+    };
     const title=chat.messages.length===0?msg.slice(0,40)+(msg.length>40?'…':''):chat.title;
     const newMsgs=[...chat.messages,userMsg];
     updateChat(chat.id,newMsgs,title);
 
-    const result=await callRoamio(newMsgs.map(m=>({role:m.role,content:m.content})),docs);
+    // Build the message list for Claude. Most past turns are plain strings;
+    // the current turn becomes a structured content array if we have images.
+    const apiMessages:ApiMessage[]=newMsgs.map((m,i)=>{
+      const isLast=i===newMsgs.length-1;
+      if(isLast&&visionBlocks.length>0){
+        return{role:m.role,content:[...visionBlocks,{type:'text',text:m.content}]};
+      }
+      // For prior turns with attachments, send a text placeholder. We
+      // could re-fetch the base64 from Brain to keep vision context across
+      // turns, but that's bandwidth-expensive — start lean, revisit if
+      // users notice Roam-io "forgetting" earlier images.
+      if(m.attachments&&m.attachments.length>0){
+        return{role:m.role,content:m.content+` [${m.attachments.length} image${m.attachments.length===1?'':'s'} attached earlier]`};
+      }
+      return{role:m.role,content:m.content};
+    });
+
+    const result=await callRoamio(apiMessages,docs);
     const aiMsg:Message={
       id:(Date.now()+1).toString(),
       role:'assistant',
@@ -531,7 +656,16 @@ export default function HubPage(){
                 {m.role==='assistant'&&<div style={{width:26,height:26,borderRadius:'50%',background:'var(--maroon-50)',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,marginTop:2,fontSize:12}}>🦁</div>}
                 <div style={{maxWidth:'85%'}}>
                   <div style={{fontSize:10,color:'var(--ink-400)',marginBottom:4,textAlign:m.role==='user'?'right':'left'}}>{m.role==='user'?'You':'Roam-io'} · {new Date(m.timestamp).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}</div>
-                  <div style={{background:m.role==='user'?'var(--maroon-50)':'var(--paper)',borderRadius:m.role==='user'?'var(--r-lg) 0 var(--r-lg) var(--r-lg)':'0 var(--r-lg) var(--r-lg) var(--r-lg)',padding:'11px 14px',fontSize:13,color:'var(--ink-900)',lineHeight:1.7,whiteSpace:'pre-wrap'}}>{m.content}</div>
+                  {m.attachments&&m.attachments.length>0&&(
+                    <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:6,justifyContent:m.role==='user'?'flex-end':'flex-start'}}>
+                      {m.attachments.map((a,i)=>(
+                        <a key={i} href={`/api/images/${a.blobId}`} target="_blank" rel="noreferrer" style={{display:'block',width:120,height:120,borderRadius:'var(--r-md)',overflow:'hidden',border:'1px solid var(--ink-200)',background:'var(--paper)'}}>
+                          <img src={`/api/images/${a.blobId}`} alt={a.description||'attachment'} style={{width:'100%',height:'100%',objectFit:'cover'}}/>
+                        </a>
+                      ))}
+                    </div>
+                  )}
+                  <div style={{background:m.role==='user'?'var(--maroon-50)':'var(--paper)',borderRadius:m.role==='user'?'var(--r-lg) 0 var(--r-lg) var(--r-lg)':'0 var(--r-lg) var(--r-lg) var(--r-lg)',padding:'11px 14px',fontSize:13,color:'var(--ink-900)',lineHeight:1.7,whiteSpace:'pre-wrap',display:m.content==='(image)'?'none':'block'}}>{m.content}</div>
                   {m.content&&!m.pendingTool&&(
                     <div style={{marginTop:4,display:'flex',justifyContent:m.role==='user'?'flex-end':'flex-start'}}>
                       <button
@@ -604,13 +738,51 @@ export default function HubPage(){
               ))}
             </div>
           )}
-          <div style={{display:'flex',gap:8,alignItems:'flex-end'}}>
+          {pendingAttachments.length>0&&(
+            <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:8}}>
+              {pendingAttachments.map((a,i)=>(
+                <div key={i} style={{position:'relative',width:64,height:64,borderRadius:'var(--r-sm)',overflow:'hidden',border:'1px solid var(--ink-200)'}}>
+                  <img src={a.preview} alt="" style={{width:'100%',height:'100%',objectFit:'cover'}}/>
+                  <button onClick={()=>removePendingAttachment(i)} title="Remove" style={{position:'absolute',top:2,right:2,width:18,height:18,borderRadius:'50%',background:'rgba(0,0,0,0.7)',color:'white',border:'none',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',padding:0}}><X size={11}/></button>
+                </div>
+              ))}
+              {uploadingImage&&<div style={{display:'flex',alignItems:'center',fontSize:11,color:'var(--ink-500)',padding:'0 8px'}}>Uploading…</div>}
+            </div>
+          )}
+          <div style={{display:'flex',gap:8,alignItems:'flex-end',position:'relative'}}>
             <input ref={fileInputRef} type="file" accept=".txt,.pdf,.csv,.md" onChange={handleUpload} style={{display:"none"}}/>
+            <input ref={imageInputRef} type="file" accept="image/*" multiple onChange={handleImagePicked} style={{display:"none"}}/>
+            <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" onChange={handleImagePicked} style={{display:"none"}}/>
             <textarea ref={inputRef} value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}}} placeholder={activeChat?'Continue the conversation… (Enter to send)':'Ask Roam-io anything…'} rows={2} disabled={loading} style={{flex:1,fontSize:13,padding:'9px 12px',border:'1.5px solid var(--ink-200)',borderRadius:'var(--r-md)',fontFamily:'inherit',color:'var(--ink-900)',background:'var(--white)',resize:'none',outline:'none'}}/>
-            <button onClick={()=>fileInputRef.current?.click()} title="Upload to knowledge base" style={{width:40,height:40,borderRadius:"var(--r-md)",background:"var(--ink-100)",border:"none",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}><Paperclip size={15} color="var(--ink-500)"/></button>
-            <button onClick={()=>send()} disabled={!input.trim()||loading} style={{width:40,height:40,borderRadius:'var(--r-md)',background:input.trim()&&!loading?'var(--maroon-700)':'var(--ink-200)',border:'none',cursor:input.trim()&&!loading?'pointer':'default',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'background 0.15s'}}>
+            <button onClick={()=>setShowAttachMenu(v=>!v)} title="Attach" style={{width:40,height:40,borderRadius:"var(--r-md)",background:showAttachMenu?'var(--maroon-700)':"var(--ink-100)",border:"none",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}><Paperclip size={15} color={showAttachMenu?'white':"var(--ink-500)"}/></button>
+            <button onClick={()=>send()} disabled={(!input.trim()&&pendingAttachments.length===0)||loading} style={{width:40,height:40,borderRadius:'var(--r-md)',background:(input.trim()||pendingAttachments.length>0)&&!loading?'var(--maroon-700)':'var(--ink-200)',border:'none',cursor:(input.trim()||pendingAttachments.length>0)&&!loading?'pointer':'default',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'background 0.15s'}}>
               <Send size={15} color="white"/>
             </button>
+            {showAttachMenu&&(
+              <>
+                <div onClick={()=>setShowAttachMenu(false)} style={{position:'fixed',inset:0,zIndex:200}}/>
+                <div style={{position:'absolute',bottom:48,right:48,background:'var(--white)',borderRadius:'var(--r-md)',boxShadow:'var(--shadow-lg)',border:'1px solid var(--ink-100)',padding:6,minWidth:200,zIndex:201}}>
+                  {isMobile?(
+                    <>
+                      <button onClick={()=>{cameraInputRef.current?.click();}} style={{display:'flex',alignItems:'center',gap:10,width:'100%',padding:'10px 12px',background:'none',border:'none',cursor:'pointer',fontSize:12,color:'var(--ink-700)',borderRadius:'var(--r-sm)',fontFamily:'inherit',textAlign:'left'}}>
+                        <Camera size={14} color="var(--maroon-600)"/> Take a photo
+                      </button>
+                      <button onClick={()=>{imageInputRef.current?.click();}} style={{display:'flex',alignItems:'center',gap:10,width:'100%',padding:'10px 12px',background:'none',border:'none',cursor:'pointer',fontSize:12,color:'var(--ink-700)',borderRadius:'var(--r-sm)',fontFamily:'inherit',textAlign:'left'}}>
+                        <ImageIcon size={14} color="var(--maroon-600)"/> Choose from library
+                      </button>
+                    </>
+                  ):(
+                    <button onClick={()=>{imageInputRef.current?.click();}} style={{display:'flex',alignItems:'center',gap:10,width:'100%',padding:'10px 12px',background:'none',border:'none',cursor:'pointer',fontSize:12,color:'var(--ink-700)',borderRadius:'var(--r-sm)',fontFamily:'inherit',textAlign:'left'}}>
+                      <ImageIcon size={14} color="var(--maroon-600)"/> Attach image
+                    </button>
+                  )}
+                  <div style={{height:1,background:'var(--ink-100)',margin:'4px 0'}}/>
+                  <button onClick={()=>{setShowAttachMenu(false);fileInputRef.current?.click();}} style={{display:'flex',alignItems:'center',gap:10,width:'100%',padding:'10px 12px',background:'none',border:'none',cursor:'pointer',fontSize:12,color:'var(--ink-700)',borderRadius:'var(--r-sm)',fontFamily:'inherit',textAlign:'left'}}>
+                    <FileText size={14} color="var(--info)"/> Add to knowledge base
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>
