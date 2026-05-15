@@ -28,7 +28,12 @@ function parseAccountId(id: string): { kind: string; value: string } {
 
 export async function POST(req: NextRequest) {
   try {
-    const body: PublishBody = await req.json();
+    let body: PublishBody;
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json({ ok: false, error: 'Invalid JSON' }, { status: 400 });
+    }
     const { accountId, platform, caption, imageUrl } = body;
     let { metaPageId, linkedinAuthorUrn } = body;
 

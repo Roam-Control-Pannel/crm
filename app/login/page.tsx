@@ -126,14 +126,18 @@ export default function LoginPage() {
           </div>
 
           {error && (
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 8,
-              background: 'rgba(208,48,80,0.15)',
-              border: '1px solid rgba(208,48,80,0.3)',
-              borderRadius: 10, padding: '10px 14px',
-              fontSize: 13, color: '#f5c0cc', marginBottom: 18,
-            }}>
-              <AlertCircle size={14} style={{ flexShrink: 0 }}/>
+            <div
+              role="alert"
+              aria-live="polite"
+              style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                background: 'rgba(208,48,80,0.15)',
+                border: '1px solid rgba(208,48,80,0.3)',
+                borderRadius: 10, padding: '10px 14px',
+                fontSize: 13, color: '#f5c0cc', marginBottom: 18,
+              }}
+            >
+              <AlertCircle size={14} style={{ flexShrink: 0 }} aria-hidden="true"/>
               {error}
             </div>
           )}
