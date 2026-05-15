@@ -358,28 +358,61 @@ export default function AccountsPage() {
           style={{ zIndex: 500 }}
           onClick={e => { if (e.target === e.currentTarget) setEditing(null); }}
         >
-          <div className="soc-modal-panel" style={{ width: 540 }}>
-            {/* Patch 7.3: self-contained scrollbar styling. After two
-                rounds of trying to fix this from globals.css and watching
-                Netlify never serve the new CSS, the modal now ships its
-                own style tag so scroll behaviour can't fail to load. */}
+          <div
+            className="soc-modal-panel soc-modal-abs"
+            style={{
+              width: 540,
+              // Patch 7.4: replace flex layout with absolute positioning.
+              // Three failed scroll patches because flex chains kept losing
+              // height constraints somewhere up the tree. Absolute eliminates
+              // all flex magic — header/body/footer have explicit positions.
+              position: 'relative',
+              height: 'min(90vh, 800px)',  // explicit height (not max-height) — forces panel to size first
+              display: 'block',             // override .soc-modal-panel's display:flex from globals.css
+            }}
+          >
             <style>{`
-              .soc-modal-body-scroll {
-                max-height: calc(90vh - 145px);
+              .soc-modal-abs { display: block !important; }
+              .soc-modal-abs-body {
+                position: absolute;
+                top: 72px;        /* below header */
+                bottom: 64px;     /* above footer */
+                left: 0;
+                right: 0;
                 overflow-y: auto;
                 overflow-x: hidden;
+                padding: 18px 22px;
+                box-sizing: border-box;
                 scrollbar-width: thin;
                 scrollbar-color: #c9c9c9 #f5f5f5;
               }
-              .soc-modal-body-scroll::-webkit-scrollbar { width: 10px; }
-              .soc-modal-body-scroll::-webkit-scrollbar-track { background: #f5f5f5; border-radius: 5px; }
-              .soc-modal-body-scroll::-webkit-scrollbar-thumb { background: #c9c9c9; border-radius: 5px; border: 2px solid #f5f5f5; }
-              .soc-modal-body-scroll::-webkit-scrollbar-thumb:hover { background: #a8a8a8; }
+              .soc-modal-abs-body::-webkit-scrollbar { width: 10px; }
+              .soc-modal-abs-body::-webkit-scrollbar-track { background: #f5f5f5; }
+              .soc-modal-abs-body::-webkit-scrollbar-thumb { background: #c9c9c9; border-radius: 5px; border: 2px solid #f5f5f5; }
+              .soc-modal-abs-body::-webkit-scrollbar-thumb:hover { background: #a8a8a8; }
+              .soc-modal-abs-header {
+                position: absolute; top: 0; left: 0; right: 0;
+                padding: 18px 22px 14px;
+                border-bottom: 1px solid var(--ink-100);
+                display: flex; justify-content: space-between; align-items: center;
+                background: var(--white);
+                z-index: 1;
+                box-sizing: border-box;
+              }
+              .soc-modal-abs-footer {
+                position: absolute; bottom: 0; left: 0; right: 0;
+                padding: 14px 22px;
+                border-top: 1px solid var(--ink-100);
+                display: flex; gap: 8px; justify-content: flex-end;
+                background: var(--white);
+                z-index: 1;
+                box-sizing: border-box;
+              }
               @media (max-width: 640px) {
-                .soc-modal-body-scroll { max-height: calc(100dvh - 130px); }
+                .soc-modal-abs { height: 100dvh !important; }
               }
             `}</style>
-            <div style={{ padding: '18px 22px 14px', borderBottom: '1px solid var(--ink-100)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div className="soc-modal-abs-header">
               <div>
                 <div style={{ fontFamily: 'var(--font-display)', fontSize: 20, color: 'var(--ink-900)' }}>Account settings</div>
                 <div style={{ fontSize: 12, color: 'var(--ink-500)', marginTop: 2 }}>{editing.handle} · {PLATFORM_LABEL[editing.platform]}</div>
@@ -388,18 +421,11 @@ export default function AccountsPage() {
             </div>
 
             <div
-              className="soc-modal-body-scroll"
+              className="soc-modal-abs-body"
               style={{
-                padding: '18px 22px',
                 display: 'flex',
                 flexDirection: 'column',
                 gap: 16,
-                // Belt-and-braces: max-height + overflow inline AS WELL
-                // as via the embedded style tag's class, in case some
-                // future optimisation strips one or the other.
-                maxHeight: 'calc(90vh - 145px)',
-                overflowY: 'auto',
-                overflowX: 'hidden',
               }}
             >
               {/* MULTI-BRIEF-V1: checkbox multi-select for briefs */}
@@ -552,7 +578,7 @@ export default function AccountsPage() {
               )}
             </div>
 
-            <div style={{ padding: '14px 22px', borderTop: '1px solid var(--ink-100)', display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <div className="soc-modal-abs-footer">
               <button onClick={() => setEditing(null)} style={btnG}>Cancel</button>
               <button onClick={saveEdit} style={btnP}><Check size={13} /> Save</button>
             </div>
