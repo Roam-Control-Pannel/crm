@@ -108,6 +108,33 @@ export async function uploadItem(file: File, folderId: string | null = null): Pr
   return data.item;
 }
 
+/**
+ * Save a chunk of text (chat message, note, extracted memory) to Brain.
+ * Lands in "Roam-io saves" folder by default. Source tag lets us filter
+ * later — e.g. 'roam-io-chat', 'roam-io-memory', 'manual-note'.
+ */
+export interface SaveTextOptions {
+  content: string;
+  tags?: string[];
+  description?: string;
+  source?: string;
+  folderId?: string | null;
+  autoFolder?: boolean;
+  contextBefore?: string;
+  contextAfter?: string;
+}
+
+export async function saveTextToBrain(opts: SaveTextOptions): Promise<BrainItem | null> {
+  const res = await fetch('/api/brain/items', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(opts),
+  });
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.error || 'Save failed');
+  return data.item;
+}
+
 export async function updateItem(id: string, patch: Partial<Pick<BrainItem, 'tags' | 'description' | 'folderId'>>): Promise<boolean> {
   try {
     const res = await fetch(`/api/brain/items/${id}`, {

@@ -6,6 +6,10 @@ export const dynamic = 'force-dynamic';
 const META_STORE = 'roam-brain';
 const BLOB_STORE = 'roam-uploads';
 const ITEMS_KEY = 'items';
+const FOLDERS_KEY = 'folders';
+
+// Default folder name for Roam-io chat saves. Auto-created on first use.
+const ROAMIO_SAVES_FOLDER = 'Roam-io saves';
 
 export interface Item {
   id: string;
@@ -92,6 +96,64 @@ Return ONLY the JSON, no markdown, no preamble.`,
   }
 }
 
+// =================================================================
+// Folder helpers — used by JSON save branch to land items in
+// "Roam-io saves" (auto-created on first save).
+// =================================================================
+interface Folder { id: string; name: string; parentId: string | null; createdAt: string; }
+
+async function getFolders(): Promise<Folder[]> {
+  try {
+    const store = getStore(META_STORE);
+    const data = await store.get(FOLDERS_KEY, { type: 'json' });
+    return (data as Folder[]) || [];
+  } catch { return []; }
+}
+
+async function setFolders(folders: Folder[]): Promise<void> {
+  const store = getStore(META_STORE);
+  await store.set(FOLDERS_KEY, JSON.stringify(folders));
+}
+
+/**
+ * Find a folder by exact name (case-insensitive). If missing, create it
+ * at root and return the new folder.
+ */
+async function findOrCreateFolder(name: string): Promise<Folder> {
+  const folders = await getFolders();
+  const existing = folders.find(f => f.name.toLowerCase() === name.toLowerCase() && !f.parentId);
+  if (existing) return existing;
+  const folder: Folder = {
+    id: 'fld_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+    name,
+    parentId: null,
+    createdAt: new Date().toISOString(),
+  };
+  folders.push(folder);
+  await setFolders(folders);
+  return folder;
+}
+
+/**
+ * Smart-match: given a list of tags + the content body, find an existing
+ * folder whose name appears in either. Returns null if no clear match.
+ * Currently used as a NO-OP fallback — Patch 2 ships with auto-foldering
+ * disabled per the agreed scope (single "Roam-io saves" folder), but the
+ * helper is here so Patch 4 / future work can flip it on.
+ */
+async function smartMatchFolder(content: string, tags: string[]): Promise<Folder | null> {
+  const folders = await getFolders();
+  if (folders.length === 0) return null;
+  const haystack = (content + ' ' + tags.join(' ')).toLowerCase();
+  for (const f of folders) {
+    const needle = f.name.toLowerCase();
+    if (needle === ROAMIO_SAVES_FOLDER.toLowerCase()) continue;
+    if (needle.length < 4) continue; // avoid matching tiny folder names spuriously
+    if (haystack.includes(needle)) return f;
+  }
+  return null;
+}
+
 /**
  * GET — list all items, optional ?folderId= filter (use 'root' for items with no folder)
  */
@@ -112,10 +174,26 @@ export async function GET(req: NextRequest) {
 }
 
 /**
- * POST — multipart file upload. Stores binary in roam-uploads, metadata in roam-brain.
- * Auto-tags via Claude vision.
+ * POST — two branches:
+ *
+ *  A) multipart/form-data: file upload. Stores binary in roam-uploads,
+ *     metadata in roam-brain. Auto-tags via Claude vision (images only).
+ *
+ *  B) application/json: text save (used by Roam-io chat save-to-Brain).
+ *     Body: { content, tags?, description?, source?, autoFolder?,
+ *             contextBefore?, contextAfter? }
+ *     Stores the text as a blob with content-type text/markdown so the
+ *     brain page preview iframe can render it.
  */
 export async function POST(req: NextRequest) {
+  const contentType = req.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) {
+    return handleJsonSave(req);
+  }
+  return handleFileUpload(req);
+}
+
+async function handleFileUpload(req: NextRequest) {
   try {
     const formData = await req.formData();
     const file = formData.get('file') as File | null;
@@ -169,5 +247,82 @@ export async function POST(req: NextRequest) {
   } catch (err: any) {
     console.error('brain upload error:', err);
     return NextResponse.json({ ok: false, error: err?.message || 'Upload failed' }, { status: 500 });
+  }
+}
+
+async function handleJsonSave(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const content: string = (body.content || '').toString();
+    if (!content.trim()) {
+      return NextResponse.json({ ok: false, error: 'content required' }, { status: 400 });
+    }
+    if (content.length > 200_000) {
+      return NextResponse.json({ ok: false, error: 'content too large (200kb max)' }, { status: 400 });
+    }
+
+    const tags: string[] = Array.isArray(body.tags) ? body.tags.slice(0, 12) : [];
+    const description: string = (body.description || '').toString().slice(0, 300);
+    const source: string = (body.source || 'roam-io-chat').toString();
+    const autoFolder: boolean = body.autoFolder !== false; // default true
+    let folderId: string | null = body.folderId || null;
+    const contextBefore: string = (body.contextBefore || '').toString();
+    const contextAfter: string = (body.contextAfter || '').toString();
+
+    // Resolve folder. autoFolder = true means: try smartMatchFolder, fall
+    // back to "Roam-io saves". Caller can pass explicit folderId to skip
+    // routing entirely.
+    if (!folderId && autoFolder) {
+      const matched = await smartMatchFolder(content, tags);
+      const folder = matched || (await findOrCreateFolder(ROAMIO_SAVES_FOLDER));
+      folderId = folder.id;
+    }
+
+    // Compose final body — wrap context if present so the saved item is
+    // self-explanatory when viewed later.
+    let composed = content;
+    if (contextBefore || contextAfter) {
+      const parts: string[] = [];
+      if (contextBefore) parts.push('---\n**Context before:**\n\n' + contextBefore);
+      parts.push((contextBefore || contextAfter ? '---\n**Saved:**\n\n' : '') + content);
+      if (contextAfter) parts.push('---\n**Context after:**\n\n' + contextAfter);
+      composed = parts.join('\n\n');
+    }
+
+    // Store as a markdown blob so the brain preview iframe renders it.
+    const blobId = `txt_${Date.now()}_${Math.random().toString(36).slice(2, 9)}.md`;
+    const blobStore = getStore(BLOB_STORE);
+    await blobStore.set(blobId, composed, {
+      metadata: {
+        originalName: `${source}.md`,
+        contentType: 'text/markdown',
+        size: composed.length,
+        uploadedAt: new Date().toISOString(),
+      },
+    });
+
+    // Compose description if not provided — first ~140 chars of content.
+    const finalDescription = description || content.trim().split('\n')[0].slice(0, 140);
+    // Always tag with the source so future retrieval can filter to chat saves.
+    const finalTags = Array.from(new Set([...tags, source]));
+
+    const item: Item = {
+      id: 'itm_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+      blobId,
+      folderId,
+      tags: finalTags,
+      description: finalDescription,
+      mime: 'text/markdown',
+      size: composed.length,
+      uploadedAt: new Date().toISOString(),
+    };
+    const items = await getItems();
+    items.push(item);
+    await setItems(items);
+
+    return NextResponse.json({ ok: true, item, url: `/api/images/${blobId}` });
+  } catch (err: any) {
+    console.error('brain JSON save error:', err);
+    return NextResponse.json({ ok: false, error: err?.message || 'Save failed' }, { status: 500 });
   }
 }
