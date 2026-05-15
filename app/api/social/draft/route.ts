@@ -65,10 +65,17 @@ export async function POST(req: NextRequest) {
     // 3. Resolve account + meta from internal endpoints
     const accountsRes = await fetch(`${origin}/api/accounts/status`, { headers: { 'x-internal-call': secret } });
     const accountsData = accountsRes.ok ? await accountsRes.json() : null;
-    const allAccounts: any[] = accountsData?.accounts || [];
+    // Route returns realAccounts, not accounts — patch-6 launch bug fixed in 6.1.
+    const allAccounts: any[] = accountsData?.realAccounts || [];
     const account = allAccounts.find((a: any) => a.id === accountId);
     if (!account) {
-      return NextResponse.json({ ok: false, error: `Account ${accountId} not found` }, { status: 404 });
+      // Include the available ids in the error so any future key-name
+      // mismatch is debuggable from the Roam-io chat response itself.
+      const availableIds = allAccounts.map((a: any) => a.id).slice(0, 10);
+      return NextResponse.json({
+        ok: false,
+        error: `Account ${accountId} not found. Available: ${availableIds.join(', ') || '(none returned)'}`,
+      }, { status: 404 });
     }
     const metaCol = (await getCollection<any[]>(DEFAULT_USER_ID, 'account_meta')) || [];
     const meta = metaCol.find((m: any) => m.accountId === accountId) || { accountId, briefId };
