@@ -367,7 +367,7 @@ export default function AccountsPage() {
               <button onClick={() => setEditing(null)} style={{ ...btnG, padding: '4px 8px' }}><X size={14} /></button>
             </div>
 
-            <div style={{ padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 16, overflowY: 'auto', flex: 1, minHeight: 0 }}>
+            <div className="soc-modal-body" style={{ padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 16 }}>
               {/* MULTI-BRIEF-V1: checkbox multi-select for briefs */}
               <div>
                 <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--ink-600)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
