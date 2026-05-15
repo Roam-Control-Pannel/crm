@@ -169,7 +169,7 @@ function BriefWeightsPanel() {
   if (!loaded) return null;
 
   return (
-    <div style={{ background: 'var(--white)', borderRadius: 'var(--r-lg)', boxShadow: 'var(--shadow-sm)', padding: 18, marginBottom: 14 }}>
+    <div id="brief-weights" style={{ background: 'var(--white)', borderRadius: 'var(--r-lg)', boxShadow: 'var(--shadow-sm)', padding: 18, marginBottom: 14, scrollMarginTop: 80 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
         <div>
           <div style={{ fontFamily: 'var(--font-display)', fontSize: 18, color: 'var(--ink-900)' }}>Brief Weights</div>
