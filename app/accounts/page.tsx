@@ -348,81 +348,64 @@ export default function AccountsPage() {
         </div>
       )}
 
-      {/* Edit modal — uses .soc-modal-* classes from globals.css so it
-          inherits the iOS-safe behaviour (100dvh on mobile + pinned
-          header/footer so the Save button doesn't get hidden under the
-          Safari URL bar). */}
+      {/* Edit modal.
+          Layout: panel is a flex column with a hard height cap. Header and
+          footer don't shrink; body takes the remaining space with
+          min-height:0 so it can shrink below its intrinsic content size,
+          which is what lets overflow-y:auto actually engage. Earlier
+          patches tried absolute-positioning the body (Patch 7.4) which
+          looked right on paper but didn't scroll in practice — the
+          min-height:0 flex pattern is the textbook fix and works here as
+          long as we don't fight it from the parent .soc-modal-panel
+          (hence the inline display:flex below, overriding the class). */}
       {editing && (
         <div
           className="soc-modal-overlay"
-          style={{ zIndex: 500 }}
+          style={{ zIndex: 500, overflow: 'hidden' }}
           onClick={e => { if (e.target === e.currentTarget) setEditing(null); }}
         >
           <div
-            className="soc-modal-panel soc-modal-abs"
+            className="soc-modal-panel"
             style={{
               width: 540,
-              // Patch 7.4: replace flex layout with absolute positioning.
-              // Three failed scroll patches because flex chains kept losing
-              // height constraints somewhere up the tree. Absolute eliminates
-              // all flex magic — header/body/footer have explicit positions.
-              position: 'relative',
-              height: 'min(90vh, 800px)',  // explicit height (not max-height) — forces panel to size first
-              display: 'block',             // override .soc-modal-panel's display:flex from globals.css
+              maxWidth: '100%',
+              maxHeight: 'min(90vh, 800px)',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
             }}
           >
-            <style>{`
-              .soc-modal-abs { display: block !important; }
-              .soc-modal-abs-body {
-                position: absolute;
-                top: 72px;        /* below header */
-                bottom: 64px;     /* above footer */
-                left: 0;
-                right: 0;
-                overflow-y: auto;
-                overflow-x: hidden;
-                padding: 18px 22px;
-                box-sizing: border-box;
-                scrollbar-width: thin;
-                scrollbar-color: #c9c9c9 #f5f5f5;
-              }
-              .soc-modal-abs-body::-webkit-scrollbar { width: 10px; }
-              .soc-modal-abs-body::-webkit-scrollbar-track { background: #f5f5f5; }
-              .soc-modal-abs-body::-webkit-scrollbar-thumb { background: #c9c9c9; border-radius: 5px; border: 2px solid #f5f5f5; }
-              .soc-modal-abs-body::-webkit-scrollbar-thumb:hover { background: #a8a8a8; }
-              .soc-modal-abs-header {
-                position: absolute; top: 0; left: 0; right: 0;
-                padding: 18px 22px 14px;
-                border-bottom: 1px solid var(--ink-100);
-                display: flex; justify-content: space-between; align-items: center;
-                background: var(--white);
-                z-index: 1;
-                box-sizing: border-box;
-              }
-              .soc-modal-abs-footer {
-                position: absolute; bottom: 0; left: 0; right: 0;
-                padding: 14px 22px;
-                border-top: 1px solid var(--ink-100);
-                display: flex; gap: 8px; justify-content: flex-end;
-                background: var(--white);
-                z-index: 1;
-                box-sizing: border-box;
-              }
-              @media (max-width: 640px) {
-                .soc-modal-abs { height: 100dvh !important; }
-              }
-            `}</style>
-            <div className="soc-modal-abs-header">
+            <div
+              style={{
+                padding: '18px 22px 14px',
+                borderBottom: '1px solid var(--ink-100)',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexShrink: 0,
+              }}
+            >
               <div>
                 <div style={{ fontFamily: 'var(--font-display)', fontSize: 20, color: 'var(--ink-900)' }}>Account settings</div>
                 <div style={{ fontSize: 12, color: 'var(--ink-500)', marginTop: 2 }}>{editing.handle} · {PLATFORM_LABEL[editing.platform]}</div>
               </div>
-              <button onClick={() => setEditing(null)} style={{ ...btnG, padding: '4px 8px' }}><X size={14} /></button>
+              <button
+                type="button"
+                onClick={() => setEditing(null)}
+                aria-label="Close account settings"
+                style={{ ...btnG, padding: '4px 8px' }}
+              >
+                <X size={14} aria-hidden="true" />
+              </button>
             </div>
 
             <div
-              className="soc-modal-abs-body"
               style={{
+                flex: '1 1 0',
+                minHeight: 0,
+                overflowY: 'auto',
+                overflowX: 'hidden',
+                padding: '18px 22px',
                 display: 'flex',
                 flexDirection: 'column',
                 gap: 16,
@@ -578,9 +561,18 @@ export default function AccountsPage() {
               )}
             </div>
 
-            <div className="soc-modal-abs-footer">
-              <button onClick={() => setEditing(null)} style={btnG}>Cancel</button>
-              <button onClick={saveEdit} style={btnP}><Check size={13} /> Save</button>
+            <div
+              style={{
+                padding: '14px 22px',
+                borderTop: '1px solid var(--ink-100)',
+                display: 'flex',
+                gap: 8,
+                justifyContent: 'flex-end',
+                flexShrink: 0,
+              }}
+            >
+              <button type="button" onClick={() => setEditing(null)} style={btnG}>Cancel</button>
+              <button type="button" onClick={saveEdit} style={btnP}><Check size={13} aria-hidden="true" /> Save</button>
             </div>
           </div>
         </div>
