@@ -72,10 +72,20 @@ export interface ThemeOverrides {
  * What gets stored in Netlify Blobs under key 'social-settings'.
  * Versioned so future schema changes don't break old data.
  */
+/**
+ * MULTI-BRIEF-V1: per-brief weights for the weighted-random brief picker.
+ * Map of briefId -> integer weight. Any brief absent from the map gets
+ * weight 1 (equal weighting). Tourism:Business 6:1 = { 'brief-roam-ni': 6,
+ * 'brief-roam-business': 1 } (or whichever ids the user has).
+ */
+export type BriefWeights = Record<string, number>;
+
 export interface SocialSettingsBlob {
   version: 1;
   postingTimes: PostingTimes;
   themeOverrides: ThemeOverrides;
+  // MULTI-BRIEF-V1: optional — empty map means all briefs equal.
+  briefWeights?: BriefWeights;
   updatedAt: string;     // ISO timestamp
 }
 
@@ -88,6 +98,8 @@ export interface EffectiveSocialSettings {
   themes: Theme[];          // seed + overrides applied + deletions filtered
   // CRON-AUTOGEN-V1: resolved lookahead (always defined here)
   lookaheadDays: number;
+  // MULTI-BRIEF-V1: always defined (empty map if not configured)
+  briefWeights: BriefWeights;
 }
 
 // ============================================================
@@ -136,6 +148,9 @@ export const EMPTY_OVERRIDES: ThemeOverrides = {
   additions: [],
   deletions: [],
 };
+
+// MULTI-BRIEF-V1: empty weight map = treat all briefs as equal.
+export const EMPTY_BRIEF_WEIGHTS: BriefWeights = {};
 
 // CRON-AUTOGEN-V1: default days-ahead window for the auto-generate cron.
 export const DEFAULT_LOOKAHEAD_DAYS = 14;

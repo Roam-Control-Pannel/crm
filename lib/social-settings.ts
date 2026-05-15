@@ -3,9 +3,11 @@ import { SEED_THEMES, type Theme } from './social-themes';
 import {
   DEFAULT_POSTING_TIMES,
   EMPTY_OVERRIDES,
+  EMPTY_BRIEF_WEIGHTS,
   type SocialSettingsBlob,
   type PostingTimes,
   type ThemeOverrides,
+  type BriefWeights,
   type EffectiveSocialSettings,
   DEFAULT_LOOKAHEAD_DAYS,
 } from './social-settings-types';
@@ -127,15 +129,18 @@ export function mergeThemes(overrides: ThemeOverrides): Theme[] {
  * This is what GET /api/social/settings returns and what the cron should
  * read from at scheduling time.
  */
-// CRON-AUTOGEN-V1: lookaheadDays now part of the effective settings object
+// CRON-AUTOGEN-V1: lookaheadDays now part of the effective settings object.
+// MULTI-BRIEF-V1: briefWeights also part of effective settings.
 export async function getEffectiveSettings(): Promise<EffectiveSocialSettings> {
   const blob = await readSettingsBlob();
   const postingTimes: PostingTimes = blob?.postingTimes || DEFAULT_POSTING_TIMES;
   const overrides: ThemeOverrides = blob?.themeOverrides || EMPTY_OVERRIDES;
+  const briefWeights: BriefWeights = blob?.briefWeights || EMPTY_BRIEF_WEIGHTS;
   return {
     postingTimes,
     themes: mergeThemes(overrides),
     lookaheadDays: blob?.postingTimes?.lookaheadDays || DEFAULT_LOOKAHEAD_DAYS,
+    briefWeights,
   };
 }
 

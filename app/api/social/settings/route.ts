@@ -60,10 +60,12 @@ export async function PUT(req: NextRequest) {
     const body = await req.json().catch(() => ({}));
     const incomingTimes: PostingTimes | undefined = body.postingTimes;
     const incomingOverrides: ThemeOverrides | undefined = body.themeOverrides;
+    // MULTI-BRIEF-V1: optional weights map.
+    const incomingWeights: Record<string, number> | undefined = body.briefWeights;
 
-    if (!incomingTimes && !incomingOverrides) {
+    if (!incomingTimes && !incomingOverrides && !incomingWeights) {
       return NextResponse.json(
-        { error: 'Provide postingTimes and/or themeOverrides in body' },
+        { error: 'Provide postingTimes, themeOverrides, or briefWeights in body' },
         { status: 400 }
       );
     }
@@ -72,10 +74,22 @@ export async function PUT(req: NextRequest) {
     // just times shouldn't wipe overrides.
     const existing = await readSettingsBlob();
 
+    // MULTI-BRIEF-V1: validate weights are non-negative integers.
+    let validWeights = incomingWeights;
+    if (validWeights) {
+      const clean: Record<string, number> = {};
+      for (const [k, v] of Object.entries(validWeights)) {
+        if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) continue;
+        clean[k] = Math.round(v);
+      }
+      validWeights = clean;
+    }
+
     const next: SocialSettingsBlob = {
       version: 1,
       postingTimes: incomingTimes || existing?.postingTimes || DEFAULT_POSTING_TIMES,
       themeOverrides: incomingOverrides || existing?.themeOverrides || EMPTY_OVERRIDES,
+      briefWeights: validWeights || existing?.briefWeights || {},
       updatedAt: new Date().toISOString(),
     };
 

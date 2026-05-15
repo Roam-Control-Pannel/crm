@@ -32,6 +32,7 @@ import {
   type EffectiveSocialSettings,
   type PostingTimeSlot,
 } from '@/lib/social-settings-types';
+import { fetchBriefs, type Brief } from '@/lib/briefs';
 
 // ---------- style tokens (kept consistent with app/social/page.tsx) ----------
 
@@ -110,6 +111,109 @@ function hasSlot(slots: PostingTimeSlot[], day: number, time: string): boolean {
 }
 
 // ---------- page ----------
+
+function BriefWeightsPanel() {
+  const [briefs, setBriefs] = useState<Brief[]>([]);
+  const [weights, setWeights] = useState<Record<string, number>>({});
+  const [loaded, setLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      // Load briefs + current weights from the settings GET
+      const [briefList, settingsRes] = await Promise.all([
+        fetchBriefs(),
+        fetch('/api/social/settings').then(r => r.json()).catch(() => null),
+      ]);
+      if (cancelled) return;
+      setBriefs(briefList);
+      const w = settingsRes?.settings?.briefWeights || {};
+      setWeights(w);
+      setLoaded(true);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  async function persist(next: Record<string, number>) {
+    setSaving(true);
+    try {
+      await fetch('/api/social/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ briefWeights: next }),
+      });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function updateWeight(briefId: string, raw: string) {
+    const n = parseInt(raw, 10);
+    const v = Number.isFinite(n) && n >= 0 ? Math.min(n, 99) : 1;
+    const next = { ...weights, [briefId]: v };
+    setWeights(next);
+    persist(next);
+  }
+
+  function resetToEqual() {
+    const next: Record<string, number> = {};
+    briefs.forEach(b => { next[b.id] = 1; });
+    setWeights(next);
+    persist(next);
+  }
+
+  // Compute denominator for the % readout (defaults to 1 for missing briefs).
+  const total = briefs.reduce((sum, b) => sum + (weights[b.id] || 1), 0);
+
+  if (!loaded) return null;
+
+  return (
+    <div style={{ background: 'var(--white)', borderRadius: 'var(--r-lg)', boxShadow: 'var(--shadow-sm)', padding: 18, marginBottom: 14 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+        <div>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: 18, color: 'var(--ink-900)' }}>Brief Weights</div>
+          <div style={{ fontSize: 12, color: 'var(--ink-500)', marginTop: 4, lineHeight: 1.5 }}>
+            When an account has multiple briefs assigned, these weights decide the mix. Higher number = more frequent.
+            <br />Default is 1:1 (all equal). Example: 6:1 Tourism:Business means 6 in every 7 posts are Tourism.
+          </div>
+        </div>
+        <button
+          onClick={resetToEqual}
+          disabled={saving}
+          style={{ fontSize: 11, padding: '6px 12px', background: 'var(--white)', border: '1.5px solid var(--ink-200)', borderRadius: 'var(--r-md)', cursor: 'pointer', color: 'var(--ink-600)', fontFamily: 'inherit', whiteSpace: 'nowrap' }}
+        >
+          Reset to equal
+        </button>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {briefs.map(b => {
+          const w = weights[b.id] ?? 1;
+          const pct = total > 0 ? Math.round((w / total) * 100) : 0;
+          return (
+            <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 'var(--r-sm)', background: b.color + '08', border: `1px solid ${b.color}22` }}>
+              <div style={{ width: 10, height: 10, borderRadius: '50%', background: b.color, flexShrink: 0 }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink-900)' }}>{b.name}</div>
+                <div style={{ fontSize: 10, color: 'var(--ink-500)' }}>{pct}% of posts on multi-brief accounts</div>
+              </div>
+              <input
+                type="number"
+                min={0}
+                max={99}
+                value={w}
+                onChange={e => updateWeight(b.id, e.target.value)}
+                disabled={saving}
+                style={{ width: 64, padding: '6px 10px', fontSize: 13, fontFamily: 'inherit', border: '1.5px solid var(--ink-200)', borderRadius: 'var(--r-sm)', textAlign: 'center', background: 'var(--white)' }}
+              />
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 export default function SocialSettingsPage() {
   const [loading, setLoading] = useState(true);
@@ -495,6 +599,9 @@ export default function SocialSettingsPage() {
           );
         })}
       </section>
+
+      {/* MULTI-BRIEF-V1: PANEL 1.5 — Brief Weights */}
+      <BriefWeightsPanel />
 
       {/* PANEL 2 — Themes */}
       <section style={card}>
