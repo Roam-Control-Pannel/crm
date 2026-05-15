@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getStore } from '@netlify/blobs';
 import { generateCaption, pickBrainImage, pickUnsplashImage } from '@/lib/social-cron';
 import { getEffectiveSettings } from '@/lib/social-settings';
-import { fetchBriefs } from '@/lib/briefs';
+import { DEFAULT_BRIEFS, type Brief } from '@/lib/briefs';
 import { getCollection, saveCollection, DEFAULT_USER_ID } from '@/lib/store';
 
 export const dynamic = 'force-dynamic';
@@ -46,11 +46,23 @@ export async function POST(req: NextRequest) {
 
     const origin = new URL(req.url).origin;
 
-    // 1. Resolve brief
-    const briefs = await fetchBriefs();
+    // 1. Resolve brief — server-side, direct from Blobs (NOT fetchBriefs()
+    // which uses relative fetch URLs and only works in the browser; that
+    // mismatch was the patch-6 launch bug fixed in 6.2).
+    let briefs = (await getCollection<Brief[]>(DEFAULT_USER_ID, 'briefs')) || [];
+    if (briefs.length === 0) {
+      // First run on a fresh account — seed defaults and persist, same
+      // behaviour the client-side fetchBriefs() implements.
+      briefs = DEFAULT_BRIEFS;
+      await saveCollection(DEFAULT_USER_ID, 'briefs', briefs);
+    }
     const brief = briefs.find(b => b.id === briefId);
     if (!brief) {
-      return NextResponse.json({ ok: false, error: `Brief ${briefId} not found` }, { status: 404 });
+      const availableIds = briefs.map(b => b.id).join(', ') || '(none)';
+      return NextResponse.json({
+        ok: false,
+        error: `Brief ${briefId} not found. Available: ${availableIds}`,
+      }, { status: 404 });
     }
 
     // 2. Resolve theme (pick random enabled if not specified)
@@ -98,8 +110,9 @@ export async function POST(req: NextRequest) {
     let imageSocialHandles: any;
 
     if (withImage === 'brain') {
-      const brainItems = (await getCollection<any[]>(DEFAULT_USER_ID, 'briefs')) ? [] : []; // brain items live in a different store
-      // Brain images come from the brain items store, not the user collection.
+      // Brain images live in the 'roam-brain' Blob store, separate from
+      // the per-user collection — so we hit getStore() directly here
+      // rather than going through getCollection().
       try {
         const brainStore = getStore('roam-brain');
         const items = ((await brainStore.get('items', { type: 'json' })) as any[]) || [];
