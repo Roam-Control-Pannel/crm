@@ -359,6 +359,26 @@ export default function AccountsPage() {
           onClick={e => { if (e.target === e.currentTarget) setEditing(null); }}
         >
           <div className="soc-modal-panel" style={{ width: 540 }}>
+            {/* Patch 7.3: self-contained scrollbar styling. After two
+                rounds of trying to fix this from globals.css and watching
+                Netlify never serve the new CSS, the modal now ships its
+                own style tag so scroll behaviour can't fail to load. */}
+            <style>{`
+              .soc-modal-body-scroll {
+                max-height: calc(90vh - 145px);
+                overflow-y: auto;
+                overflow-x: hidden;
+                scrollbar-width: thin;
+                scrollbar-color: #c9c9c9 #f5f5f5;
+              }
+              .soc-modal-body-scroll::-webkit-scrollbar { width: 10px; }
+              .soc-modal-body-scroll::-webkit-scrollbar-track { background: #f5f5f5; border-radius: 5px; }
+              .soc-modal-body-scroll::-webkit-scrollbar-thumb { background: #c9c9c9; border-radius: 5px; border: 2px solid #f5f5f5; }
+              .soc-modal-body-scroll::-webkit-scrollbar-thumb:hover { background: #a8a8a8; }
+              @media (max-width: 640px) {
+                .soc-modal-body-scroll { max-height: calc(100dvh - 130px); }
+              }
+            `}</style>
             <div style={{ padding: '18px 22px 14px', borderBottom: '1px solid var(--ink-100)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
                 <div style={{ fontFamily: 'var(--font-display)', fontSize: 20, color: 'var(--ink-900)' }}>Account settings</div>
@@ -367,7 +387,21 @@ export default function AccountsPage() {
               <button onClick={() => setEditing(null)} style={{ ...btnG, padding: '4px 8px' }}><X size={14} /></button>
             </div>
 
-            <div className="soc-modal-body" style={{ padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div
+              className="soc-modal-body-scroll"
+              style={{
+                padding: '18px 22px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 16,
+                // Belt-and-braces: max-height + overflow inline AS WELL
+                // as via the embedded style tag's class, in case some
+                // future optimisation strips one or the other.
+                maxHeight: 'calc(90vh - 145px)',
+                overflowY: 'auto',
+                overflowX: 'hidden',
+              }}
+            >
               {/* MULTI-BRIEF-V1: checkbox multi-select for briefs */}
               <div>
                 <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--ink-600)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
