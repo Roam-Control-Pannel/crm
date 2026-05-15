@@ -348,33 +348,20 @@ export default function AccountsPage() {
         </div>
       )}
 
-      {/* Edit modal.
-          Layout: panel is a flex column with a hard height cap. Header and
-          footer don't shrink; body takes the remaining space with
-          min-height:0 so it can shrink below its intrinsic content size,
-          which is what lets overflow-y:auto actually engage. Earlier
-          patches tried absolute-positioning the body (Patch 7.4) which
-          looked right on paper but didn't scroll in practice — the
-          min-height:0 flex pattern is the textbook fix and works here as
-          long as we don't fight it from the parent .soc-modal-panel
-          (hence the inline display:flex below, overriding the class). */}
+      {/* Edit modal. Mirror the New post composer in app/social/page.tsx
+          exactly — that one is a flex column where the body has flex:1 +
+          overflow-y:auto and reliably scrolls. The history of this modal:
+          we tried inline panel overrides (max-height with min(), overflow
+          hidden) and various flex values on the body, all of which broke
+          scroll in one way or another. The lesson: don't override the
+          .soc-modal-panel class at all — let it do its job. */}
       {editing && (
         <div
           className="soc-modal-overlay"
-          style={{ zIndex: 500, overflow: 'hidden' }}
+          style={{ zIndex: 500 }}
           onClick={e => { if (e.target === e.currentTarget) setEditing(null); }}
         >
-          <div
-            className="soc-modal-panel"
-            style={{
-              width: 540,
-              maxWidth: '100%',
-              maxHeight: 'min(90vh, 800px)',
-              display: 'flex',
-              flexDirection: 'column',
-              overflow: 'hidden',
-            }}
-          >
+          <div className="soc-modal-panel" style={{ width: 540 }}>
             <div
               style={{
                 padding: '18px 22px 14px',
@@ -382,7 +369,6 @@ export default function AccountsPage() {
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'center',
-                flexShrink: 0,
               }}
             >
               <div>
@@ -401,24 +387,12 @@ export default function AccountsPage() {
 
             <div
               style={{
-                // Drop the flex sizing entirely — relying on flex-shrink to
-                // engage overflow when the panel hits its max-height has
-                // failed twice in this layout (browser flex algorithm
-                // doesn't re-shrink children after max-height clamps the
-                // container, as far as we can tell from the symptoms).
-                //
-                // Cap the body's height directly: panel maxes at min(90vh,
-                // 800px), so the body maxes at that minus the header (~70px)
-                // and footer (~60px). overflow-y:auto then has a concrete
-                // height to act against and reliably scrolls. This is the
-                // same approach globals.css uses for .soc-modal-body.
-                maxHeight: 'calc(min(90vh, 800px) - 130px)',
-                overflowY: 'auto',
-                overflowX: 'hidden',
                 padding: '18px 22px',
                 display: 'flex',
                 flexDirection: 'column',
                 gap: 16,
+                overflowY: 'auto',
+                flex: 1,
               }}
             >
               {/* MULTI-BRIEF-V1: checkbox multi-select for briefs */}
