@@ -401,14 +401,18 @@ export default function AccountsPage() {
 
             <div
               style={{
-                // No flex-grow: panel uses max-height (not height), so there
-                // is no "remaining space" for grow to consume — basis:0 +
-                // grow:1 collapses the body to 0. Letting flex-basis: auto
-                // sizes the body to its content; combined with min-height:0
-                // it still shrinks when the panel hits its 90vh cap, which
-                // is when overflow-y:auto engages.
-                flex: '0 1 auto',
-                minHeight: 0,
+                // Drop the flex sizing entirely — relying on flex-shrink to
+                // engage overflow when the panel hits its max-height has
+                // failed twice in this layout (browser flex algorithm
+                // doesn't re-shrink children after max-height clamps the
+                // container, as far as we can tell from the symptoms).
+                //
+                // Cap the body's height directly: panel maxes at min(90vh,
+                // 800px), so the body maxes at that minus the header (~70px)
+                // and footer (~60px). overflow-y:auto then has a concrete
+                // height to act against and reliably scrolls. This is the
+                // same approach globals.css uses for .soc-modal-body.
+                maxHeight: 'calc(min(90vh, 800px) - 130px)',
                 overflowY: 'auto',
                 overflowX: 'hidden',
                 padding: '18px 22px',
