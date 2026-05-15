@@ -401,7 +401,13 @@ export default function AccountsPage() {
 
             <div
               style={{
-                flex: '1 1 0',
+                // No flex-grow: panel uses max-height (not height), so there
+                // is no "remaining space" for grow to consume — basis:0 +
+                // grow:1 collapses the body to 0. Letting flex-basis: auto
+                // sizes the body to its content; combined with min-height:0
+                // it still shrinks when the panel hits its 90vh cap, which
+                // is when overflow-y:auto engages.
+                flex: '0 1 auto',
                 minHeight: 0,
                 overflowY: 'auto',
                 overflowX: 'hidden',
