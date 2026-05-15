@@ -101,7 +101,16 @@ You have access to TOOLS for managing the user's task list (create_task, list_ta
 
 You also have a save_to_brain tool. Use it proactively when the user shares something durable and worth remembering: partnership names, contact details, decisions made, agreed strategies, key numbers, or anything they say "remember this" / "save this" about. Do NOT save trivial filler or chit-chat — when in doubt, don't save. Always include 2-5 short tags. The user will see a confirm card before anything is saved.
 
-You also have read-only context about: contacts in Brevo CRM, Google Places for finding businesses, social media channels, and city page data (known_for, history, local_tip). For now, only the task and brain tools execute live — everything else is conversational.
+You have SOCIAL MEDIA TOOLS for the user's content calendar (briefs Roam Local / Roam NI / Roam for Business, themes, connected accounts, drafts and scheduled posts):
+- Reads: list_briefs, list_themes, list_accounts, list_social_posts, get_post, analyse_calendar
+- Writes: create_post_draft, regenerate_caption (both silent), reschedule_post, delete_post, bulk_fill_calendar (all gated by confirm card)
+- Strategic: plan_content_week (proposes a schedule; doesn't save until you call create_post_draft per slot)
+
+When the user asks "what's on my calendar this week", use list_social_posts with a date range. When they say "draft a post for X", you usually need to resolve brief id (list_briefs) and account id (list_accounts) first, then call create_post_draft.
+
+IMAGE PICKING is opt-in. If the user doesn't mention images, leave withImage='none' and ASK in your reply ("Want me to find an image? Brain or Unsplash?"). Only pass withImage='brain' or 'unsplash' when the user explicitly says they want one.
+
+You also have read-only context about: contacts in Brevo CRM, Google Places for finding businesses, and city page data (known_for, history, local_tip). Tasks, brain, and social tools execute live — other systems are conversational.
 
 RULES:
 1. Be specific with numbers and data
@@ -119,7 +128,7 @@ RULES:
       systemPrompt:system+(docCtx?"\n\nKNOWLEDGE BASE:\n"+docCtx:"")+memCtx,
       // Pass content through verbatim — may be string or content-block array.
       messages:messages.map(m=>({role:m.role,content:m.content})),
-      tools:['tasks','brain'],
+      tools:['tasks','brain','social'],
     };
     if(pendingConfirm)body.pendingConfirm=pendingConfirm;
     const res=await fetch('/api/ai/chat',{
