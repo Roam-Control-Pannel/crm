@@ -197,10 +197,22 @@ async function handleFileUpload(req: NextRequest) {
   try {
     const formData = await req.formData();
     const file = formData.get('file') as File | null;
-    const folderId = (formData.get('folderId') as string | null) || null;
+    let folderId = (formData.get('folderId') as string | null) || null;
+    // New: callers can pass a folder NAME (e.g. "Roam-io attachments") and
+    // we auto-create it if missing. Keeps client code free of folder IDs.
+    const folderName = (formData.get('folderName') as string | null) || null;
+    // New: an extra tag merged with whatever auto-tagging produces. Used
+    // by the Roam-io chat image flow to mark attachments as such.
+    const extraTag = (formData.get('extraTag') as string | null) || null;
 
     if (!file) {
       return NextResponse.json({ ok: false, error: 'No file' }, { status: 400 });
+    }
+
+    // Resolve folderName → folderId if provided and no explicit folderId.
+    if (!folderId && folderName) {
+      const folder = await findOrCreateFolder(folderName);
+      folderId = folder.id;
     }
 
     // 1. Store binary
@@ -226,6 +238,11 @@ async function handleFileUpload(req: NextRequest) {
       const result = await autoTagImage(base64, mediaType);
       tags = result.tags;
       description = result.description;
+    }
+
+    // Merge extra tag if provided, dedupe.
+    if (extraTag) {
+      tags = Array.from(new Set([...tags, extraTag]));
     }
 
     // 3. Save metadata to brain store

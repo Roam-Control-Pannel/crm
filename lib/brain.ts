@@ -109,6 +109,24 @@ export async function uploadItem(file: File, folderId: string | null = null): Pr
 }
 
 /**
+ * Upload an image attached to a Roam-io chat message. Lands in the
+ * 'Roam-io attachments' folder (auto-created under root). Returns the
+ * full BrainItem so callers can grab blobId + auto-generated tags.
+ */
+export async function uploadChatImage(file: File): Promise<BrainItem | null> {
+  if (!file.type.startsWith('image/')) throw new Error('Not an image');
+  if (file.size > 8 * 1024 * 1024) throw new Error('Image too large (max 8MB)');
+  const fd = new FormData();
+  fd.append('file', file);
+  fd.append('folderName', 'Roam-io attachments');
+  fd.append('extraTag', 'roam-io-chat-attachment');
+  const res = await fetch('/api/brain/items', { method: 'POST', body: fd });
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.error || 'Upload failed');
+  return data.item;
+}
+
+/**
  * Save a chunk of text (chat message, note, extracted memory) to Brain.
  * Lands in "Roam-io saves" folder by default. Source tag lets us filter
  * later — e.g. 'roam-io-chat', 'roam-io-memory', 'manual-note'.
