@@ -551,7 +551,10 @@ export async function executeTool(name: string, input: any): Promise<any> {
       }).catch(() => null);
       if (!res || !res.ok) return { ok: false, error: 'Could not load accounts' };
       const data: any = await res.json();
-      const realAccounts: any[] = data?.accounts || [];
+      // The route returns { linkedin, meta, realAccounts } — NOT accounts.
+      // Reading the wrong key here was the patch-6 launch bug that made
+      // Roam-io insist no accounts were connected.
+      const realAccounts: any[] = data?.realAccounts || [];
       const metaCol = (await getCollection<any[]>(DEFAULT_USER_ID, 'account_meta')) || [];
       const result = realAccounts.map((a: any) => {
         const meta = metaCol.find((m: any) => m.accountId === a.id);
@@ -789,9 +792,10 @@ export async function executeTool(name: string, input: any): Promise<any> {
         fetch(`${baseUrl}/api/accounts/status`, { headers: secret ? { 'x-internal-call': secret } : {} }).catch(() => null),
         fetch(`${baseUrl}/api/social/settings`, { headers: secret ? { 'x-internal-call': secret } : {} }).catch(() => null),
       ]);
-      const accountsData: any = accountsRes && accountsRes.ok ? await accountsRes.json() : { accounts: [] };
+      const accountsData: any = accountsRes && accountsRes.ok ? await accountsRes.json() : { realAccounts: [] };
       const settingsData: any = settingsRes && settingsRes.ok ? await settingsRes.json() : { themes: [] };
-      const accounts: any[] = (accountsData.accounts || []).filter((a: any) => a.capabilities?.canPost);
+      // Use realAccounts (the route's shape), not accounts.
+      const accounts: any[] = (accountsData.realAccounts || []).filter((a: any) => a.capabilities?.canPost);
       const themes: any[] = settingsData.themes || [];
       const metaCol = (await getCollection<any[]>(DEFAULT_USER_ID, 'account_meta')) || [];
 
