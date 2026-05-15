@@ -1,7 +1,7 @@
 'use client';
 import {useState,useEffect,useRef} from 'react';
 import {Plus,Send,Sparkles,X,Check,AlertTriangle,MessageSquare,Brain,Paperclip,Trash2,FileText,Bookmark,BookmarkCheck,Image as ImageIcon,Camera} from 'lucide-react';
-import {saveTextToBrain,uploadChatImage} from '@/lib/brain';
+import {saveTextToBrain,uploadChatImage,fetchMemories,fetchMemoryContent,saveMemory,deleteItem,type BrainItem} from '@/lib/brain';
 import {loadWithMigration, saveRemote} from '@/lib/client-store';
 
 interface Message {
@@ -33,6 +33,11 @@ interface Chat {
   messages:Message[];
   createdAt:Date;
   updatedAt:Date;
+  // Memory extraction watermark. We only mine messages newer than this
+  // id, so re-opening a chat never re-extracts the same facts.
+  lastExtractedMessageId?:string;
+  // When the most-recent extraction ran. Used for "2 min idle" gating.
+  lastExtractedAt?:string;
 }
 
 const SUGGESTIONS=[
@@ -84,7 +89,7 @@ interface RoamioResult{
 // images — Claude vision requires the structured form).
 type ApiMessage={role:string;content:string|any[]};
 
-async function callRoamio(messages:ApiMessage[],docs?:RoamDoc[],pendingConfirm?:any):Promise<RoamioResult>{
+async function callRoamio(messages:ApiMessage[],docs?:RoamDoc[],pendingConfirm?:any,memoryContext?:string):Promise<RoamioResult>{
   const today=new Date().toISOString().split('T')[0];
   const system=`You are Roam-io, the AI growth assistant for Roam Local — a free local business discovery app. You help the Roam team run their business outreach CRM.
 
@@ -104,12 +109,14 @@ RULES:
 3. When a tool returns a result, summarise it briefly in your reply ("Added: Follow up with Dún Laoghaire BID, due Friday")
 4. If a tool fails, explain plainly what went wrong
 5. Don't pretend to do things you don't have tools for — say what you'd do and offer to walk through it
-6. When the user shares an image, respond naturally and conversationally about what you see — don't dump structured analysis unless asked. Tie it back to their work (high streets, partnerships, branding, social content) where it's relevant.`;
+6. When the user shares an image, respond naturally and conversationally about what you see — don't dump structured analysis unless asked. Tie it back to their work (high streets, partnerships, branding, social content) where it's relevant.
+7. If MEMORIES are attached, use them naturally — like a colleague who remembers context. Don't announce "I remember that...", just reference the fact ("Sarah at Dún Laoghaire BID — want me to draft a note to her?"). Trust the memory unless the current conversation contradicts it; if it does, follow the current conversation.`;
 
   const docCtx=docs&&docs.length>0?docs.map(d=>`[DOC: ${d.name}]\n${d.content}`).join("\n\n"):"";
+  const memCtx=memoryContext?`\n\nMEMORIES (things you've learned about Andy in previous conversations — use these naturally, do not announce them):\n${memoryContext}`:"";
   try{
     const body:any={
-      systemPrompt:system+(docCtx?"\n\nKNOWLEDGE BASE:\n"+docCtx:""),
+      systemPrompt:system+(docCtx?"\n\nKNOWLEDGE BASE:\n"+docCtx:"")+memCtx,
       // Pass content through verbatim — may be string or content-block array.
       messages:messages.map(m=>({role:m.role,content:m.content})),
       tools:['tasks','brain'],
@@ -160,6 +167,11 @@ export default function HubPage(){
   const [savingMsgId,setSavingMsgId]=useState<string|null>(null);
   const [savingChat,setSavingChat]=useState(false);
   const [toast,setToast]=useState<string|null>(null);
+  // Memory state — items themselves plus their text contents (cached).
+  const [memories,setMemories]=useState<BrainItem[]>([]);
+  const [memoryContents,setMemoryContents]=useState<Record<string,string>>({});
+  const [showMemories,setShowMemories]=useState(false);
+  const [extracting,setExtracting]=useState(false);
   // Pending image attachments — uploaded to Brain on send, never persisted
   // in state across renders if the user navigates away mid-compose.
   const [pendingAttachments,setPendingAttachments]=useState<{file:File;preview:string}[]>([]);
@@ -217,6 +229,139 @@ export default function HubPage(){
     });
   }
 
+  /**
+   * Memory extraction core. Pulls the latest messages since the last
+   * extraction watermark, sends them to /api/ai/memory, saves any
+   * returned memories to Brain (one per item), and bumps the watermark.
+   *
+   * Safe to call repeatedly — no-ops if nothing new or too short.
+   */
+  async function extractMemoriesFromChat(targetChat:Chat){
+    if(extracting)return;
+    // Find new messages since the last extraction watermark.
+    let startIdx=0;
+    if(targetChat.lastExtractedMessageId){
+      const i=targetChat.messages.findIndex(m=>m.id===targetChat.lastExtractedMessageId);
+      if(i>=0)startIdx=i+1;
+    }
+    const newMessages=targetChat.messages.slice(startIdx);
+    // Need at least 4 messages to bother — anything shorter is noise.
+    if(newMessages.length<4)return;
+
+    setExtracting(true);
+    try{
+      const transcript=newMessages
+        .map(m=>`${m.role==='user'?'You':'Roam-io'}: ${m.content||(m.attachments?.length?'[image]':'')}`)
+        .join('\n\n');
+      const existing=memories.map(m=>m.description).filter(Boolean);
+      const res=await fetch('/api/ai/memory',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({transcript,existingMemories:existing}),
+      });
+      const data=await res.json();
+      if(!data.ok||!Array.isArray(data.memories)){
+        return;
+      }
+      const saved:BrainItem[]=[];
+      for(const m of data.memories){
+        try{
+          const item=await saveMemory({description:m.description,content:m.content,tags:m.tags||[]});
+          if(item)saved.push(item);
+        }catch(e){
+          console.error('saveMemory failed',e);
+        }
+      }
+      // Bump watermark on the chat regardless of whether facts were
+      // found — we processed those messages and shouldn't reprocess.
+      const lastId=targetChat.messages[targetChat.messages.length-1]?.id;
+      if(lastId){
+        setChats(prev=>prev.map(c=>c.id===targetChat.id?{...c,lastExtractedMessageId:lastId,lastExtractedAt:new Date().toISOString()}:c));
+      }
+      if(saved.length>0){
+        setMemories(prev=>[...saved,...prev]);
+        showToast(`${saved.length} fact${saved.length===1?'':'s'} saved to memory`);
+      }
+    }catch(e){
+      console.error('memory extraction error',e);
+    }finally{
+      setExtracting(false);
+    }
+  }
+
+  // Trigger A: when the active chat changes (user switches away).
+  // Captures the OUTGOING chat in a ref so we can extract from it even
+  // after activeChat has flipped.
+  const prevActiveIdRef=useRef<string|null>(null);
+  useEffect(()=>{
+    const prevId=prevActiveIdRef.current;
+    if(prevId&&prevId!==activeChat?.id){
+      const outgoing=chats.find(c=>c.id===prevId);
+      if(outgoing&&outgoing.messages.length>=4){
+        extractMemoriesFromChat(outgoing);
+      }
+    }
+    prevActiveIdRef.current=activeChat?.id||null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[activeChat?.id]);
+
+  // Trigger B: idle timer. Each time activeChat's messages change, reset
+  // a 2-minute timer; if it fires, extract.
+  useEffect(()=>{
+    if(!activeChat||activeChat.messages.length<4)return;
+    const t=setTimeout(()=>{
+      extractMemoriesFromChat(activeChat);
+    },2*60*1000);
+    return()=>clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[activeChat?.messages.length,activeChat?.id]);
+
+  async function forgetMemory(item:BrainItem){
+    try{
+      const ok=await deleteItem(item.id);
+      if(ok){
+        setMemories(prev=>prev.filter(m=>m.id!==item.id));
+        setMemoryContents(prev=>{const n={...prev};delete n[item.id];return n;});
+        showToast('Memory forgotten');
+      }
+    }catch(e){
+      showToast('Failed to forget');
+    }
+  }
+
+  /**
+   * Smart match: pick memories whose tags or description overlap with the
+   * current chat's text. Hard cap at 15 items to keep the system prompt
+   * reasonable. Keyword overlap is dumb but fast and good enough for now —
+   * upgrade to embeddings if recall starts feeling off.
+   */
+  function selectRelevantMemories(chatText:string,limit=15):BrainItem[]{
+    if(memories.length===0)return[];
+    const text=chatText.toLowerCase();
+    // Tokenise: words of 4+ chars to skip noise like "the", "and".
+    const words=new Set(text.split(/[^a-z0-9-]+/i).filter(w=>w.length>=4));
+    if(words.size===0)return memories.slice(0,limit);
+    const scored=memories.map(m=>{
+      let score=0;
+      for(const tag of m.tags){
+        if(words.has(tag.toLowerCase()))score+=3;
+        // Partial tag match (e.g. "dun-laoghaire" in "laoghaire")
+        for(const w of words){
+          if(tag.toLowerCase().includes(w)||w.includes(tag.toLowerCase()))score+=1;
+        }
+      }
+      const desc=(m.description||'').toLowerCase();
+      for(const w of words){
+        if(desc.includes(w))score+=2;
+      }
+      return{m,score};
+    });
+    scored.sort((a,b)=>b.score-a.score);
+    // Anything scoring 0 only included if we haven't hit the limit yet —
+    // helpful when there's no clear match but we want some context.
+    return scored.slice(0,limit).map(s=>s.m);
+  }
+
   // Per-message save: bundle ±2 turns of context around the target message.
   async function saveMessageToBrain(msg:Message){
     if(!activeChat||savingMsgId)return;
@@ -271,14 +416,16 @@ export default function HubPage(){
   useEffect(()=>{
     let cancelled=false;
     (async()=>{
-      const [docsData,chatsData]=await Promise.all([
+      const [docsData,chatsData,memoryData]=await Promise.all([
         fetchDocs(),
         loadWithMigration<Chat[]>('hub_chats'),
+        fetchMemories().catch(()=>[] as BrainItem[]),
       ]);
       if(cancelled)return;
       setDocs(docsData);
       const hydrated=Array.isArray(chatsData)?chatsData.map((c:any)=>({...c,createdAt:new Date(c.createdAt),updatedAt:new Date(c.updatedAt),messages:(c.messages||[]).map((m:any)=>({...m,timestamp:new Date(m.timestamp)}))})):[];
       setChats(hydrated);
+      setMemories(memoryData);
       setChatsLoaded(true);
     })();
     const check=()=>setIsMobile(window.innerWidth<640);
@@ -396,7 +543,20 @@ export default function HubPage(){
       return{role:m.role,content:m.content};
     });
 
-    const result=await callRoamio(apiMessages,docs);
+    // Build memory context for this turn — keyword-match against the latest user message.
+    const latestUserText=newMsgs.filter(m=>m.role==='user').map(m=>m.content).join(' ');
+    const relevant=selectRelevantMemories(latestUserText);
+    // Resolve cached content for relevant memories, fetching any we haven't seen yet.
+    const memBlocks=await Promise.all(relevant.map(async m=>{
+      let body=memoryContents[m.id];
+      if(!body){
+        body=await fetchMemoryContent(m);
+        setMemoryContents(prev=>({...prev,[m.id]:body}));
+      }
+      return `- ${m.description}\n  ${body.split('\n')[0]}`;
+    }));
+    const memoryContext=memBlocks.length>0?memBlocks.join('\n'):undefined;
+    const result=await callRoamio(apiMessages,docs,undefined,memoryContext);
     const aiMsg:Message={
       id:(Date.now()+1).toString(),
       role:'assistant',
@@ -446,12 +606,24 @@ export default function HubPage(){
     const lastAssistantText=chat.messages.find(m=>m.id===msgId)?.content||'';
     if(lastAssistantText)history.push({role:'assistant',content:lastAssistantText});
 
+    // Memory context for the confirm-reply turn too.
+    const latestUserText=history.filter(m=>m.role==='user').map(m=>typeof m.content==='string'?m.content:'').join(' ');
+    const relevant=selectRelevantMemories(latestUserText);
+    const memBlocks=await Promise.all(relevant.map(async m=>{
+      let body=memoryContents[m.id];
+      if(!body){
+        body=await fetchMemoryContent(m);
+        setMemoryContents(prev=>({...prev,[m.id]:body}));
+      }
+      return `- ${m.description}\n  ${body.split('\n')[0]}`;
+    }));
+    const memoryContext=memBlocks.length>0?memBlocks.join('\n'):undefined;
     const result=await callRoamio(history,docs,{
       name:pending.name,
       input:pending.input,
       tool_use_id:pending.tool_use_id,
       assistant_content:pending.assistantContent,
-    });
+    },memoryContext);
     const responseMsg:Message={
       id:Date.now().toString(),
       role:'assistant',
@@ -592,6 +764,15 @@ export default function HubPage(){
                   </div>
                 </div>
               )}
+            </div>
+            <div style={{width:'100%',maxWidth:480,marginTop:8,display:'flex',gap:8}}>
+              <button onClick={()=>setShowMemories(true)} style={{flex:1,padding:'14px 16px',borderRadius:'var(--r-lg)',border:'1.5px dashed var(--ink-200)',background:'var(--white)',cursor:'pointer',display:'flex',alignItems:'center',gap:10,fontFamily:'inherit'}}>
+                <div style={{width:32,height:32,borderRadius:'var(--r-sm)',background:'var(--maroon-50)',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}><Brain size={14} color="var(--maroon-600)"/></div>
+                <div style={{textAlign:'left',flex:1,minWidth:0}}>
+                  <div style={{fontSize:12,fontWeight:600,color:'var(--ink-900)'}}>Memories</div>
+                  <div style={{fontSize:10,color:'var(--ink-400)',marginTop:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{memories.length===0?'Nothing remembered yet':`${memories.length} fact${memories.length===1?'':'s'} remembered`}</div>
+                </div>
+              </button>
             </div>
             <div style={{width:'100%',maxWidth:480,marginTop:8}}>
               {!showDocs?(
@@ -789,6 +970,50 @@ export default function HubPage(){
       {toast&&(
         <div style={{position:'fixed',bottom:24,left:'50%',transform:'translateX(-50%)',background:'var(--ink-900)',color:'white',padding:'10px 18px',borderRadius:'var(--r-pill)',fontSize:12,fontWeight:500,boxShadow:'var(--shadow-lg)',zIndex:1000,display:'flex',alignItems:'center',gap:8}}>
           <Check size={13}/>{toast}
+        </div>
+      )}
+      {showMemories&&(
+        <div style={{position:'fixed',inset:0,background:'rgba(26,13,18,0.5)',zIndex:500,display:'flex',alignItems:'center',justifyContent:'center'}} onClick={e=>{if(e.target===e.currentTarget)setShowMemories(false);}}>
+          <div style={{background:'var(--white)',borderRadius:'var(--r-xl)',width:560,maxWidth:'95vw',maxHeight:'85vh',display:'flex',flexDirection:'column',boxShadow:'var(--shadow-lg)'}}>
+            <div style={{padding:'18px 22px 14px',borderBottom:'1px solid var(--ink-100)',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+              <div>
+                <div style={{fontFamily:'var(--font-display)',fontSize:20,color:'var(--ink-900)'}}>Memories</div>
+                <div style={{fontSize:11,color:'var(--ink-400)',marginTop:2}}>What Roam-io has learned about you and your work across conversations</div>
+              </div>
+              <button onClick={()=>setShowMemories(false)} style={{width:28,height:28,borderRadius:'var(--r-sm)',border:'1.5px solid var(--ink-200)',background:'var(--white)',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',padding:0}}><X size={14}/></button>
+            </div>
+            <div style={{padding:16,overflowY:'auto',flex:1}}>
+              {memories.length===0?(
+                <div style={{padding:'40px 20px',textAlign:'center'}}>
+                  <Brain size={32} color="var(--ink-200)" style={{margin:'0 auto 12px',display:'block'}}/>
+                  <div style={{fontSize:14,color:'var(--ink-600)',marginBottom:6}}>Nothing remembered yet</div>
+                  <div style={{fontSize:11,color:'var(--ink-400)',lineHeight:1.6,maxWidth:340,margin:'0 auto'}}>Roam-io will save durable facts (contacts, decisions, active projects) automatically as you chat. You can also save anything manually via the bookmark on each message.</div>
+                </div>
+              ):(
+                <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                  {memories.map(m=>(
+                    <div key={m.id} style={{padding:'12px 14px',borderRadius:'var(--r-md)',background:'var(--paper)',border:'1px solid var(--ink-100)',display:'flex',gap:10,alignItems:'flex-start'}}>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:13,color:'var(--ink-900)',lineHeight:1.5,marginBottom:6}}>{m.description||<em style={{color:'var(--ink-400)'}}>No description</em>}</div>
+                        <div style={{display:'flex',gap:4,flexWrap:'wrap'}}>
+                          {m.tags.filter(t=>t!=='roam-io-memory'&&t!=='roam-io-chat').slice(0,5).map(t=>(
+                            <span key={t} style={{fontSize:9,background:'var(--white)',padding:'2px 7px',borderRadius:'var(--r-pill)',color:'var(--ink-500)',border:'1px solid var(--ink-100)'}}>{t}</span>
+                          ))}
+                          <span style={{fontSize:9,color:'var(--ink-400)',padding:'2px 0'}}>{new Date(m.uploadedAt).toLocaleDateString('en-GB',{day:'numeric',month:'short'})}</span>
+                        </div>
+                      </div>
+                      <button onClick={()=>forgetMemory(m)} title="Forget this" style={{width:26,height:26,borderRadius:'var(--r-xs)',border:'1.5px solid var(--ink-200)',background:'var(--white)',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',color:'var(--alert)',flexShrink:0}}><Trash2 size={12}/></button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            {extracting&&(
+              <div style={{padding:'10px 22px',borderTop:'1px solid var(--ink-100)',fontSize:11,color:'var(--ink-500)',display:'flex',alignItems:'center',gap:8}}>
+                <Sparkles size={12} color="var(--maroon-600)"/> Looking for new memories…
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>

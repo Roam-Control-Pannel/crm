@@ -283,13 +283,18 @@ async function handleJsonSave(req: NextRequest) {
     const source: string = (body.source || 'roam-io-chat').toString();
     const autoFolder: boolean = body.autoFolder !== false; // default true
     let folderId: string | null = body.folderId || null;
+    const folderName: string | null = body.folderName || null;
     const contextBefore: string = (body.contextBefore || '').toString();
     const contextAfter: string = (body.contextAfter || '').toString();
 
-    // Resolve folder. autoFolder = true means: try smartMatchFolder, fall
-    // back to "Roam-io saves". Caller can pass explicit folderId to skip
-    // routing entirely.
-    if (!folderId && autoFolder) {
+    // Resolve folder. Precedence:
+    //   1. explicit folderId
+    //   2. explicit folderName -> findOrCreateFolder(name)
+    //   3. autoFolder=true (default) -> smart match -> 'Roam-io saves'
+    if (!folderId && folderName) {
+      const folder = await findOrCreateFolder(folderName);
+      folderId = folder.id;
+    } else if (!folderId && autoFolder) {
       const matched = await smartMatchFolder(content, tags);
       const folder = matched || (await findOrCreateFolder(ROAMIO_SAVES_FOLDER));
       folderId = folder.id;

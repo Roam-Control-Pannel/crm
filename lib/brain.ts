@@ -137,6 +137,7 @@ export interface SaveTextOptions {
   description?: string;
   source?: string;
   folderId?: string | null;
+  folderName?: string;        // when set, server auto-creates the folder
   autoFolder?: boolean;
   contextBefore?: string;
   contextAfter?: string;
@@ -151,6 +152,46 @@ export async function saveTextToBrain(opts: SaveTextOptions): Promise<BrainItem 
   const data = await res.json();
   if (!data.ok) throw new Error(data.error || 'Save failed');
   return data.item;
+}
+
+/**
+ * Memory helpers — thin wrappers around the Brain items API filtered to
+ * source tag 'roam-io-memory'. Memory items are just Brain items with a
+ * specific tag, but the rest of the app treats them as a distinct concept
+ * (loaded into chat system prompts, shown in the Memories panel).
+ */
+const MEMORY_TAG = 'roam-io-memory';
+
+export async function fetchMemories(): Promise<BrainItem[]> {
+  const items = await fetchItems();
+  return items.filter(i => i.tags.includes(MEMORY_TAG));
+}
+
+/**
+ * Fetch the actual text content of a brain item (used to inject memory
+ * text into the system prompt). Streams from /api/images/[blobId] — the
+ * route serves any blob, with the correct contentType from metadata.
+ */
+export async function fetchMemoryContent(item: BrainItem): Promise<string> {
+  try {
+    const res = await fetch(`/api/images/${item.blobId}`);
+    if (!res.ok) return item.description || '';
+    return await res.text();
+  } catch { return item.description || ''; }
+}
+
+/**
+ * Save a memory fact extracted from chat. Lands in 'Roam-io memory' folder.
+ */
+export async function saveMemory(opts: { description: string; content: string; tags: string[] }): Promise<BrainItem | null> {
+  return saveTextToBrain({
+    description: opts.description,
+    content: opts.content,
+    tags: Array.from(new Set([...opts.tags, MEMORY_TAG])),
+    source: MEMORY_TAG,
+    folderName: 'Roam-io memory',
+    autoFolder: false,
+  });
 }
 
 export async function updateItem(id: string, patch: Partial<Pick<BrainItem, 'tags' | 'description' | 'folderId'>>): Promise<boolean> {
