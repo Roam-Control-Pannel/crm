@@ -148,6 +148,52 @@ tbody tr:hover td { background: var(--paper); }
 .soc-modal-panel > :first-child,
 .soc-modal-panel > :last-child { flex-shrink: 0; }
 
+/* Patch 7.2: Explicit-height modal body. We tried flex:1 + min-height:0
+   (the textbook fix) but it kept failing on long content in this app —
+   suspect the chain of overflow:auto layers in AppShell breaks the
+   parent-bounds resolution flex relies on. This pins the body to a
+   known-good height directly: 90vh from the panel max-height, minus
+   ~145px for header + footer + their padding.
+
+   The radial inset-shadow at the bottom is a visual "more below"
+   indicator — appears when content extends past the visible area. */
+.soc-modal-body {
+  max-height: calc(90vh - 145px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  /* Soft bottom fade indicating scrollable content. */
+  background:
+    linear-gradient(var(--white) 30%, transparent),
+    linear-gradient(transparent, var(--white) 70%) 0 100%,
+    radial-gradient(50% 8px at 50% 0, rgba(0,0,0,0.08), transparent),
+    radial-gradient(50% 8px at 50% 100%, rgba(0,0,0,0.08), transparent) 0 100%;
+  background-repeat: no-repeat;
+  background-size: 100% 20px, 100% 20px, 100% 8px, 100% 8px;
+  background-attachment: local, local, scroll, scroll;
+}
+/* Thicker, always-visible scrollbar on the modal body so users actually
+   notice they can scroll. Overrides the global 6px ::-webkit-scrollbar. */
+.soc-modal-body::-webkit-scrollbar {
+  width: 10px;
+}
+.soc-modal-body::-webkit-scrollbar-track {
+  background: var(--paper);
+  border-radius: 5px;
+}
+.soc-modal-body::-webkit-scrollbar-thumb {
+  background: var(--ink-300);
+  border-radius: 5px;
+  border: 2px solid var(--paper);
+}
+.soc-modal-body::-webkit-scrollbar-thumb:hover {
+  background: var(--ink-400);
+}
+/* Firefox */
+.soc-modal-body {
+  scrollbar-width: thin;
+  scrollbar-color: var(--ink-300) var(--paper);
+}
+
 @media (max-width: 1024px) and (min-width: 641px) {
   .soc-stat-grid { grid-template-columns: repeat(4, 1fr); }
 }
@@ -178,6 +224,9 @@ tbody tr:hover td { background: var(--paper); }
      browsers that don't support dvh (pre-2022). */
   .soc-modal-panel { width: 100% !important; max-width: 100% !important; max-height: 100vh !important; height: 100vh; border-radius: 0 !important; }
   .soc-modal-panel { max-height: 100dvh !important; height: 100dvh; }
+  /* Patch 7.2: on mobile the panel is full-viewport so body gets nearly
+     all of it. Header is ~58px (smaller padding on touch), footer ~56px. */
+  .soc-modal-body { max-height: calc(100dvh - 130px) !important; }
 }
 
 /* ============================================================
