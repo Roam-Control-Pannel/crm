@@ -130,6 +130,31 @@ const TASK_TOOLS = [
   },
 ];
 
+const BRAIN_TOOLS = [
+  {
+    name: 'save_to_brain',
+    description:
+      'Save a piece of text to the user\'s Brain knowledge base. Use proactively when the user shares ' +
+      'something durable and worth remembering: partnership names, contact details, decisions, key ' +
+      'numbers, agreed strategies, or anything the user says "remember this" / "save this" / "keep ' +
+      'this in mind" about. Do NOT save trivial conversational filler or things that are obvious from ' +
+      'context. Always include 2-5 short tags so the item is searchable later.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        content: { type: 'string', description: 'The text to save. Usually 1-3 sentences. Quote the user\'s own words when possible.' },
+        description: { type: 'string', description: 'One-line summary, max 140 chars. Shown as the Brain card title.' },
+        tags: {
+          type: 'array',
+          items: { type: 'string' },
+          description: '2-5 short lowercase kebab-case tags (e.g. "dun-laoghaire", "partnership", "contact-info")',
+        },
+      },
+      required: ['content', 'description', 'tags'],
+    },
+  },
+];
+
 // =================================================================
 // Confirmation registry — flip flags here to change UX without touching
 // any other file. requiresConfirm: true => client renders the warning card
@@ -142,6 +167,8 @@ export const REQUIRES_CONFIRM: Record<string, boolean> = {
   complete_task: false,  // toggleable
   update_task: true,     // edits feel destructive — confirm
   delete_task: true,     // definitely confirm
+  // Brain
+  save_to_brain: true,   // user should see what's being saved before it lands
 };
 
 // =================================================================
@@ -150,6 +177,7 @@ export const REQUIRES_CONFIRM: Record<string, boolean> = {
 // =================================================================
 const TOOLSETS: Record<string, any[]> = {
   tasks: TASK_TOOLS,
+  brain: BRAIN_TOOLS,
 };
 
 export function getToolSchemas(toolsets: string[]): any[] {
@@ -268,6 +296,33 @@ export async function executeTool(name: string, input: any): Promise<any> {
       if (next.length === before) return { ok: false, error: `No task with id ${input.id}` };
       await saveTasks(next);
       return { ok: true, deletedId: input.id };
+    }
+
+    case 'save_to_brain': {
+      // Server-side save: hit our own JSON endpoint. We could call the
+      // brain storage helpers directly, but going through the API keeps
+      // one path for "save text to Brain" (works the same whether the
+      // user clicked a bookmark or Roam-io decided to save).
+      const baseUrl = process.env.URL || process.env.DEPLOY_PRIME_URL || 'http://localhost:3000';
+      const res = await fetch(`${baseUrl}/api/brain/items`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content: input.content,
+          tags: input.tags,
+          description: input.description,
+          source: 'roam-io-chat',
+          autoFolder: true,
+        }),
+      });
+      const data = await res.json();
+      if (!data.ok) return { ok: false, error: data.error || 'Save failed' };
+      return {
+        ok: true,
+        savedTo: data.item?.folderId ? 'Brain' : 'Brain (root)',
+        description: data.item?.description,
+        tags: data.item?.tags,
+      };
     }
 
     default:

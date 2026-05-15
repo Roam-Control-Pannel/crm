@@ -1,6 +1,7 @@
 'use client';
 import {useState,useEffect,useRef} from 'react';
-import {Plus,Send,Sparkles,X,Check,AlertTriangle,MessageSquare,Brain,Paperclip,Trash2,FileText} from 'lucide-react';
+import {Plus,Send,Sparkles,X,Check,AlertTriangle,MessageSquare,Brain,Paperclip,Trash2,FileText,Bookmark,BookmarkCheck} from 'lucide-react';
+import {saveTextToBrain} from '@/lib/brain';
 import {loadWithMigration, saveRemote} from '@/lib/client-store';
 
 interface Message {
@@ -18,6 +19,9 @@ interface Message {
   executedTools?:{name:string;input:any}[];
   confirmed?:boolean;
   cancelled?:boolean;
+  // Set true once this message has been saved to Brain via the bookmark.
+  // Persisted so the bookmark stays "saved" across reloads.
+  savedToBrain?:boolean;
 }
 
 interface Chat {
@@ -82,7 +86,9 @@ Today's date is ${today}. When the user says "today", "tomorrow", "Friday" etc.,
 
 You have access to TOOLS for managing the user's task list (create_task, list_tasks, complete_task, update_task, delete_task). Use them whenever the user asks to add a task, see what's on their list, mark something done, or change/remove a task. Don't ask the user to do these things manually — call the tool.
 
-You also have read-only context about: contacts in Brevo CRM, Google Places for finding businesses, social media channels, and city page data (known_for, history, local_tip). For now, only the task tools execute live — everything else is conversational.
+You also have a save_to_brain tool. Use it proactively when the user shares something durable and worth remembering: partnership names, contact details, decisions made, agreed strategies, key numbers, or anything they say "remember this" / "save this" about. Do NOT save trivial filler or chit-chat — when in doubt, don't save. Always include 2-5 short tags. The user will see a confirm card before anything is saved.
+
+You also have read-only context about: contacts in Brevo CRM, Google Places for finding businesses, social media channels, and city page data (known_for, history, local_tip). For now, only the task and brain tools execute live — everything else is conversational.
 
 RULES:
 1. Be specific with numbers and data
@@ -96,7 +102,7 @@ RULES:
     const body:any={
       systemPrompt:system+(docCtx?"\n\nKNOWLEDGE BASE:\n"+docCtx:""),
       messages:messages.map(m=>({role:m.role,content:m.content})),
-      tools:['tasks'],
+      tools:['tasks','brain'],
     };
     if(pendingConfirm)body.pendingConfirm=pendingConfirm;
     const res=await fetch('/api/ai/chat',{
@@ -141,9 +147,69 @@ export default function HubPage(){
   const [showDocs,setShowDocs]=useState(false);
   const [docs,setDocs]=useState<RoamDoc[]>([]);
   const [chatsLoaded,setChatsLoaded]=useState(false);
+  const [savingMsgId,setSavingMsgId]=useState<string|null>(null);
+  const [savingChat,setSavingChat]=useState(false);
+  const [toast,setToast]=useState<string|null>(null);
   const fileInputRef=useRef<HTMLInputElement>(null);
   const messagesEndRef=useRef<HTMLDivElement>(null);
   const inputRef=useRef<HTMLTextAreaElement>(null);
+
+  // Lightweight toast — auto-dismisses after 2.4s.
+  function showToast(text:string){
+    setToast(text);
+    setTimeout(()=>setToast(null),2400);
+  }
+
+  // Per-message save: bundle ±2 turns of context around the target message.
+  async function saveMessageToBrain(msg:Message){
+    if(!activeChat||savingMsgId)return;
+    setSavingMsgId(msg.id);
+    try{
+      const idx=activeChat.messages.findIndex(m=>m.id===msg.id);
+      const before=activeChat.messages.slice(Math.max(0,idx-2),idx)
+        .map(m=>`${m.role==='user'?'You':'Roam-io'}: ${m.content}`).join('\n\n');
+      const after=activeChat.messages.slice(idx+1,idx+3)
+        .map(m=>`${m.role==='user'?'You':'Roam-io'}: ${m.content}`).join('\n\n');
+      const body=`${msg.role==='user'?'You':'Roam-io'}: ${msg.content}`;
+      await saveTextToBrain({
+        content:body,
+        contextBefore:before||undefined,
+        contextAfter:after||undefined,
+        description:msg.content.split('\n')[0].slice(0,140),
+        tags:['roam-io-chat',activeChat.title.toLowerCase().replace(/[^a-z0-9]+/g,'-').slice(0,40)].filter(Boolean),
+        source:'roam-io-chat',
+      });
+      // Mark this message as saved so the bookmark icon flips state.
+      updateChat(activeChat.id,activeChat.messages.map(m=>m.id===msg.id?{...m,savedToBrain:true}:m));
+      showToast('Saved to Brain');
+    }catch(e:any){
+      showToast('Save failed: '+(e?.message||'unknown error'));
+    }finally{
+      setSavingMsgId(null);
+    }
+  }
+
+  // Full-chat save: one Brain item containing the whole transcript.
+  async function saveWholeChatToBrain(){
+    if(!activeChat||savingChat||activeChat.messages.length===0)return;
+    setSavingChat(true);
+    try{
+      const transcript=activeChat.messages
+        .map(m=>`${m.role==='user'?'You':'Roam-io'}: ${m.content}`)
+        .join('\n\n');
+      await saveTextToBrain({
+        content:transcript,
+        description:`Conversation: ${activeChat.title}`,
+        tags:['roam-io-chat','conversation',activeChat.title.toLowerCase().replace(/[^a-z0-9]+/g,'-').slice(0,40)].filter(Boolean),
+        source:'roam-io-chat',
+      });
+      showToast('Conversation saved to Brain');
+    }catch(e:any){
+      showToast('Save failed: '+(e?.message||'unknown error'));
+    }finally{
+      setSavingChat(false);
+    }
+  }
 
   useEffect(()=>{
     let cancelled=false;
@@ -448,12 +514,36 @@ export default function HubPage(){
           </div>
         ):(
           <div style={{flex:1,overflowY:'auto',padding:'16px',display:'flex',flexDirection:'column',gap:14}}>
+            {activeChat.messages.length>0&&(
+              <div style={{display:'flex',justifyContent:'flex-end',marginBottom:-6}}>
+                <button
+                  onClick={saveWholeChatToBrain}
+                  disabled={savingChat}
+                  title="Save the whole conversation to Brain"
+                  style={{display:'inline-flex',alignItems:'center',gap:5,fontSize:11,padding:'5px 10px',borderRadius:'var(--r-pill)',border:'1px solid var(--ink-200)',background:'var(--white)',cursor:savingChat?'default':'pointer',color:'var(--ink-600)',fontFamily:'inherit',opacity:savingChat?0.5:1}}
+                >
+                  {savingChat?<>Saving conversation…</>:<><Bookmark size={11}/> Save conversation</>}
+                </button>
+              </div>
+            )}
             {activeChat.messages.map(m=>(
               <div key={m.id} style={{display:'flex',flexDirection:m.role==='user'?'row-reverse':'row',gap:10,alignItems:'flex-start'}}>
                 {m.role==='assistant'&&<div style={{width:26,height:26,borderRadius:'50%',background:'var(--maroon-50)',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,marginTop:2,fontSize:12}}>🦁</div>}
                 <div style={{maxWidth:'85%'}}>
                   <div style={{fontSize:10,color:'var(--ink-400)',marginBottom:4,textAlign:m.role==='user'?'right':'left'}}>{m.role==='user'?'You':'Roam-io'} · {new Date(m.timestamp).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}</div>
                   <div style={{background:m.role==='user'?'var(--maroon-50)':'var(--paper)',borderRadius:m.role==='user'?'var(--r-lg) 0 var(--r-lg) var(--r-lg)':'0 var(--r-lg) var(--r-lg) var(--r-lg)',padding:'11px 14px',fontSize:13,color:'var(--ink-900)',lineHeight:1.7,whiteSpace:'pre-wrap'}}>{m.content}</div>
+                  {m.content&&!m.pendingTool&&(
+                    <div style={{marginTop:4,display:'flex',justifyContent:m.role==='user'?'flex-end':'flex-start'}}>
+                      <button
+                        onClick={()=>saveMessageToBrain(m)}
+                        disabled={savingMsgId===m.id||m.savedToBrain}
+                        title={m.savedToBrain?'Saved to Brain':'Save to Brain'}
+                        style={{background:'none',border:'none',padding:'4px 6px',cursor:m.savedToBrain?'default':'pointer',display:'flex',alignItems:'center',gap:4,fontSize:10,color:m.savedToBrain?'var(--ok)':'var(--ink-400)',borderRadius:'var(--r-xs)',fontFamily:'inherit',opacity:savingMsgId===m.id?0.5:1}}
+                      >
+                        {m.savedToBrain?<><BookmarkCheck size={11}/> Saved</>:savingMsgId===m.id?<>Saving…</>:<><Bookmark size={11}/> Save to Brain</>}
+                      </button>
+                    </div>
+                  )}
                   {m.confirmAction&&!m.confirmed&&!m.cancelled&&(
                     <div style={{marginTop:10,background:'var(--white)',border:'1.5px solid var(--warn)',borderRadius:'var(--r-md)',padding:'12px 14px'}}>
                       <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:6}}><AlertTriangle size={13} color="var(--warn)"/><span style={{fontSize:12,fontWeight:600,color:'var(--warn)'}}>Confirmation required</span></div>
@@ -524,6 +614,11 @@ export default function HubPage(){
           </div>
         </div>
       </div>
+      {toast&&(
+        <div style={{position:'fixed',bottom:24,left:'50%',transform:'translateX(-50%)',background:'var(--ink-900)',color:'white',padding:'10px 18px',borderRadius:'var(--r-pill)',fontSize:12,fontWeight:500,boxShadow:'var(--shadow-lg)',zIndex:1000,display:'flex',alignItems:'center',gap:8}}>
+          <Check size={13}/>{toast}
+        </div>
+      )}
     </div>
   );
 }
