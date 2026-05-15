@@ -5,6 +5,7 @@ import { Brief, fetchBriefs } from '@/lib/briefs';
 import { GOAL_OPTIONS, getGoalLabel } from '@/lib/goals';
 import { SocialAccount, fetchRealAccounts, combineAccounts, fetchAccountMeta } from '@/lib/social-accounts';
 import { loadWithMigration, saveRemote } from '@/lib/client-store';
+import { buildUnsplashCredit } from '@/lib/unsplash-credit';
 import BrainPicker from '@/components/BrainPicker';
 import type { BrainItem } from '@/lib/brain';
 // SOCIAL-NOTIFS-V1: persistent notifications for the bell + dashboard.
@@ -240,34 +241,6 @@ export default function SocialPage() {
       setUnsplash(d.images || []);
     } catch { setUnsplash([]); }
     finally { setSearchingImgs(false); }
-  }
-
-  /**
-   * Build the credit suffix that gets appended to the caption when a post
-   * with an Unsplash photo is published. Required by Unsplash compliance
-   * for social re-posts: photographer name + Unsplash mention in the
-   * actual post text (not just the CRM UI).
-   *
-   * Platform-aware: Instagram/Twitter prefer @-tagged handles when
-   * available; LinkedIn/Facebook get a plain text credit with the photo
-   * URL since they don't recognise Unsplash usernames as @-mentions.
-   *
-   * Returns an empty string when the post is from Brain / own upload
-   * (no Unsplash attribution present) — those are non-Unsplash images
-   * and don't need crediting.
-   */
-  function buildUnsplashCredit(post: { imageCredit?: string; imageCreditUrl?: string; imagePhotoUrl?: string; imageSocialHandles?: { instagram?: string|null; twitter?: string|null; unsplash?: string|null } }, platform: string): string {
-    if (!post.imageCredit || !post.imageCreditUrl) return '';
-    const handles = post.imageSocialHandles || {};
-    if (platform === 'instagram' && handles.instagram) {
-      return `\n\n📸 by @${handles.instagram} via Unsplash`;
-    }
-    if (platform === 'twitter' && handles.twitter) {
-      return `\n\n📸 by @${handles.twitter} via Unsplash`;
-    }
-    // LinkedIn / Facebook / fallback — plain text with the photo link so
-    // it remains attributable even though we can't tag the photographer.
-    return `\n\n📸 Photo by ${post.imageCredit} on Unsplash: ${post.imagePhotoUrl || post.imageCreditUrl}`;
   }
 
   /**
