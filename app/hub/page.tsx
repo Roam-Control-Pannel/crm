@@ -278,9 +278,18 @@ export default function HubPage(){
       if(lastId){
         setChats(prev=>prev.map(c=>c.id===targetChat.id?{...c,lastExtractedMessageId:lastId,lastExtractedAt:new Date().toISOString()}:c));
       }
+      const duplicates=typeof data.duplicates==='number'?data.duplicates:0;
       if(saved.length>0){
         setMemories(prev=>[...saved,...prev]);
-        showToast(`${saved.length} fact${saved.length===1?'':'s'} saved to memory`);
+        if(duplicates>0){
+          showToast(`${saved.length} new, ${duplicates} duplicate${duplicates===1?'':'s'} skipped`);
+        }else{
+          showToast(`${saved.length} fact${saved.length===1?'':'s'} saved to memory`);
+        }
+      }else if(duplicates>0){
+        // Nothing new but Claude did find facts — all were duplicates of
+        // existing memories. Worth a quiet toast so you know dedupe is working.
+        showToast(`${duplicates} duplicate${duplicates===1?'':'s'} skipped`);
       }
     }catch(e){
       console.error('memory extraction error',e);
