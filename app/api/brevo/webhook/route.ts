@@ -34,6 +34,28 @@ export const runtime = 'nodejs';
 
 const BREVO_BASE = 'https://api.brevo.com/v3';
 
+// Truncate the local part of an email for logging so we keep enough
+// information to correlate events without writing full PII into logs.
+function redactEmail(email: string): string {
+  const at = email.indexOf('@');
+  if (at < 1) return '***';
+  const local = email.slice(0, at);
+  const domain = email.slice(at);
+  return `${local.slice(0, 2)}***${domain}`;
+}
+
+// Attribute names we deliberately exclude from logs. The set is small —
+// most CRM attributes are operational metadata (timestamps, counters,
+// status enums) and useful in error context; phone/email/name aren't.
+const SENSITIVE_ATTR_KEYS = new Set(['EMAIL', 'FIRSTNAME', 'LASTNAME', 'PHONE', 'SMS']);
+function redactAttrs(attrs: Record<string, any>): string {
+  const safe: Record<string, any> = {};
+  for (const [k, v] of Object.entries(attrs)) {
+    safe[k] = SENSITIVE_ATTR_KEYS.has(k.toUpperCase()) ? '***' : v;
+  }
+  return JSON.stringify(safe);
+}
+
 async function getContactAttrs(email: string): Promise<Record<string, any> | null> {
   try {
     const res = await fetch(`${BREVO_BASE}/contacts/${encodeURIComponent(email)}`, {
@@ -41,13 +63,13 @@ async function getContactAttrs(email: string): Promise<Record<string, any> | nul
     });
     if (!res.ok) {
       const body = await res.text();
-      console.error(`[webhook] getContactAttrs ${res.status} for ${email}: ${body.slice(0, 200)}`);
+      console.error(`[webhook] getContactAttrs ${res.status} for ${redactEmail(email)}: ${body.slice(0, 200)}`);
       return null;
     }
     const data = await res.json();
     return data?.attributes || {};
   } catch (err: any) {
-    console.error(`[webhook] getContactAttrs threw for ${email}:`, err?.message);
+    console.error(`[webhook] getContactAttrs threw for ${redactEmail(email)}:`, err?.message);
     return null;
   }
 }
@@ -64,28 +86,18 @@ async function updateContact(email: string, attributes: Record<string, any>): Pr
     });
     if (!res.ok) {
       const body = await res.text();
-      console.error(`[webhook] updateContact ${res.status} for ${email} attrs=${JSON.stringify(attributes)}: ${body.slice(0, 200)}`);
+      console.error(`[webhook] updateContact ${res.status} for ${redactEmail(email)} attrs=${redactAttrs(attributes)}: ${body.slice(0, 200)}`);
       return false;
     }
-    console.log(`[webhook] updateContact OK for ${email} attrs=${JSON.stringify(attributes)}`);
+    console.log(`[webhook] updateContact OK for ${redactEmail(email)} attrs=${redactAttrs(attributes)}`);
     return true;
   } catch (err: any) {
-    console.error(`[webhook] updateContact threw for ${email}:`, err?.message);
+    console.error(`[webhook] updateContact threw for ${redactEmail(email)}:`, err?.message);
     return false;
   }
 }
 
 function nowIso() { return new Date().toISOString(); }
-
-// Truncate the local part of an email for logging so we keep enough
-// information to correlate events without writing full PII into logs.
-function redactEmail(email: string): string {
-  const at = email.indexOf('@');
-  if (at < 1) return '***';
-  const local = email.slice(0, at);
-  const domain = email.slice(at);
-  return `${local.slice(0, 2)}***${domain}`;
-}
 
 export async function POST(req: NextRequest) {
   let payload: any;

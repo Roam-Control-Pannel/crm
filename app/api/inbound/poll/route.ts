@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { fetchPendingReplies, markProcessed } from '@/lib/imap';
 import { addNotification } from '@/lib/notifications';
 import { storeReply } from '@/lib/replies';
+import { safeEqual } from '@/lib/safe-equal';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -34,10 +35,10 @@ interface BrevoContact {
 function authorize(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET_V2;
   if (!secret) return false;
-  const auth = req.headers.get('authorization');
-  if (auth === `Bearer ${secret}`) return true;
-  const { searchParams } = new URL(req.url);
-  if (searchParams.get('secret') === secret) return true;
+  const auth = req.headers.get('authorization') || '';
+  if (auth.startsWith('Bearer ') && safeEqual(auth.slice(7), secret)) return true;
+  const provided = new URL(req.url).searchParams.get('secret');
+  if (provided && safeEqual(provided, secret)) return true;
   return false;
 }
 
