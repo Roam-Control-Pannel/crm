@@ -348,18 +348,36 @@ export default function AccountsPage() {
         </div>
       )}
 
-      {/* Edit modal. The body uses .soc-modal-body (globals.css) which pins
-          height to calc(90vh - 145px) explicitly — earlier attempts with
-          flex:1 + min-height:0 silently failed in this app, see the comment
-          at .soc-modal-body in globals.css for the history. The class also
-          provides the scroll-fade visual + visible scrollbar styling. */}
+      {/* Edit modal.
+          History: 8+ prior attempts to make this scroll using flex layout
+          (flex:1, flex:1 1 0, flex:0 1 auto + min-height:0, max-height calc,
+          .soc-modal-body class, absolute positioning) all failed in one
+          way or another. Root cause: flex items default to min-height:auto
+          (= content size), preventing the body from shrinking enough for
+          overflow-y to engage. The composer modal works by accident — its
+          content is short enough to never trigger the bug.
+
+          The real fix is CSS grid with `minmax(0, 1fr)` on the middle row.
+          Grid has unambiguous row-sizing semantics; `minmax(0, ...)` is the
+          grid equivalent of `min-height: 0` and lets the row shrink so
+          overflow-y on the body engages reliably. We override the
+          .soc-modal-panel class's `display: flex` inline so we keep the
+          panel's max-height, background, border-radius, and shadow but
+          switch the layout mechanism entirely. */}
       {editing && (
         <div
           className="soc-modal-overlay"
           style={{ zIndex: 500 }}
           onClick={e => { if (e.target === e.currentTarget) setEditing(null); }}
         >
-          <div className="soc-modal-panel" style={{ width: 540 }}>
+          <div
+            className="soc-modal-panel"
+            style={{
+              width: 540,
+              display: 'grid',
+              gridTemplateRows: 'auto minmax(0, 1fr) auto',
+            }}
+          >
             <div
               style={{
                 padding: '18px 22px 14px',
@@ -384,12 +402,13 @@ export default function AccountsPage() {
             </div>
 
             <div
-              className="soc-modal-body"
               style={{
                 padding: '18px 22px',
                 display: 'flex',
                 flexDirection: 'column',
                 gap: 16,
+                overflowY: 'auto',
+                overflowX: 'hidden',
               }}
             >
               {/* MULTI-BRIEF-V1: checkbox multi-select for briefs */}
@@ -549,7 +568,6 @@ export default function AccountsPage() {
                 display: 'flex',
                 gap: 8,
                 justifyContent: 'flex-end',
-                flexShrink: 0,
               }}
             >
               <button type="button" onClick={() => setEditing(null)} style={btnG}>Cancel</button>
