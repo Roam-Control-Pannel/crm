@@ -274,7 +274,21 @@ export async function publishToAccount(rawInput: PublishInput): Promise<PublishR
       );
       const container = await containerRes.json();
       if (!container.id) {
-        return fail(input, 'Container creation failed', 400, container);
+        // INSTAGRAM-CONTAINER-ERROR-V1
+        // Surface Meta's actual error message rather than the generic
+        // 'Container creation failed' so we can tell which class of
+        // problem we're hitting (image URL unreachable, scope missing,
+        // dimensions invalid, etc.). Meta's standard error shape is
+        // { error: { message, type, code, fbtrace_id } }. We also log
+        // the full response server-side as a paper trail.
+        console.error('[social-publish] IG container creation failed:', JSON.stringify(container));
+        const metaMsg = container?.error?.message;
+        const metaCode = container?.error?.code;
+        const metaSub = container?.error?.error_subcode;
+        const detail = metaMsg
+          ? `Instagram: ${metaMsg}` + (metaCode ? ` (code ${metaCode}${metaSub ? '/' + metaSub : ''})` : '')
+          : 'Container creation failed';
+        return fail(input, detail, 502, container);
       }
 
       const publishRes = await fetch(
