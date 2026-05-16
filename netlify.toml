@@ -9,13 +9,36 @@
 [[plugins]]
   package = "@netlify/plugin-nextjs"
 
-# Scheduled functions live in netlify/functions/*.mts and declare their own
-# cron schedule via `export const config = { schedule: '...' }`.
+# Scheduled functions in netlify/functions/*.mts each ALSO declare an inline
+# `export const config = { schedule: '...' }`. The duplication is intentional:
+# the inline declaration is the source of truth for developers reading the
+# function file, and the netlify.toml entries below force Netlify's scheduler
+# to actually register the cron. On a Next.js site mediated by
+# @netlify/plugin-nextjs the inline-only style sometimes shows "Scheduled" in
+# the UI without firing — declaring here as well closes that gap.
 
-# CRON-AUTOGEN-V1
-# Daily social calendar auto-generation. Runs at 04:00 UTC (~05:00 BST in
-# summer, 04:00 GMT in winter) to fill drafts before the user wakes up.
-# Adjust schedule below if a different cadence is preferred.
-[[scheduled.functions]]
-  path = "/api/social/auto-generate"
-  schedule = "0 4 * * *"
+# CRON-PUBLISH-V1
+# Every minute, fire any social post whose scheduledAt has arrived. Worst-case
+# delay from scheduledAt to publish is ~60s (Netlify's minimum granularity).
+[functions."social-publish-due"]
+  schedule = "* * * * *"
+
+# CRON-INBOUND-V1
+# Poll the inbound IMAP mailbox for replies every 15 minutes.
+[functions."inbound-poll"]
+  schedule = "*/15 * * * *"
+
+# CRON-SEQUENCES-V1
+# Daily outreach follow-up sequences at 08:00 UTC.
+[functions."sequences-daily"]
+  schedule = "0 8 * * *"
+
+# CRON-AUTOGEN-V1 (TODO)
+# The previous [[scheduled.functions]] entry pointing at /api/social/auto-generate
+# was invalid TOML syntax and Netlify silently ignored it, so auto-generate has
+# never run on a schedule — only via the "Run now" button. To wire it up the
+# same way as social-publish-due, add a thin wrapper at
+# netlify/functions/social-auto-generate.mts that POSTs to
+# /api/social/auto-generate with the x-internal-call secret, then add a
+# matching [functions."social-auto-generate"] entry here. Out of scope for
+# this patch — fix focuses on scheduled publishing only.
