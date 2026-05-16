@@ -348,13 +348,11 @@ export default function AccountsPage() {
         </div>
       )}
 
-      {/* Edit modal. Mirror the New post composer in app/social/page.tsx
-          exactly — that one is a flex column where the body has flex:1 +
-          overflow-y:auto and reliably scrolls. The history of this modal:
-          we tried inline panel overrides (max-height with min(), overflow
-          hidden) and various flex values on the body, all of which broke
-          scroll in one way or another. The lesson: don't override the
-          .soc-modal-panel class at all — let it do its job. */}
+      {/* Edit modal. The body uses .soc-modal-body (globals.css) which pins
+          height to calc(90vh - 145px) explicitly — earlier attempts with
+          flex:1 + min-height:0 silently failed in this app, see the comment
+          at .soc-modal-body in globals.css for the history. The class also
+          provides the scroll-fade visual + visible scrollbar styling. */}
       {editing && (
         <div
           className="soc-modal-overlay"
@@ -386,13 +384,12 @@ export default function AccountsPage() {
             </div>
 
             <div
+              className="soc-modal-body"
               style={{
                 padding: '18px 22px',
                 display: 'flex',
                 flexDirection: 'column',
                 gap: 16,
-                overflowY: 'auto',
-                flex: 1,
               }}
             >
               {/* MULTI-BRIEF-V1: checkbox multi-select for briefs */}
