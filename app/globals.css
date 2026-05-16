@@ -127,13 +127,20 @@ tbody tr:hover td { background: var(--paper); }
    look; these classes layer responsive overrides on top.
    ============================================================ */
 .soc-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
-.soc-header-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.soc-header-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; position: relative; }
+/* MOBILE-CAL-UX-V1 — overflow trigger only appears at ≤640px. Using
+   display:contents on the secondary wrapper here lets its children sit
+   inline with .soc-header-actions on desktop without an extra flex row. */
+.soc-header-overflow { display: none; }
+.soc-header-secondary { display: contents; }
 .soc-stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 16px; }
 .soc-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
 .soc-tabs { display: flex; gap: 2px; background: var(--ink-100); border-radius: var(--r-md); padding: 3px; flex-shrink: 0; }
 .soc-filters { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 .soc-cal-min { min-width: 560px; }
 .soc-cal-cell { min-height: 88px; padding: 5px; }
+.soc-cell-pills { display: block; }
+.soc-cell-dots { display: none; }
 .soc-postrow { padding: 14px 18px; border-bottom: 1px solid var(--ink-100); display: flex; gap: 14px; align-items: flex-start; }
 .soc-postrow-content { flex: 1; min-width: 0; }
 .soc-postrow-actions { display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; }
@@ -154,17 +161,70 @@ tbody tr:hover td { background: var(--paper); }
 
 @media (max-width: 640px) {
   .soc-header { flex-direction: column; align-items: stretch; gap: 10px; margin-bottom: 14px; }
-  .soc-header-actions { width: 100%; gap: 6px; }
-  .soc-header-actions > button,
-  .soc-header-actions > a { flex: 1 1 calc(33.333% - 4px); min-width: 0; min-height: 38px; justify-content: center; font-size: 11px !important; padding: 7px 8px !important; white-space: nowrap; }
+  .soc-header-actions { width: 100%; gap: 8px; flex-wrap: nowrap; align-items: stretch; }
+  /* MOBILE-CAL-UX-V1 — collapse Select/Settings/Fill/Generate into an
+     overflow menu so the header is one row: [⋯] [New post]. Stops the
+     5-button stack from eating ~120px before any calendar appears. */
+  .soc-header-overflow { display: inline-flex !important; width: 44px; flex-shrink: 0; justify-content: center; align-items: center; font-size: 18px !important; line-height: 1; padding: 8px !important; min-height: 40px; }
+  .soc-header-secondary {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    margin-top: 6px;
+    background: var(--white);
+    border: 1px solid var(--ink-100);
+    border-radius: var(--r-md);
+    box-shadow: var(--shadow-md);
+    padding: 6px;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 200px;
+    z-index: 50;
+  }
+  .soc-header-secondary.is-open { display: flex; }
+  .soc-header-secondary > button,
+  .soc-header-secondary > a {
+    width: 100%;
+    justify-content: flex-start !important;
+    flex: none !important;
+    padding: 10px 12px !important;
+    font-size: 13px !important;
+    min-height: 40px;
+  }
+  .soc-header-primary { flex: 1; min-height: 40px; justify-content: center; font-size: 13px !important; }
   .soc-stat-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 12px; }
   .soc-toolbar { gap: 8px; margin-bottom: 12px; }
   .soc-tabs { width: 100%; }
   .soc-tabs > button { flex: 1; justify-content: center; }
   .soc-filters { width: 100%; }
   .soc-filters > select { flex: 1; min-width: 0; }
-  .soc-cal-min { min-width: 480px; }
-  .soc-cal-cell { min-height: 70px !important; padding: 3px !important; }
+  /* MOBILE-CAL-UX-V1 — drop the horizontal scroll. The 7-column grid now
+     fits the viewport; cells show colored dots (one per post) instead of
+     unreadable text pills. Tap a day → DaySheet bottom sheet with full
+     post list. Cell stays tap-target-sized (~52px) even when empty. */
+  .soc-cal-min { min-width: 0; }
+  .soc-cal-cell { min-height: 52px !important; padding: 4px 3px !important; }
+  .soc-cell-pills { display: none; }
+  .soc-cell-dots {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+    align-items: center;
+    margin-top: 2px;
+  }
+  .soc-cell-dots > .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .soc-cell-dots > .more {
+    font-size: 9px;
+    color: var(--ink-400);
+    line-height: 1;
+    font-weight: 600;
+  }
   .soc-postrow { flex-wrap: wrap; padding: 12px 14px; gap: 10px; }
   .soc-postrow-content { flex: 1 1 100%; }
   .soc-postrow-actions { flex-direction: row; flex-wrap: wrap; width: 100%; gap: 6px; }
@@ -178,6 +238,114 @@ tbody tr:hover td { background: var(--paper); }
      browsers that don't support dvh (pre-2022). */
   .soc-modal-panel { width: 100% !important; max-width: 100% !important; max-height: 100vh !important; height: 100vh; border-radius: 0 !important; }
   .soc-modal-panel { max-height: 100dvh !important; height: 100dvh; }
+}
+
+/* MOBILE-CAL-UX-V1 — day-detail bottom sheet. Renders on all viewports
+   (state set by the cell-click handler), but the layout is designed for
+   phones; on desktop we still let it work as a centered modal so a
+   touch laptop or narrow window stays usable. */
+.soc-daysheet-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(26,13,18,0.45);
+  z-index: 650;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  animation: soc-daysheet-fade 140ms ease;
+}
+@keyframes soc-daysheet-fade { from { background: rgba(26,13,18,0); } to { background: rgba(26,13,18,0.45); } }
+.soc-daysheet {
+  background: var(--white);
+  width: 100%;
+  max-width: 520px;
+  max-height: 85vh;
+  max-height: 85dvh;
+  border-radius: var(--r-xl) var(--r-xl) 0 0;
+  display: flex;
+  flex-direction: column;
+  box-shadow: var(--shadow-lg);
+  animation: soc-daysheet-up 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@keyframes soc-daysheet-up { from { transform: translateY(100%); } to { transform: translateY(0); } }
+.soc-daysheet-grab {
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--ink-200);
+  margin: 8px auto 4px;
+  flex-shrink: 0;
+}
+.soc-daysheet-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 18px 14px;
+  border-bottom: 1px solid var(--ink-100);
+  flex-shrink: 0;
+}
+.soc-daysheet-close {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--ink-500);
+  padding: 8px;
+  border-radius: var(--r-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  min-height: 40px;
+}
+.soc-daysheet-close:hover { background: var(--paper); color: var(--ink-900); }
+.soc-daysheet-body {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 6px 0;
+}
+.soc-daysheet-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 18px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--ink-100);
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+}
+.soc-daysheet-row:last-child { border-bottom: none; }
+.soc-daysheet-row:active { background: var(--paper); }
+.soc-daysheet-row-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.soc-daysheet-row-body { flex: 1; min-width: 0; }
+.soc-daysheet-row-thumb {
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: var(--r-sm);
+  flex-shrink: 0;
+}
+.soc-daysheet-footer {
+  padding: 12px 18px calc(12px + env(safe-area-inset-bottom, 0));
+  border-top: 1px solid var(--ink-100);
+  flex-shrink: 0;
+}
+.soc-daysheet-add {
+  width: 100%;
+  justify-content: center;
+  min-height: 44px;
+  font-size: 13px !important;
 }
 
 /* ============================================================

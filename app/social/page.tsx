@@ -203,6 +203,34 @@ export default function SocialPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
 
+  // MOBILE-CAL-UX-V1 — viewport-aware behavior switch for the calendar grid.
+  // The phone layout swaps post pills for colored dots and opens a day-detail
+  // bottom sheet on cell tap (instead of jumping straight to the composer),
+  // so users can actually read what's scheduled before editing.
+  const [isMobile, setIsMobile] = useState(false);
+  const [daySheet, setDaySheet] = useState<{ y: number; m: number; d: number } | null>(null);
+  const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return;
+    const mq = window.matchMedia('(max-width: 640px)');
+    const sync = () => setIsMobile(mq.matches);
+    sync();
+    mq.addEventListener('change', sync);
+    return () => mq.removeEventListener('change', sync);
+  }, []);
+
+  // Click-outside to close the mobile header overflow menu.
+  useEffect(() => {
+    if (!headerMenuOpen) return;
+    const close = (e: MouseEvent) => {
+      const t = e.target as HTMLElement;
+      if (!t.closest('.soc-header-actions')) setHeaderMenuOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [headerMenuOpen]);
+
   function addNotification(n: Omit<Notification, 'id' | 'ts'>) {
     const note: Notification = { ...n, id: 't' + Date.now() + Math.random(), ts: Date.now() };
     setNotifications(ns => [note, ...ns].slice(0, 5));
@@ -348,7 +376,7 @@ export default function SocialPage() {
     });
   }
 
-  function openComposer(p?: SocialPost) {
+  function openComposer(p?: SocialPost, opts?: { defaultDate?: string }) {
     if (p) {
       const d = new Date(p.scheduledAt);
       setEditPost(p);
@@ -373,7 +401,10 @@ export default function SocialPage() {
         briefId: '', accountIds: [], caption: '', town: '',
         imageUrl: '', imageCredit: '',
         imageCreditUrl: '', imagePhotoUrl: '', imageUnsplashUrl: '', imageSocialHandles: {},
-        scheduledDate: today.toISOString().split('T')[0],
+        // opts.defaultDate lets cell-click prefills survive — calling
+        // openComposer() unconditionally reset form, so the caller's
+        // setForm({scheduledDate}) was wiped a tick later.
+        scheduledDate: opts?.defaultDate || today.toISOString().split('T')[0],
         scheduledTime: '10:00',
         status: 'draft',
       });
@@ -999,39 +1030,53 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
           <p style={{ fontSize: 12, color: 'var(--ink-400)', marginTop: 5, fontWeight: 500 }}>{scheduled.length} scheduled · {drafts.length} drafts · {published.length} published · {activeAccountCount} accounts</p>
         </div>
         <div className="soc-header-actions">
-          {/* BULK-SELECT-V1 — select toggle button */}
+          {/* MOBILE-CAL-UX-V1 — overflow trigger; hidden on desktop via CSS. */}
           <button
-            onClick={() => { setSelectMode(m => !m); setSelectedIds(new Set()); }}
-            style={{ ...(selectMode ? btnP : btnG) }}
-            title={selectMode ? 'Exit selection mode' : 'Select multiple posts'}
-          >
-            <Check size={13} /> {selectMode ? 'Done' : 'Select'}
-          </button>
-          {/* SOCIAL-SETTINGS-LINK-V1 */}
-          <a href="/social/settings" style={{ ...btnG, textDecoration: 'none' }} title="Posting times & themes"><Settings size={13} /> Settings</a>
-          <button style={btnG} onClick={async () => {
-            if (fillingCalendar) return;
-            setFillingCalendar(true);
-            try {
-              const res = await fetch('/api/social/auto-generate/run-now', { method: 'POST' });
-              const data = await res.json();
-              if (data.ok) {
-                alert(`Created ${data.createdCount} draft${data.createdCount === 1 ? '' : 's'} (skipped ${data.skippedCount}).`);
-                // Refresh posts list
-                const fresh = await loadWithMigration<SocialPost[]>('social_posts');
-                if (fresh) setPosts(fresh);
-              } else {
-                alert('Fill calendar failed: ' + (data.error || 'unknown error'));
+            className="soc-header-overflow"
+            style={btnG}
+            aria-label="More actions"
+            aria-expanded={headerMenuOpen}
+            onClick={() => setHeaderMenuOpen(o => !o)}
+          >⋯</button>
+          {/* MOBILE-CAL-UX-V1 — secondary actions: on desktop these display
+              inline via display:contents; on mobile they collapse into the
+              overflow dropdown panel and only show when .is-open is set. */}
+          <div className={`soc-header-secondary${headerMenuOpen ? ' is-open' : ''}`}>
+            {/* BULK-SELECT-V1 — select toggle button */}
+            <button
+              onClick={() => { setSelectMode(m => !m); setSelectedIds(new Set()); setHeaderMenuOpen(false); }}
+              style={{ ...(selectMode ? btnP : btnG) }}
+              title={selectMode ? 'Exit selection mode' : 'Select multiple posts'}
+            >
+              <Check size={13} /> {selectMode ? 'Done' : 'Select'}
+            </button>
+            {/* SOCIAL-SETTINGS-LINK-V1 */}
+            <a href="/social/settings" style={{ ...btnG, textDecoration: 'none' }} title="Posting times & themes" onClick={() => setHeaderMenuOpen(false)}><Settings size={13} /> Settings</a>
+            <button style={btnG} onClick={async () => {
+              setHeaderMenuOpen(false);
+              if (fillingCalendar) return;
+              setFillingCalendar(true);
+              try {
+                const res = await fetch('/api/social/auto-generate/run-now', { method: 'POST' });
+                const data = await res.json();
+                if (data.ok) {
+                  alert(`Created ${data.createdCount} draft${data.createdCount === 1 ? '' : 's'} (skipped ${data.skippedCount}).`);
+                  // Refresh posts list
+                  const fresh = await loadWithMigration<SocialPost[]>('social_posts');
+                  if (fresh) setPosts(fresh);
+                } else {
+                  alert('Fill calendar failed: ' + (data.error || 'unknown error'));
+                }
+              } catch (err: any) {
+                alert('Fill calendar failed: ' + (err?.message || err));
+              } finally {
+                setFillingCalendar(false);
               }
-            } catch (err: any) {
-              alert('Fill calendar failed: ' + (err?.message || err));
-            } finally {
-              setFillingCalendar(false);
-            }
-          }}>{fillingCalendar ? 'Filling...' : 'Fill calendar'}</button>
-          {/* CRON-AUTOGEN-V1 Fill calendar button */}
-          <button style={btnG} onClick={() => setShowGen(true)}><Sparkles size={13} /> Generate</button>
-          <button style={btnP} onClick={() => openComposer()}><Plus size={13} /> New post</button>
+            }}>{fillingCalendar ? 'Filling...' : 'Fill calendar'}</button>
+            {/* CRON-AUTOGEN-V1 Fill calendar button */}
+            <button style={btnG} onClick={() => { setShowGen(true); setHeaderMenuOpen(false); }}><Sparkles size={13} /> Generate</button>
+          </div>
+          <button className="soc-header-primary" style={btnP} onClick={() => openComposer()}><Plus size={13} /> New post</button>
         </div>
       </div>
 
@@ -1127,12 +1172,39 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
                     cursor: day ? 'pointer' : 'default',
                     transition: 'background 80ms ease',
                   }}
-                  onClick={() => { if (day) { setForm(f => ({ ...f, scheduledDate: calY + '-' + String(calM + 1).padStart(2, '0') + '-' + String(day).padStart(2, '0') })); openComposer(); } }}
+                  onClick={() => {
+                    if (!day) return;
+                    // MOBILE-CAL-UX-V1 — on phones the post pills are
+                    // replaced by dots, so cell-tap opens a day-detail sheet
+                    // listing posts in full (and offering "Add post for this
+                    // day"). On desktop the pills are clickable directly, so
+                    // cell-tap goes straight to composer prefilled with this
+                    // day's date.
+                    if (isMobile) {
+                      setDaySheet({ y: calY, m: calM, d: day });
+                    } else {
+                      const dateStr = calY + '-' + String(calM + 1).padStart(2, '0') + '-' + String(day).padStart(2, '0');
+                      openComposer(undefined, { defaultDate: dateStr });
+                    }
+                  }}
                 >
                   {day && (<>
                     <div style={{ fontSize: 11, fontWeight: isToday ? 700 : 400, color: isToday ? 'var(--maroon-700)' : 'var(--ink-400)', marginBottom: 3 }}>{day}{isToday && <span style={{ marginLeft: 4, fontSize: 9, background: 'var(--maroon-700)', color: 'white', padding: '1px 5px', borderRadius: 'var(--r-pill)' }}>today</span>}</div>
-                    {dp.slice(0, 3).map(p => <PostPill key={p.id} post={p} />)}
-                    {dp.length > 3 && <div style={{ fontSize: 9, color: 'var(--ink-400)' }}>+{dp.length - 3}</div>}
+                    {/* MOBILE-CAL-UX-V1 — pills shown on desktop, dots on mobile.
+                        Both rendered; CSS toggles which is visible. */}
+                    <div className="soc-cell-pills">
+                      {dp.slice(0, 3).map(p => <PostPill key={p.id} post={p} />)}
+                      {dp.length > 3 && <div style={{ fontSize: 9, color: 'var(--ink-400)' }}>+{dp.length - 3}</div>}
+                    </div>
+                    {dp.length > 0 && (
+                      <div className="soc-cell-dots" aria-label={`${dp.length} post${dp.length === 1 ? '' : 's'} scheduled`}>
+                        {dp.slice(0, 4).map(p => {
+                          const acc = accounts.find(a => a.id === p.accountIds[0]);
+                          return <span key={p.id} className="dot" style={{ background: acc?.color || 'var(--ink-300)' }} />;
+                        })}
+                        {dp.length > 4 && <span className="more">+{dp.length - 4}</span>}
+                      </div>
+                    )}
                   </>)}
                 </div>
               );
@@ -1185,6 +1257,80 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
           </>)}
         </div>
       )}
+
+      {/* MOBILE-CAL-UX-V1 — day-detail bottom sheet (mobile cell tap). */}
+      {daySheet && (() => {
+        const { y, m, d } = daySheet;
+        const date = new Date(y, m, d);
+        const dayPosts = filtered
+          .filter(p => {
+            const pd = new Date(p.scheduledAt);
+            return pd.getDate() === d && pd.getMonth() === m && pd.getFullYear() === y;
+          })
+          .sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime());
+        const dateLabel = date.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+        const dateStr = y + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+        return (
+          <div className="soc-daysheet-overlay" onClick={e => { if (e.target === e.currentTarget) setDaySheet(null); }}>
+            <div className="soc-daysheet">
+              <div className="soc-daysheet-grab" />
+              <div className="soc-daysheet-header">
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 10, color: 'var(--ink-400)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600 }}>{dayPosts.length} post{dayPosts.length === 1 ? '' : 's'}</div>
+                  <div style={{ fontFamily: 'var(--font-display)', fontSize: 18, color: 'var(--ink-900)', marginTop: 2 }}>{dateLabel}</div>
+                </div>
+                <button onClick={() => setDaySheet(null)} className="soc-daysheet-close" aria-label="Close"><X size={20} /></button>
+              </div>
+              <div className="soc-daysheet-body">
+                {dayPosts.length === 0 ? (
+                  <div style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--ink-400)' }}>
+                    <Calendar size={28} style={{ margin: '0 auto 10px', display: 'block', opacity: 0.5 }} />
+                    <div style={{ fontSize: 13 }}>No posts scheduled for this day</div>
+                  </div>
+                ) : dayPosts.map(p => {
+                  const accs = p.accountIds.map(id => accounts.find(a => a.id === id)).filter(Boolean) as SocialAccount[];
+                  const primary = accs[0];
+                  const time = new Date(p.scheduledAt).toTimeString().slice(0, 5);
+                  const statusColor = p.status === 'scheduled' ? 'var(--ok)' : (p.status === 'published' || p.status === 'partial') ? 'var(--info)' : p.status === 'failed' ? 'var(--alert)' : 'var(--warn)';
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => { setDaySheet(null); openComposer(p); }}
+                      className="soc-daysheet-row"
+                    >
+                      {primary && (
+                        <div className="soc-daysheet-row-icon" style={{ background: primary.color + '22' }}>
+                          <PlatformIcon platform={primary.platform} size={14} color={primary.color} />
+                        </div>
+                      )}
+                      <div className="soc-daysheet-row-body">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3, flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink-900)' }}>{primary?.handle || 'Unknown'}{accs.length > 1 ? ` +${accs.length - 1}` : ''}</span>
+                          <span style={{ fontSize: 11, color: 'var(--ink-400)' }}>{time}</span>
+                          <span style={{ fontSize: 9, color: statusColor, textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 700, padding: '1px 6px', borderRadius: 'var(--r-pill)', background: 'var(--paper)' }}>{p.status}</span>
+                        </div>
+                        <div style={{ fontSize: 12, color: 'var(--ink-600)', lineHeight: 1.4, display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2, overflow: 'hidden' }}>{p.caption}</div>
+                      </div>
+                      {p.imageUrl && <img src={p.imageUrl} alt="" className="soc-daysheet-row-thumb" />}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="soc-daysheet-footer">
+                <button
+                  className="soc-daysheet-add"
+                  style={btnP}
+                  onClick={() => {
+                    setDaySheet(null);
+                    openComposer(undefined, { defaultDate: dateStr });
+                  }}
+                ><Plus size={14} /> Add post for this day</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* BULK-SELECT-V1 — confirm bulk delete modal */}
       {confirmBulkDelete && (
