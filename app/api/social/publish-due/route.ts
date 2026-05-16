@@ -66,7 +66,7 @@ interface SocialPostStored {
   imageSocialHandles?: { instagram?: string | null; twitter?: string | null; unsplash?: string | null };
   scheduledAt: string;
   status: 'draft' | 'scheduled' | 'publishing' | 'published' | 'partial' | 'failed';
-  results?: Record<string, { status: 'pending' | 'publishing' | 'published' | 'failed'; postId?: string | null; postUrl?: string | null; error?: string }>;
+  results?: Record<string, { status: 'pending' | 'publishing' | 'published' | 'failed'; postId?: string | null; postUrl?: string | null; error?: string; details?: unknown }>;
   publishingStartedAt?: string;
   publishedAt?: string;
   createdAt: string;
@@ -131,7 +131,14 @@ async function handle(req: NextRequest) {
   );
   await saveCollection(DEFAULT_USER_ID, 'social_posts', collection);
 
-  const summary: Array<{ id: string; status: string; accountResults: Array<{ accountId: string; ok: boolean; error?: string }> }> = [];
+  // PUBLISH-DUE-DETAILS-V1: summary type widened to carry imageUrl and
+  // per-account details for diagnostics.
+  const summary: Array<{
+    id: string;
+    status: string;
+    imageUrl?: string;
+    accountResults: Array<{ accountId: string; ok: boolean; error?: string; details?: unknown }>;
+  }> = [];
 
   for (const post of toProcess) {
     const results: SocialPostStored['results'] = {};
@@ -165,7 +172,14 @@ async function handle(req: NextRequest) {
       if (r.ok) {
         results[accountId] = { status: 'published', postId: r.postId ?? undefined, postUrl: r.postUrl ?? undefined };
       } else {
-        results[accountId] = { status: 'failed', error: r.error || 'Publish failed' };
+        // PUBLISH-DUE-DETAILS-V1
+        // Stash the upstream details object alongside the bare error
+        // message so the social UI (and the 🐛 debug button) can show
+        // the full Meta error including subcode, error_user_msg, and
+        // fbtrace_id. SocialPostStored.results doesn't declare a
+        // `details` field, but storing it as an extra key is forward-
+        // compatible — clients that don't know about it will ignore it.
+        results[accountId] = { status: 'failed', error: r.error || 'Publish failed', details: r.details } as any;
       }
     }
 
@@ -186,10 +200,17 @@ async function handle(req: NextRequest) {
     summary.push({
       id: post.id,
       status: finalStatus,
+      // PUBLISH-DUE-DETAILS-V1: surface enough context to diagnose
+      // failures without needing function logs. imageUrl is the exact
+      // URL the route handed to publishToAccount(); details is whatever
+      // the platform handler returned alongside the failure (for Meta,
+      // the full error object including error_user_msg and subcode).
+      imageUrl: post.imageUrl,
       accountResults: Object.entries(results).map(([accountId, r]) => ({
         accountId,
         ok: r.status === 'published',
         error: r.error,
+        details: (r as any).details,
       })),
     });
   }
