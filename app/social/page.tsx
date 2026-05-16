@@ -266,6 +266,13 @@ export default function SocialPage() {
   // server but the social page only loads on mount, so without polling the
   // user has to manually refresh to see the result. Effect tears itself down
   // when there's nothing pending, so it costs nothing on idle pages.
+  //
+  // PUBLISH-NOTIFS-V2: also fire bell notifications on transitions from
+  // in-flight (scheduled/publishing) to terminal (published/partial/failed)
+  // so cron-driven successes and failures surface in the notification
+  // centre the same way manual "Publish Now" does. Uses the same dedupeKey
+  // shape as the manual path (publishPost in this file) so a race between
+  // manual and cron publishing for the same post can't double-fire.
   useEffect(() => {
     const hasPending = posts.some(p => p.status === 'scheduled' || p.status === 'publishing');
     if (!hasPending) return;
@@ -274,6 +281,52 @@ export default function SocialPage() {
       // Only update if a status actually changed — avoids re-render churn
       // when the cron has no work to do.
       setPosts(prev => {
+        // Build a quick lookup of previous statuses by post id so we can
+        // detect transitions regardless of array ordering or length.
+        const prevById = new Map(prev.map(p => [p.id, p.status]));
+        for (const np of fresh) {
+          const before = prevById.get(np.id);
+          // Only fire on the FIRST observed transition from in-flight to
+          // a terminal state. Subsequent polls find the same terminal
+          // status and the dedupeKey blocks duplicate notifications.
+          const wasPending = before === 'scheduled' || before === 'publishing';
+          const isTerminal = np.status === 'published' || np.status === 'partial' || np.status === 'failed';
+          if (!wasPending || !isTerminal) continue;
+
+          const captionPreview = np.caption.trim().slice(0, 60) + (np.caption.length > 60 ? '…' : '');
+          const results = np.results || {};
+          const successCount = Object.values(results).filter((r: any) => r.status === 'published').length;
+          const failCount = Object.values(results).filter((r: any) => r.status === 'failed').length;
+
+          if (np.status === 'published') {
+            addPersistentNotification({
+              type: 'social_published',
+              title: `Post published to ${successCount} account${successCount === 1 ? '' : 's'}`,
+              body: captionPreview,
+              href: '/social',
+              dedupeKey: 'social_published:' + np.id,
+            });
+          } else if (np.status === 'partial') {
+            addPersistentNotification({
+              type: 'social_publish_failed',
+              title: `Partial publish · ${successCount} ok, ${failCount} failed`,
+              body: captionPreview,
+              href: '/social',
+              dedupeKey: 'social_publish_failed:' + np.id,
+            });
+          } else {
+            // np.status === 'failed'
+            addPersistentNotification({
+              type: 'social_publish_failed',
+              title: 'Publish failed',
+              body: captionPreview,
+              href: '/social',
+              dedupeKey: 'social_publish_failed:' + np.id,
+            });
+          }
+        }
+
+        // Status-change check (preserved from the original effect).
         if (prev.length !== fresh.length) return fresh;
         for (let i = 0; i < prev.length; i++) {
           if (prev[i].status !== fresh[i]?.status) return fresh;
