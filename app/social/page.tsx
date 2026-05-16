@@ -1194,6 +1194,26 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
             </button>
             {/* SOCIAL-SETTINGS-LINK-V1 */}
             <a href="/social/settings" style={{ ...btnG, textDecoration: 'none' }} title="Posting times & themes" onClick={() => setHeaderMenuOpen(false)}><Settings size={13} /> Settings</a>
+            {/* DEBUG-PUBLISH-RUN-NOW-V1: temporary button to manually invoke
+                the publish-due cron and see its full response. Remove once
+                the cron is verified working. */}
+            <button
+              style={btnG}
+              onClick={async () => {
+                setHeaderMenuOpen(false);
+                try {
+                  const res = await fetch('/api/social/publish-due/run-now', { method: 'POST' });
+                  const data = await res.json();
+                  // Crude on purpose — surfaces the full upstream response
+                  // so we can read dueCount / processed / per-account
+                  // results in one shot.
+                  alert('publish-due response (HTTP ' + res.status + '):\n\n' + JSON.stringify(data, null, 2));
+                } catch (e: any) {
+                  alert('publish-due call threw: ' + (e?.message || String(e)));
+                }
+              }}
+              title="Manually invoke the publish-due cron endpoint and show its response"
+            >🐛 Run publish-due</button>
             <button style={btnG} onClick={async () => {
               setHeaderMenuOpen(false);
               if (fillingCalendar) return;
