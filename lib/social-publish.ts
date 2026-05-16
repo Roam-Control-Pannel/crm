@@ -74,6 +74,45 @@ function resolveRoutingFromAccountId(input: PublishInput): PublishInput {
   return next;
 }
 
+/**
+ * META-IMAGE-FORMAT-V1
+ *
+ * Meta's Graph API for both Facebook page photos and Instagram media
+ * containers fetches `image_url` from our side. Unsplash's CDN serves
+ * content-negotiated formats — without an explicit `fm=` parameter,
+ * Meta typically receives WebP, which the Instagram media-ingest backend
+ * rejects with error code 36001 / 2207083 "The image format is not
+ * supported."
+ *
+ * This helper rewrites Unsplash CDN URLs to force JPEG (`fm=jpg`) and
+ * pins width to 1080 (Instagram requires 320–1440px wide; 1080 matches
+ * Unsplash's `urls.regular` default and is well within both FB and IG
+ * limits). Non-Unsplash URLs (Brain uploads, picsum dev placeholders,
+ * own-hosted images) pass through untouched.
+ *
+ * We do this at publish time rather than at search time so we don't
+ * have to migrate existing scheduled posts whose stored imageUrl
+ * predates this fix.
+ */
+function forceJpegForMeta(url: string | undefined): string | undefined {
+  if (!url) return url;
+  if (!url.startsWith('https://images.unsplash.com/')) return url;
+  try {
+    const parsed = new URL(url);
+    parsed.searchParams.set('fm', 'jpg');
+    // Only pin width if there isn't already one set — respect explicit
+    // sizing if a future code path adds it.
+    if (!parsed.searchParams.has('w')) parsed.searchParams.set('w', '1080');
+    // q=80 is Unsplash's default for `urls.regular`; only set if missing
+    // so we don't override an intentionally-higher quality.
+    if (!parsed.searchParams.has('q')) parsed.searchParams.set('q', '80');
+    return parsed.toString();
+  } catch {
+    // Malformed URL — return as-is and let Meta report the error.
+    return url;
+  }
+}
+
 export async function publishToAccount(rawInput: PublishInput): Promise<PublishResult> {
   if (!rawInput.platform || !rawInput.caption) {
     return fail(rawInput, 'Missing platform or caption', 400);
@@ -205,11 +244,15 @@ export async function publishToAccount(rawInput: PublishInput): Promise<PublishR
       }
 
       if (imageUrl) {
+        // META-IMAGE-FORMAT-V1: see forceJpegForMeta() above. Unsplash
+        // serves WebP by default and Meta rejects it on Instagram; same
+        // hazard exists on Facebook though we haven't hit it in practice.
+        const fbImageUrl = forceJpegForMeta(imageUrl);
         const photoRes = await fetch(`https://graph.facebook.com/v21.0/${page.id}/photos`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            url: imageUrl,
+            url: fbImageUrl,
             caption,
             access_token: page.pageToken,
           }),
@@ -264,12 +307,16 @@ export async function publishToAccount(rawInput: PublishInput): Promise<PublishR
         return fail(input, 'Instagram requires an image', 400);
       }
 
+      // META-IMAGE-FORMAT-V1: see forceJpegForMeta() above. This is the
+      // path that was failing with error 36001/2207083 — Instagram only
+      // accepts JPEG/PNG containers, and Unsplash defaults to WebP.
+      const igImageUrl = forceJpegForMeta(imageUrl);
       const containerRes = await fetch(
         `https://graph.facebook.com/v21.0/${page.instagramId}/media`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image_url: imageUrl, caption, access_token: page.pageToken }),
+          body: JSON.stringify({ image_url: igImageUrl, caption, access_token: page.pageToken }),
         }
       );
       const container = await containerRes.json();
