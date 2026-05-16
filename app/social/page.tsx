@@ -261,6 +261,29 @@ export default function SocialPage() {
     })();
   }, []);
 
+  // PUBLISH-UI-V1: while any post is in-flight (scheduled or publishing),
+  // refetch social_posts every 30s. The cron updates these statuses on the
+  // server but the social page only loads on mount, so without polling the
+  // user has to manually refresh to see the result. Effect tears itself down
+  // when there's nothing pending, so it costs nothing on idle pages.
+  useEffect(() => {
+    const hasPending = posts.some(p => p.status === 'scheduled' || p.status === 'publishing');
+    if (!hasPending) return;
+    const interval = setInterval(async () => {
+      const fresh = await fetchPosts();
+      // Only update if a status actually changed — avoids re-render churn
+      // when the cron has no work to do.
+      setPosts(prev => {
+        if (prev.length !== fresh.length) return fresh;
+        for (let i = 0; i < prev.length; i++) {
+          if (prev[i].status !== fresh[i]?.status) return fresh;
+        }
+        return prev;
+      });
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [posts]);
+
   // Debounced Unsplash search
   useEffect(() => {
     if (!unsplashQuery.trim()) { setUnsplash([]); return; }
@@ -912,6 +935,11 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
   const scheduled = filtered.filter(p => p.status === 'scheduled');
   const drafts = filtered.filter(p => p.status === 'draft');
   const published = filtered.filter(p => p.status === 'published' || p.status === 'partial');
+  // PUBLISH-UI-V1: failures bubble up between Scheduled and Drafts so the
+  // user can see and retry them immediately. 'partial' is intentionally
+  // grouped with 'published' above (the post DID go out, just not everywhere)
+  // — per-account results render inline so the user can see which leg failed.
+  const failed = filtered.filter(p => p.status === 'failed');
 
   function postsForDay(day: number) {
     return filtered.filter(p => {
@@ -932,11 +960,48 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
   // ============================================================================
   // Sub-components
   // ============================================================================
+
+  // PUBLISH-UI-V1: tiny pill that renders status with the right colour + icon.
+  // Used by PostRow and the day-sheet row. 'publishing' deliberately uses the
+  // scheduled treatment with a spinner because to the user it's still "waiting
+  // for the cron" — they don't need to distinguish "queued" from "actively
+  // hitting LinkedIn's API right now".
+  function PostStatusBadge({ status }: { status: SocialPost['status'] }) {
+    const map: Record<SocialPost['status'], { label: string; bg: string; fg: string; icon: JSX.Element }> = {
+      draft:      { label: 'Draft',      bg: 'var(--paper)',    fg: 'var(--warn)',  icon: <Edit3 size={10} /> },
+      scheduled:  { label: 'Scheduled',  bg: '#e8f5ee',         fg: 'var(--ok)',    icon: <Clock size={10} /> },
+      publishing: { label: 'Publishing', bg: '#e8f5ee',         fg: 'var(--ok)',    icon: <RefreshCw size={10} /> },
+      published:  { label: 'Published',  bg: '#dcfce7',         fg: '#15803d',      icon: <Check size={10} /> },
+      partial:    { label: 'Partial',    bg: '#fef3c7',         fg: '#b45309',      icon: <AlertTriangle size={10} /> },
+      failed:     { label: 'Failed',     bg: '#fee2e2',         fg: 'var(--alert)', icon: <AlertTriangle size={10} /> },
+    };
+    const s = map[status] || map.draft;
+    return (
+      <div style={{
+        display: 'inline-flex', alignItems: 'center', gap: 4,
+        padding: '2px 8px', borderRadius: 'var(--r-pill)',
+        background: s.bg, color: s.fg,
+        fontSize: 10, fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase',
+      }}>
+        {s.icon}{s.label}
+      </div>
+    );
+  }
+
   function PostPill({ post }: { post: SocialPost }) {
     const accs = post.accountIds.map(id => accounts.find(a => a.id === id)).filter(Boolean) as SocialAccount[];
     const primary = accs[0];
     if (!primary) return null;
     const canDrag = post.status === 'draft' || post.status === 'scheduled';
+    // PUBLISH-UI-V1: published / partial / failed posts get their own border
+    // colour so the calendar reads at a glance — green = done, red = needs
+    // attention, original platform colour = still pending. The status glyph
+    // sits on the right; the platform icon stays on the left so the at-a-
+    // glance reading "which account, what state" still works.
+    const isPublished = post.status === 'published' || post.status === 'partial';
+    const isFailed = post.status === 'failed';
+    const borderColor = isPublished ? '#15803d' : isFailed ? 'var(--alert)' : primary.color;
+    const bgColor = isPublished ? '#dcfce7' : isFailed ? '#fee2e2' : primary.color + '22';
     return (
       <div
         draggable={canDrag}
@@ -946,15 +1011,17 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
           e.dataTransfer.effectAllowed = 'move';
         } : undefined}
         onClick={e => { e.stopPropagation(); openComposer(post); }}
-        title={canDrag ? 'Drag to a different day to reschedule' : undefined}
+        title={canDrag ? 'Drag to a different day to reschedule' : isPublished ? 'Published — click to view' : isFailed ? 'Publish failed — click to retry' : undefined}
         style={{
-        background: primary.color + '22', borderLeft: `3px solid ${primary.color}`,
+        background: bgColor, borderLeft: `3px solid ${borderColor}`,
         padding: '3px 6px', marginBottom: 2, borderRadius: 'var(--r-sm)',
         fontSize: 10, color: 'var(--ink-700)', display: 'flex', alignItems: 'center', gap: 4,
         cursor: canDrag ? 'grab' : 'pointer', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis',
       }}>
         <PlatformIcon platform={primary.platform} size={9} />
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{primary.handle}{accs.length > 1 ? ` +${accs.length - 1}` : ''}</span>
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', flex: 1 }}>{primary.handle}{accs.length > 1 ? ` +${accs.length - 1}` : ''}</span>
+        {isPublished && <Check size={9} color="#15803d" />}
+        {isFailed && <AlertTriangle size={9} color="var(--alert)" />}
       </div>
     );
   }
@@ -962,6 +1029,14 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
   function PostRow({ post }: { post: SocialPost }) {
     const accs = post.accountIds.map(id => accounts.find(a => a.id === id)).filter(Boolean) as SocialAccount[];
     const brief = briefs.find(b => b.id === post.briefId);
+    // PUBLISH-UI-V1: collect per-account result data once so the chips and
+    // the failure banner stay consistent.
+    const results = post.results || {};
+    const failedResults = Object.entries(results).filter(([, r]) => r.status === 'failed');
+    const showRetry = post.status === 'failed' || post.status === 'partial';
+    // First error message is enough for the banner — full per-account
+    // breakdown sits in the chips row below.
+    const firstError = failedResults[0]?.[1]?.error;
     return (
       <div className="soc-postrow" style={{ background: selectMode && selectedIds.has(post.id) ? 'var(--paper)' : 'transparent' }}>
         {/* BULK-SELECT-V1 — checkbox */}
@@ -981,12 +1056,71 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
         )}
         <div className="soc-postrow-content">
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
+            <PostStatusBadge status={post.status} />
             {brief && <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '2px 8px', borderRadius: 'var(--r-pill)', background: brief.color + '15', fontSize: 10, fontWeight: 600, color: brief.color }}><div style={{ width: 6, height: 6, borderRadius: '50%', background: brief.color }} />{brief.name}</div>}
             {accs.map(a => <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: 'var(--ink-600)' }}><PlatformIcon platform={a.platform} size={10} color={a.color} />{a.handle}</div>)}
             <div style={{ fontSize: 10, color: 'var(--ink-400)' }}>· {new Date(post.scheduledAt).toLocaleDateString()} {new Date(post.scheduledAt).toTimeString().slice(0, 5)}</div>
           </div>
           <div style={{ fontSize: 13, color: 'var(--ink-800)', lineHeight: 1.5, marginBottom: 6, whiteSpace: 'pre-wrap' }}>{post.caption.length > 240 ? post.caption.slice(0, 240) + '…' : post.caption}</div>
           {post.imageUrl && <img src={post.imageUrl} alt="" style={{ width: 100, height: 60, objectFit: 'cover', borderRadius: 'var(--r-sm)' }} />}
+          {/* PUBLISH-UI-V1: per-account chips. Show outcomes for any post
+              that has results — covers published, partial, failed, and the
+              in-flight publishing state. Linked chips deep-link to the live
+              social post when postUrl is set (LinkedIn / FB / IG). */}
+          {Object.keys(results).length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+              {Object.entries(results).map(([accountId, r]) => {
+                const a = accounts.find(x => x.id === accountId);
+                const handle = a?.handle || accountId;
+                const platform = a?.platform || '';
+                const isOk = r.status === 'published';
+                const isFail = r.status === 'failed';
+                const chipBg = isOk ? '#dcfce7' : isFail ? '#fee2e2' : 'var(--paper)';
+                const chipFg = isOk ? '#15803d' : isFail ? 'var(--alert)' : 'var(--ink-600)';
+                const inner = (
+                  <>
+                    {platform && <PlatformIcon platform={platform} size={10} color={chipFg} />}
+                    <span>{handle}</span>
+                    {isOk && <Check size={10} />}
+                    {isFail && <X size={10} />}
+                  </>
+                );
+                const chipStyle = {
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                  padding: '3px 8px', borderRadius: 'var(--r-pill)',
+                  background: chipBg, color: chipFg,
+                  fontSize: 10, fontWeight: 600,
+                  textDecoration: 'none',
+                } as const;
+                return isOk && r.postUrl ? (
+                  <a key={accountId} href={r.postUrl} target="_blank" rel="noopener noreferrer" style={chipStyle} title="Open published post in a new tab">{inner}</a>
+                ) : (
+                  <span key={accountId} style={chipStyle} title={isFail ? (r.error || 'Failed') : undefined}>{inner}</span>
+                );
+              })}
+            </div>
+          )}
+          {/* PUBLISH-UI-V1: failure banner. Surfaces the first error message
+              inline so the user doesn't have to hover a chip to see what
+              broke. Retry reuses publishPost() — same code path the manual
+              Publish button uses, so a retry is exactly equivalent to a
+              fresh manual publish from the UI. */}
+          {showRetry && (
+            <div style={{ marginTop: 8, padding: '8px 10px', borderRadius: 'var(--r-sm)', background: '#fee2e2', border: '1px solid #fecaca', display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+              <AlertTriangle size={14} color="var(--alert)" style={{ flexShrink: 0, marginTop: 1 }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--alert)' }}>
+                  {post.status === 'partial' ? 'Partially published' : 'Publish failed'}
+                </div>
+                {firstError && <div style={{ fontSize: 11, color: 'var(--ink-700)', marginTop: 2, wordBreak: 'break-word' }}>{firstError}</div>}
+              </div>
+              <button
+                onClick={() => publishPost(post)}
+                style={{ ...btnG, padding: '4px 10px', fontSize: 11, flexShrink: 0 }}
+                title="Retry publishing"
+              ><RefreshCw size={11} /> Retry</button>
+            </div>
+          )}
         </div>
         <div className="soc-postrow-actions">
           <button onClick={() => setSwappingPostId(post.id)} style={{ ...btnG, padding: '4px 10px', fontSize: 11 }} title="Swap image from Brain">🧠 Swap</button>
@@ -1260,8 +1394,14 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
               </div>
             )}
             {scheduled.length > 0 && <><div style={{ padding: '9px 18px', background: '#e8f5ee', borderBottom: '1px solid var(--ink-100)', fontSize: 11, fontWeight: 600, color: 'var(--ok)', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'flex', alignItems: 'center', gap: 6 }}><Clock size={12} />Scheduled ({scheduled.length})</div>{scheduled.sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime()).map(p => <PostRow key={p.id} post={p} />)}</>}
+            {/* PUBLISH-UI-V1: failures bubble above drafts so they're visible
+                and one click from Retry. Sorted most-recent first since fresh
+                failures are usually the ones the user wants to deal with. */}
+            {failed.length > 0 && <><div style={{ padding: '9px 18px', background: '#fee2e2', borderBottom: '1px solid var(--ink-100)', fontSize: 11, fontWeight: 600, color: 'var(--alert)', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'flex', alignItems: 'center', gap: 6 }}><AlertTriangle size={12} />Failed ({failed.length})</div>{failed.sort((a, b) => new Date(b.scheduledAt).getTime() - new Date(a.scheduledAt).getTime()).map(p => <PostRow key={p.id} post={p} />)}</>}
             {drafts.length > 0 && <><div style={{ padding: '9px 18px', background: 'var(--paper)', borderBottom: '1px solid var(--ink-100)', fontSize: 11, fontWeight: 600, color: 'var(--warn)', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'flex', alignItems: 'center', gap: 6 }}><Edit3 size={12} />Drafts ({drafts.length})</div>{drafts.map(p => <PostRow key={p.id} post={p} />)}</>}
-            {published.length > 0 && <><div style={{ padding: '9px 18px', background: 'var(--paper)', borderBottom: '1px solid var(--ink-100)', fontSize: 11, fontWeight: 600, color: 'var(--info)', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'flex', alignItems: 'center', gap: 6 }}><Check size={12} />Published ({published.length})</div>{published.map(p => <PostRow key={p.id} post={p} />)}</>}
+            {/* PUBLISH-UI-V1: Published header gets the celebratory green
+                treatment to match the badge styling on individual rows. */}
+            {published.length > 0 && <><div style={{ padding: '9px 18px', background: '#dcfce7', borderBottom: '1px solid var(--ink-100)', fontSize: 11, fontWeight: 600, color: '#15803d', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'flex', alignItems: 'center', gap: 6 }}><Check size={12} />Published ({published.length})</div>{published.sort((a, b) => new Date(b.scheduledAt).getTime() - new Date(a.scheduledAt).getTime()).map(p => <PostRow key={p.id} post={p} />)}</>}
           </>)}
         </div>
       )}
@@ -1488,9 +1628,26 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
                 </div>
                 <div>
                   <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--ink-600)', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Status</label>
-                  <select value={form.status} onChange={e => setForm({ ...form, status: e.target.value as SocialPost['status'] })} style={{ ...inp, cursor: 'pointer' }}>
+                  {/* PUBLISH-UI-V1: Published / Partial / Failed are
+                      auto-managed by the publish pipeline. When editing such
+                      a post we surface the current status as a disabled
+                      option (read-only display) so the user understands what
+                      state the post is in, but they can't manually pick it
+                      for a draft. Switching off Published locally would also
+                      mean the next Save would overwrite the cron's verdict,
+                      which we don't want. */}
+                  <select
+                    value={form.status}
+                    onChange={e => setForm({ ...form, status: e.target.value as SocialPost['status'] })}
+                    disabled={form.status === 'published' || form.status === 'partial' || form.status === 'failed' || form.status === 'publishing'}
+                    style={{ ...inp, cursor: 'pointer', opacity: (form.status === 'published' || form.status === 'partial' || form.status === 'failed' || form.status === 'publishing') ? 0.6 : 1 }}
+                  >
                     <option value="draft">Draft</option>
                     <option value="scheduled">Scheduled</option>
+                    {form.status === 'published' && <option value="published">Published</option>}
+                    {form.status === 'partial' && <option value="partial">Partially published</option>}
+                    {form.status === 'failed' && <option value="failed">Failed</option>}
+                    {form.status === 'publishing' && <option value="publishing">Publishing…</option>}
                   </select>
                 </div>
               </div>
