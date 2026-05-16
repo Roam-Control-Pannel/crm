@@ -129,6 +129,14 @@ function PlatformIcon({ platform, size = 12, color = 'currentColor' }: { platfor
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
+// Format a Date's local Y-M-D and H:M so they round-trip through the composer
+// inputs without timezone drift. toISOString() returns UTC date components,
+// which silently shifted scheduledAt by ±24h on edit when the user's local
+// date didn't match the UTC date.
+const pad2 = (n: number) => String(n).padStart(2, '0');
+const localDateStr = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+const localTimeStr = (d: Date) => `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+
 // ============================================================================
 // Page component
 // ============================================================================
@@ -161,7 +169,7 @@ export default function SocialPage() {
     // links with UTMs, plus social handles for @-tagging at publish).
     imageCreditUrl: '', imageUnsplashUrl: '', imagePhotoUrl: '',
     imageSocialHandles: {} as { instagram?: string|null; twitter?: string|null; unsplash?: string|null },
-    scheduledDate: today.toISOString().split('T')[0],
+    scheduledDate: localDateStr(today),
     scheduledTime: '10:00',
     status: 'draft' as SocialPost['status'],
   });
@@ -173,7 +181,7 @@ export default function SocialPage() {
     briefId: '', accountIds: [] as string[],
     theme: '', goal: '',
     postsPerAccount: 3,
-    weekStart: today.toISOString().split('T')[0],
+    weekStart: localDateStr(today),
   });
   const [generating, setGenerating] = useState(false);
   const [generatingCaption, setGeneratingCaption] = useState(false);
@@ -391,8 +399,8 @@ export default function SocialPage() {
         imagePhotoUrl: p.imagePhotoUrl || '',
         imageUnsplashUrl: p.imageUnsplashUrl || '',
         imageSocialHandles: p.imageSocialHandles || {},
-        scheduledDate: d.toISOString().split('T')[0],
-        scheduledTime: d.toTimeString().slice(0, 5),
+        scheduledDate: localDateStr(d),
+        scheduledTime: localTimeStr(d),
         status: p.status,
       });
     } else {
@@ -404,7 +412,7 @@ export default function SocialPage() {
         // opts.defaultDate lets cell-click prefills survive — calling
         // openComposer() unconditionally reset form, so the caller's
         // setForm({scheduledDate}) was wiped a tick later.
-        scheduledDate: opts?.defaultDate || today.toISOString().split('T')[0],
+        scheduledDate: opts?.defaultDate || localDateStr(today),
         scheduledTime: '10:00',
         status: 'draft',
       });
