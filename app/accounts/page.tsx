@@ -394,13 +394,26 @@ export default function AccountsPage() {
             <div
               style={{
                 padding: '18px 22px',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 16,
                 overflowY: 'auto',
                 overflowX: 'hidden',
               }}
             >
+              {/* Inner flex column. Separating the scroll container (outer)
+                  from the flex layout (inner) is what makes overflow engage.
+                  If display:flex is on the SAME element that has a constrained
+                  height, flex's default flex-shrink:1 squeezes children to
+                  fit — and any child with `overflow: hidden` (like the brief
+                  override card below) silently clips its content instead of
+                  bubbling overflow up to the scroll container. With the
+                  layout on an inner div, children take their natural heights
+                  and the outer scrolls when total exceeds the grid row. */}
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 16,
+                }}
+              >
               {/* MULTI-BRIEF-V1: checkbox multi-select for briefs */}
               <div>
                 <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--ink-600)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
@@ -549,6 +562,7 @@ export default function AccountsPage() {
                   })}
                 </>
               )}
+              </div>
             </div>
 
             <div
