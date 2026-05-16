@@ -1,6 +1,6 @@
 'use client';
 import {useState,useEffect,useRef} from 'react';
-import {Plus,Send,Sparkles,X,Check,AlertTriangle,MessageSquare,Brain,Paperclip,Trash2,FileText,Bookmark,BookmarkCheck,Image as ImageIcon,Camera} from 'lucide-react';
+import {Plus,Send,Sparkles,X,Check,AlertTriangle,MessageSquare,Brain,Paperclip,Trash2,FileText,Bookmark,BookmarkCheck,Image as ImageIcon,Camera,Pencil,Pin,PinOff} from 'lucide-react';
 import {saveTextToBrain,uploadChatImage,fetchMemories,fetchMemoryContent,saveMemory,deleteItem,type BrainItem} from '@/lib/brain';
 import {loadWithMigration, saveRemote} from '@/lib/client-store';
 
@@ -38,6 +38,10 @@ interface Chat {
   lastExtractedMessageId?:string;
   // When the most-recent extraction ran. Used for "2 min idle" gating.
   lastExtractedAt?:string;
+  // Whether this chat is pinned to the top of the sidebar. Pinned chats
+  // render in their own section above the date-grouped buckets so the
+  // user can keep important conversations one click away.
+  pinned?:boolean;
 }
 
 const SUGGESTIONS=[
@@ -186,6 +190,10 @@ export default function HubPage(){
   const [pendingAttachments,setPendingAttachments]=useState<{file:File;preview:string}[]>([]);
   const [showAttachMenu,setShowAttachMenu]=useState(false);
   const [uploadingImage,setUploadingImage]=useState(false);
+  // Inline rename UI state — when set, the matching chat row in the sidebar
+  // swaps its title for an editable input. Draft holds the in-progress text.
+  const [renamingChatId,setRenamingChatId]=useState<string|null>(null);
+  const [renameDraft,setRenameDraft]=useState('');
   const fileInputRef=useRef<HTMLInputElement>(null);
   const imageInputRef=useRef<HTMLInputElement>(null);
   const cameraInputRef=useRef<HTMLInputElement>(null);
@@ -460,6 +468,34 @@ export default function HubPage(){
     if(activeChat?.id===id)setActiveChat(updated[0]||null);
   }
 
+  // Toggle pinned state. Pinned chats float into a dedicated section at the
+  // top of the sidebar. We deliberately don't bump updatedAt — pinning is
+  // an organisational action, not new activity, and we don't want pinning
+  // to disrupt the date grouping when the chat is later unpinned.
+  function togglePin(id:string,e:React.MouseEvent){
+    e.stopPropagation();
+    setChats(prev=>prev.map(c=>c.id===id?{...c,pinned:!c.pinned}:c));
+  }
+
+  function startRename(c:Chat,e:React.MouseEvent){
+    e.stopPropagation();
+    setRenamingChatId(c.id);
+    setRenameDraft(c.title);
+  }
+
+  function commitRename(id:string){
+    const next=renameDraft.trim();
+    setRenamingChatId(null);
+    if(!next)return;// blank → silently cancel
+    setChats(prev=>prev.map(c=>c.id===id?{...c,title:next}:c));
+    setActiveChat(prev=>prev&&prev.id===id?{...prev,title:next}:prev);
+  }
+
+  function cancelRename(){
+    setRenamingChatId(null);
+    setRenameDraft('');
+  }
+
   function newChat(){
     const chat:Chat={id:Date.now().toString(),title:'New conversation',messages:[],createdAt:new Date(),updatedAt:new Date()};
     setChats(prev=>[chat,...prev]);setActiveChat(chat);setShowChannels(false);setShowSuggestions(false);
@@ -659,7 +695,13 @@ export default function HubPage(){
     updateChat(chatId,chat.messages.map(m=>m.id===msgId?{...m,cancelled:true}:m));
   }
 
-  const groups=groupChats(chats);
+  // Pinned chats render in their own section; everything else flows through
+  // the existing date-bucketing. Pinned order is "newest activity first"
+  // (sorted by updatedAt) which mirrors how the date groups already sort.
+  const pinnedChats=chats
+    .filter(c=>c.pinned)
+    .sort((a,b)=>new Date(b.updatedAt).getTime()-new Date(a.updatedAt).getTime());
+  const groups=groupChats(chats.filter(c=>!c.pinned));
 
 
   async function handleUpload(e:React.ChangeEvent<HTMLInputElement>){
@@ -684,7 +726,78 @@ export default function HubPage(){
     persistDocs(updated).catch(err=>console.error('Failed to save docs:',err));
   }
 
-  const ChannelList=()=>(
+  // Renders a single chat row in the sidebar. Used in both the Pinned
+  // section and the date-grouped sections so the look and behaviour
+  // (selected state, hover-revealed actions, inline rename) stay
+  // identical across both.
+  const renderChatRow=(c:Chat)=>{
+    const isActive=activeChat?.id===c.id;
+    const isRenaming=renamingChatId===c.id;
+    const lastMsg=c.messages.length>0?c.messages[c.messages.length-1].content.slice(0,35)+'…':'Empty';
+    return (
+      <div key={c.id} style={{position:'relative',marginBottom:2}} className="chat-item">
+        <button
+          onClick={()=>{if(isRenaming)return;setActiveChat(c);setShowChannels(false);}}
+          style={{width:'100%',textAlign:'left',padding:'8px 10px',paddingRight:isRenaming?10:74,borderRadius:'var(--r-sm)',background:isActive?'rgba(255,255,255,0.12)':'transparent',border:'none',cursor:isRenaming?'default':'pointer',display:'block'}}
+        >
+          {isRenaming?(
+            <input
+              autoFocus
+              value={renameDraft}
+              onChange={e=>setRenameDraft(e.target.value)}
+              onClick={e=>e.stopPropagation()}
+              onKeyDown={e=>{
+                if(e.key==='Enter'){e.preventDefault();commitRename(c.id);}
+                else if(e.key==='Escape'){e.preventDefault();cancelRename();}
+              }}
+              onBlur={()=>commitRename(c.id)}
+              style={{width:'100%',background:'rgba(255,255,255,0.15)',border:'1px solid rgba(255,255,255,0.25)',borderRadius:4,color:'#fff',fontSize:12,padding:'3px 6px',fontFamily:'inherit',outline:'none'}}
+            />
+          ):(
+            <>
+              <div style={{display:'flex',alignItems:'center',gap:5,fontSize:12,color:isActive?'#fff':'rgba(255,255,255,0.65)',overflow:'hidden'}}>
+                {c.pinned&&<Pin size={9} style={{flexShrink:0,opacity:0.7}}/>}
+                <span style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',flex:1,minWidth:0}}>{c.title}</span>
+              </div>
+              <div style={{fontSize:10,color:'rgba(255,255,255,0.3)',marginTop:2,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{lastMsg}</div>
+            </>
+          )}
+        </button>
+        {!isRenaming&&(
+          <div className="chat-actions" style={{position:'absolute',right:4,top:'50%',transform:'translateY(-50%)',display:'flex',gap:1,opacity:0,transition:'opacity 0.12s'}}>
+            <button
+              onClick={(e)=>startRename(c,e)}
+              title="Rename conversation"
+              className="chat-action-btn"
+              style={{background:'none',border:'none',cursor:'pointer',color:'rgba(255,255,255,0.35)',padding:3,display:'flex',alignItems:'center',borderRadius:3}}
+            >
+              <Pencil size={11}/>
+            </button>
+            <button
+              onClick={(e)=>togglePin(c.id,e)}
+              title={c.pinned?'Unpin conversation':'Pin conversation'}
+              className="chat-action-btn"
+              style={{background:'none',border:'none',cursor:'pointer',color:c.pinned?'rgba(255,200,100,0.85)':'rgba(255,255,255,0.35)',padding:3,display:'flex',alignItems:'center',borderRadius:3,opacity:c.pinned?1:undefined}}
+            >
+              {c.pinned?<PinOff size={11}/>:<Pin size={11}/>}
+            </button>
+            <button
+              onClick={(e)=>deleteChat(c.id,e)}
+              title="Delete conversation"
+              className="chat-action-btn delete-btn"
+              style={{background:'none',border:'none',cursor:'pointer',color:'rgba(255,255,255,0.35)',padding:3,display:'flex',alignItems:'center',borderRadius:3}}
+            >
+              <Trash2 size={11}/>
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const ChannelList=()=>{
+    const hasAnyChats=pinnedChats.length>0||groups.length>0;
+    return (
     <div style={{width:isMobile?'100%':220,background:'var(--maroon-900)',display:'flex',flexDirection:'column',flexShrink:0,height:'100%'}}>
       <div style={{padding:'16px 14px 12px',borderBottom:'1px solid rgba(255,255,255,0.08)'}}>
         <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:12}}>
@@ -699,21 +812,19 @@ export default function HubPage(){
         </button>
       </div>
       <div style={{flex:1,overflowY:'auto',padding:'8px'}}>
-        {groups.length===0&&<div style={{padding:'20px 8px',fontSize:11,color:'rgba(255,255,255,0.3)',textAlign:'center',lineHeight:1.6}}>No conversations yet. Start one above.</div>}
+        {!hasAnyChats&&<div style={{padding:'20px 8px',fontSize:11,color:'rgba(255,255,255,0.3)',textAlign:'center',lineHeight:1.6}}>No conversations yet. Start one above.</div>}
+        {pinnedChats.length>0&&(
+          <div style={{marginBottom:12}}>
+            <div style={{display:'flex',alignItems:'center',gap:5,fontSize:9,letterSpacing:'0.12em',textTransform:'uppercase',color:'rgba(255,200,100,0.55)',padding:'4px 8px',fontWeight:500}}>
+              <Pin size={9}/> Pinned
+            </div>
+            {pinnedChats.map(renderChatRow)}
+          </div>
+        )}
         {groups.map(g=>(
           <div key={g.label} style={{marginBottom:12}}>
             <div style={{fontSize:9,letterSpacing:'0.12em',textTransform:'uppercase',color:'rgba(255,255,255,0.25)',padding:'4px 8px',fontWeight:500}}>{g.label}</div>
-            {g.chats.map(c=>(
-              <div key={c.id} style={{position:'relative',marginBottom:2}} className="chat-item">
-                <button onClick={()=>{setActiveChat(c);setShowChannels(false);}} style={{width:'100%',textAlign:'left',padding:'8px 10px',paddingRight:28,borderRadius:'var(--r-sm)',background:activeChat?.id===c.id?'rgba(255,255,255,0.12)':'transparent',border:'none',cursor:'pointer',display:'block'}}>
-                  <div style={{fontSize:12,color:activeChat?.id===c.id?'#fff':'rgba(255,255,255,0.65)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{c.title}</div>
-                  <div style={{fontSize:10,color:'rgba(255,255,255,0.3)',marginTop:2,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{c.messages.length>0?c.messages[c.messages.length-1].content.slice(0,35)+'…':'Empty'}</div>
-                </button>
-                <button onClick={(e)=>deleteChat(c.id,e)} title="Delete conversation" style={{position:'absolute',right:4,top:'50%',transform:'translateY(-50%)',background:'none',border:'none',cursor:'pointer',color:'rgba(255,255,255,0.25)',padding:3,display:'flex',alignItems:'center',borderRadius:3,opacity:0}} className="delete-btn">
-                  <Trash2 size={11}/>
-                </button>
-              </div>
-            ))}
+            {g.chats.map(renderChatRow)}
           </div>
         ))}
       </div>
@@ -723,11 +834,12 @@ export default function HubPage(){
         <div style={{width:6,height:6,borderRadius:'50%',background:'var(--ok)'}}/>
       </div>
     </div>
-  );
+    );
+  };
 
   return(
     <div style={{display:'flex',height:'100%',overflow:'hidden',background:'var(--paper)'}}>
-      <style>{`@keyframes bounce{0%,60%,100%{transform:translateY(0)}30%{transform:translateY(-5px)}} .chat-item:hover .delete-btn{opacity:1!important;} .delete-btn:hover{color:rgba(255,100,100,0.8)!important;background:rgba(255,255,255,0.08)!important;}`}</style>
+      <style>{`@keyframes bounce{0%,60%,100%{transform:translateY(0)}30%{transform:translateY(-5px)}} .chat-item:hover .chat-actions{opacity:1!important;} .chat-action-btn:hover{color:rgba(255,255,255,0.9)!important;background:rgba(255,255,255,0.08);} .chat-item:hover .delete-btn:hover{color:rgba(255,100,100,0.85)!important;}`}</style>
 
       {!isMobile&&<ChannelList/>}
 
