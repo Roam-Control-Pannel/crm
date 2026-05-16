@@ -348,22 +348,12 @@ export default function AccountsPage() {
         </div>
       )}
 
-      {/* Edit modal.
-          History: 8+ prior attempts to make this scroll using flex layout
-          (flex:1, flex:1 1 0, flex:0 1 auto + min-height:0, max-height calc,
-          .soc-modal-body class, absolute positioning) all failed in one
-          way or another. Root cause: flex items default to min-height:auto
-          (= content size), preventing the body from shrinking enough for
-          overflow-y to engage. The composer modal works by accident — its
-          content is short enough to never trigger the bug.
-
-          The real fix is CSS grid with `minmax(0, 1fr)` on the middle row.
-          Grid has unambiguous row-sizing semantics; `minmax(0, ...)` is the
-          grid equivalent of `min-height: 0` and lets the row shrink so
-          overflow-y on the body engages reliably. We override the
-          .soc-modal-panel class's `display: flex` inline so we keep the
-          panel's max-height, background, border-radius, and shadow but
-          switch the layout mechanism entirely. */}
+      {/* Modal uses CSS grid (overriding .soc-modal-panel's flex display)
+          because flex layout couldn't make this body scroll: flex items
+          default to min-height:auto, so the body refused to shrink below
+          its content height and overflow-y never engaged. Grid's
+          `minmax(0, 1fr)` on the middle row IS the equivalent of
+          `min-height: 0` and lets the row shrink so scroll works. */}
       {editing && (
         <div
           className="soc-modal-overlay"
