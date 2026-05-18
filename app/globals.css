@@ -90,6 +90,13 @@ tbody tr:hover td { background: var(--paper); }
 }
 
 @media (max-width: 640px) {
+  /* iOS Safari zooms the page when focusing any input/textarea/select with
+     a computed font-size below 16px. Most form controls in this app use
+     12–13px inline for desktop density, so without this rule every form
+     focus on a phone triggers a disorienting zoom-in. The !important is
+     needed because nearly every input sets font-size via inline style. */
+  input, textarea, select { font-size: 16px !important; }
+
   .app-layout { flex-direction: column; height: 100vh; }
   .app-sidebar { position: fixed !important; top: 0; left: 0; bottom: 0; width: 280px !important; height: 100vh; transform: translateX(-100%); z-index: 100; }
   .app-sidebar.open { transform: translateX(0); }
@@ -427,6 +434,45 @@ tbody tr:hover td { background: var(--paper); }
      padding, smaller icon to claw back a few more pixels for content. */
   .qq-row { padding: 14px !important; gap: 12px !important; }
   .qq-row > .qq-icon { width: 34px !important; height: 34px !important; }
+}
+
+/* ============================================================
+   Find + Contacts results tables — hide secondary columns on
+   phones to keep the table fitting the viewport without a
+   horizontal-scroll layer. Phone is surfaced inline beneath the
+   business name (see .find-phone-inline). The contact panel that
+   opens on row tap already shows email, so dropping it from the
+   list is no information loss.
+   ============================================================ */
+@media (max-width: 640px) {
+  .find-col-phone, .find-col-rating { display: none !important; }
+  .find-phone-inline { display: block !important; }
+  .contacts-col-email { display: none !important; }
+  /* The contacts table sets minWidth:480 inline, which forces a
+     horizontal scroll on a 360px viewport even though we've hidden a
+     column. Override on mobile so it fits naturally. */
+  .table-wrap > table { min-width: 0 !important; }
+}
+
+/* ============================================================
+   Social Settings — schedule grid mobile reflow.
+   Desktop: 70px label column + 7 day columns in one wide row per time.
+   Mobile (≤640px): each time becomes its own block — time label sits
+   above a 7-column row of day toggles so each toggle is ~40px wide
+   and clears the touch-target minimum. The 70px label cell is
+   suppressed and the time label spans full width.
+   ============================================================ */
+@media (max-width: 640px) {
+  .ss-schedule-header { display: none !important; }
+  .ss-schedule-row {
+    grid-template-columns: repeat(7, 1fr) !important;
+    margin-bottom: 12px !important;
+  }
+  .ss-schedule-time {
+    grid-column: 1 / -1;
+    font-size: 13px !important;
+    margin-bottom: 4px;
+  }
 }
 
 /* ============================================================

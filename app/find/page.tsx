@@ -216,9 +216,18 @@ export default function FindPage() {
           <div style={{overflowX:'auto'}}>
             <table style={{width:'100%',borderCollapse:'collapse'}}>
               <thead>
-                <tr>{['','Business','Phone','Email','Rating',''].map((h,i)=>(
-                  <th key={i} style={{padding:'10px 14px',textAlign:'left',fontSize:9.5,fontWeight:600,letterSpacing:'0.1em',textTransform:'uppercase',color:'var(--ink-400)',borderBottom:'1.5px solid var(--ink-100)'}}>{h}</th>
-                ))}</tr>
+                <tr>
+                  {[
+                    {label:'',cls:''},
+                    {label:'Business',cls:''},
+                    {label:'Phone',cls:'find-col-phone'},
+                    {label:'Email',cls:''},
+                    {label:'Rating',cls:'find-col-rating'},
+                    {label:'',cls:''},
+                  ].map((h,i)=>(
+                    <th key={i} className={h.cls} style={{padding:'10px 14px',textAlign:'left',fontSize:9.5,fontWeight:600,letterSpacing:'0.1em',textTransform:'uppercase',color:'var(--ink-400)',borderBottom:'1.5px solid var(--ink-100)'}}>{h.label}</th>
+                  ))}
+                </tr>
               </thead>
               <tbody>
                 {results.map((r,i)=>(
@@ -228,8 +237,10 @@ export default function FindPage() {
                       <div style={{fontSize:13,fontWeight:600,color:'var(--ink-900)'}}>{r.name}</div>
                       <div style={{fontSize:10.5,color:'var(--ink-400)',marginTop:1}}>{r.address}</div>
                       {r.website&&<a href={r.website} target="_blank" rel="noreferrer" style={{fontSize:10.5,color:'var(--info)',textDecoration:'none',display:'block',marginTop:1}}>🌐 {r.website.replace(/https?:\/\//,'').slice(0,35)}</a>}
+                      {/* Phone surfaced inline on mobile since the dedicated column is hidden ≤640px. */}
+                      {r.phone&&<div className="find-phone-inline" style={{display:'none',fontSize:11,color:'var(--ink-500)',marginTop:2}}>📞 {r.phone}</div>}
                     </td>
-                    <td style={{padding:'11px 14px',fontSize:12,color:'var(--ink-800)',fontWeight:500,minWidth:120}}>
+                    <td className="find-col-phone" style={{padding:'11px 14px',fontSize:12,color:'var(--ink-800)',fontWeight:500,minWidth:120}}>
                       {r.enriching?<span style={{color:'var(--ink-300)',fontSize:11}}>⟳ finding…</span>:r.phone||<span style={{color:'var(--ink-200)'}}>—</span>}
                     </td>
                     <td style={{padding:'11px 14px',fontSize:12,color:'var(--info)',fontWeight:500,minWidth:200}}>
@@ -258,7 +269,7 @@ export default function FindPage() {
                         <span style={{color:'var(--ink-200)'}}>—</span>
                       )}
                     </td>
-                    <td style={{padding:'11px 14px',fontSize:12,fontWeight:600,color:'var(--warn)'}}>{r.rating?`${r.rating} ★`:'—'}</td>
+                    <td className="find-col-rating" style={{padding:'11px 14px',fontSize:12,fontWeight:600,color:'var(--warn)'}}>{r.rating?`${r.rating} ★`:'—'}</td>
                     <td style={{padding:'11px 14px'}}>
                       <button onClick={()=>toggle(i)} style={{fontSize:10.5,fontWeight:600,color:r.selected?'var(--maroon-600)':'var(--ok)',background:'none',border:'none',cursor:'pointer'}}>
                         {r.selected?'Deselect':'Select'}
