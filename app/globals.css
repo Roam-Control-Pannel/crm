@@ -437,6 +437,30 @@ tbody tr:hover td { background: var(--paper); }
 }
 
 /* ============================================================
+   Growth Dashboard funnel — mobile reflow.
+   Desktop: 5 tiles in a row with arrows between, equal widths.
+   Mobile (≤640px): horizontal scroll on a 5-tile row is unfriendly,
+   so the row stacks vertically with the count on the right of each
+   tile and the arrows hidden. The funnel still reads top-to-bottom
+   as a progression.
+   ============================================================ */
+@media (max-width: 640px) {
+  .dash-funnel { flex-direction: column !important; gap: 6px !important; }
+  .dash-funnel-step { flex: 0 0 auto !important; }
+  .dash-funnel-arrow { display: none !important; }
+  .dash-funnel-tile {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    text-align: left !important;
+    padding: 10px 14px !important;
+    min-height: 44px;
+  }
+  .dash-funnel-num { font-size: 22px !important; margin-top: 0 !important; order: 2; }
+  .dash-funnel-label { margin-top: 0 !important; }
+}
+
+/* ============================================================
    Find + Contacts results tables — hide secondary columns on
    phones to keep the table fitting the viewport without a
    horizontal-scroll layer. Phone is surfaced inline beneath the
