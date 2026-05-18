@@ -364,6 +364,7 @@ export default function AccountsPage() {
             className="soc-modal-panel"
             style={{
               width: 540,
+              maxWidth: '95vw',
               display: 'grid',
               gridTemplateRows: 'auto minmax(0, 1fr) auto',
             }}

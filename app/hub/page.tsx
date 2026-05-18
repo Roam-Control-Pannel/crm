@@ -839,7 +839,7 @@ export default function HubPage(){
 
   return(
     <div style={{display:'flex',height:'100%',overflow:'hidden',background:'var(--paper)'}}>
-      <style>{`@keyframes bounce{0%,60%,100%{transform:translateY(0)}30%{transform:translateY(-5px)}} .chat-item:hover .chat-actions{opacity:1!important;} .chat-action-btn:hover{color:rgba(255,255,255,0.9)!important;background:rgba(255,255,255,0.08);} .chat-item:hover .delete-btn:hover{color:rgba(255,100,100,0.85)!important;}`}</style>
+      <style>{`@keyframes bounce{0%,60%,100%{transform:translateY(0)}30%{transform:translateY(-5px)}} .chat-item:hover .chat-actions{opacity:1!important;} .chat-action-btn:hover{color:rgba(255,255,255,0.9)!important;background:rgba(255,255,255,0.08);} .chat-item:hover .delete-btn:hover{color:rgba(255,100,100,0.85)!important;} @media (hover:none){.chat-actions{opacity:1!important;}}`}</style>
 
       {!isMobile&&<ChannelList/>}
 

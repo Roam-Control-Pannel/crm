@@ -552,9 +552,17 @@ export default function ContactsPage(){
           <div className="table-wrap">
             <table style={{width:'100%',borderCollapse:'collapse',minWidth:480}}>
               <thead>
-                <tr>{['Name / Business','Email','Town','Status','Actions'].map(h=>(
-                  <th key={h} style={{padding:'10px 16px',textAlign:'left',fontSize:9.5,fontWeight:600,letterSpacing:'0.1em',textTransform:'uppercase',color:'var(--ink-400)',borderBottom:'1.5px solid var(--ink-100)'}}>{h}</th>
-                ))}</tr>
+                <tr>
+                  {[
+                    {label:'Name / Business',cls:''},
+                    {label:'Email',cls:'contacts-col-email'},
+                    {label:'Town',cls:''},
+                    {label:'Status',cls:''},
+                    {label:'Actions',cls:''},
+                  ].map(h=>(
+                    <th key={h.label} className={h.cls} style={{padding:'10px 16px',textAlign:'left',fontSize:9.5,fontWeight:600,letterSpacing:'0.1em',textTransform:'uppercase',color:'var(--ink-400)',borderBottom:'1.5px solid var(--ink-100)'}}>{h.label}</th>
+                  ))}
+                </tr>
               </thead>
               <tbody>
                 {filtered.map(c=>{
@@ -573,7 +581,7 @@ export default function ContactsPage(){
                           {tp&&<div style={{fontSize:11,color:'var(--ink-400)',marginTop:1}}>{tp}</div>}
                         </button>
                       </td>
-                      <td style={{padding:'11px 16px',fontSize:12,color:'var(--info)',maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{c.email||'—'}</td>
+                      <td className="contacts-col-email" style={{padding:'11px 16px',fontSize:12,color:'var(--info)',maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{c.email||'—'}</td>
                       <td style={{padding:'11px 16px',fontSize:12.5,color:'var(--ink-700)'}}>{tn}</td>
                       <td style={{padding:'11px 16px'}}>
                         <span style={{display:'inline-flex',alignItems:'center',gap:6,fontSize:12,fontWeight:500,whiteSpace:'nowrap'}}>

@@ -558,38 +558,44 @@ export default function SocialSettingsPage() {
                   No times configured. Add one below.
                 </div>
               ) : (
-                <div style={{ display: 'grid', gridTemplateColumns: '70px repeat(7, 1fr)', gap: 4, marginBottom: 12 }}>
-                  <div />
-                  {DAY_LABELS.map(d => (
-                    <div key={d} style={{ textAlign: 'center', fontSize: 10, fontWeight: 600, color: 'var(--ink-500)', textTransform: 'uppercase' }}>{d}</div>
-                  ))}
+                <div className="ss-schedule" style={{ marginBottom: 12 }}>
+                  <div className="ss-schedule-header" style={{ display: 'grid', gridTemplateColumns: '70px repeat(7, 1fr)', gap: 4, marginBottom: 4 }}>
+                    <div />
+                    {DAY_LABELS.map(d => (
+                      <div key={d} style={{ textAlign: 'center', fontSize: 10, fontWeight: 600, color: 'var(--ink-500)', textTransform: 'uppercase' }}>{d}</div>
+                    ))}
+                  </div>
                   {times.map(time => (
-                    <>
-                      <div key={time + '-label'} style={{ fontSize: 11, color: 'var(--ink-700)', fontWeight: 600, alignSelf: 'center' }}>{time}</div>
-                      {[0, 1, 2, 3, 4, 5, 6].map(day => {
-                        const on = hasSlot(slots, day, time);
-                        return (
-                          <button
-                            key={`${time}-${day}`}
-                            type="button"
-                            onClick={() => toggleSlot(key, day, time)}
-                            title={on ? `Click to remove ${DAY_LABELS[day]} ${time}` : `Click to add ${DAY_LABELS[day]} ${time}`}
-                            style={{
-                              padding: '6px 0',
-                              borderRadius: 'var(--r-xs)',
-                              border: on ? '1.5px solid var(--maroon-700)' : '1.5px solid var(--ink-200)',
-                              background: on ? 'var(--maroon-700)' : 'var(--white)',
-                              color: on ? 'var(--white)' : 'var(--ink-300)',
-                              cursor: 'pointer',
-                              fontSize: 11,
-                              fontFamily: 'inherit',
-                            }}
-                          >
-                            {on ? '●' : '–'}
-                          </button>
-                        );
-                      })}
-                    </>
+                    <div key={time} className="ss-schedule-row" style={{ display: 'grid', gridTemplateColumns: '70px repeat(7, 1fr)', gap: 4, marginBottom: 4 }}>
+                      <div className="ss-schedule-time" style={{ fontSize: 11, color: 'var(--ink-700)', fontWeight: 600, alignSelf: 'center' }}>{time}</div>
+                      <div className="ss-schedule-buttons" style={{ display: 'contents' }}>
+                        {[0, 1, 2, 3, 4, 5, 6].map(day => {
+                          const on = hasSlot(slots, day, time);
+                          return (
+                            <button
+                              key={`${time}-${day}`}
+                              type="button"
+                              onClick={() => toggleSlot(key, day, time)}
+                              title={on ? `Click to remove ${DAY_LABELS[day]} ${time}` : `Click to add ${DAY_LABELS[day]} ${time}`}
+                              aria-label={`${DAY_LABELS[day]} ${time}: ${on ? 'on, tap to remove' : 'off, tap to add'}`}
+                              style={{
+                                padding: '6px 0',
+                                minHeight: 40,
+                                borderRadius: 'var(--r-xs)',
+                                border: on ? '1.5px solid var(--maroon-700)' : '1.5px solid var(--ink-200)',
+                                background: on ? 'var(--maroon-700)' : 'var(--white)',
+                                color: on ? 'var(--white)' : 'var(--ink-300)',
+                                cursor: 'pointer',
+                                fontSize: 11,
+                                fontFamily: 'inherit',
+                              }}
+                            >
+                              {on ? '●' : '–'}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
                   ))}
                 </div>
               )}
