@@ -6,7 +6,7 @@ import {addNotification} from "@/components/NotificationCentre";
 
 interface Contact {id:number;email:string;attributes:Record<string,string>;listIds?:number[];}
 interface BrevoList {id:number;name:string;uniqueSubscribers:number;}
-interface TimelineEvent {id:string;type:string;title:string;body?:string;user?:string;timestamp:Date;meta?:Record<string,string>;}
+interface TimelineEvent {id:string;type:string;title:string;body?:string;user?:string;timestamp?:Date;meta?:Record<string,string>;}
 interface StoredReply {
   uid:number;fromEmail:string;fromName:string|null;subject:string;
   bodyText:string;bodyTextRaw:string;receivedAt:string;
@@ -32,15 +32,6 @@ function parseAttrDate(v:string|undefined):Date|null{
 
 function buildTimeline(contact:Contact,replies:StoredReply[]=[]):TimelineEvent[]{
   const events:TimelineEvent[]=[];const attrs=contact.attributes||{};
-  events.push({id:'created',type:'created',title:'Contact created',body:`Imported via ${attrs.SOURCE||'manual'} · ${attrs.TOWN||'unknown town'}`,timestamp:new Date(Date.now()-7*86400000)});
-  if(attrs.WEBSITE||attrs.PHONE){events.push({id:'enriched',type:'enriched',title:'Contact enriched',body:'Email and phone details found',timestamp:new Date(Date.now()-6*86400000)});}
-  if(['email_sent','followed_up','responded','listed','cold'].includes(attrs.OUTREACH_STATUS||'')){
-    events.push({id:'queued',type:'queued',title:'Added to queue',body:'Added to Today\'s Queue',user:'Roam Local',timestamp:new Date(Date.now()-5*86400000)});
-    events.push({id:'email1',type:'email_sent',title:'Step 1 outreach sent via Brevo',body:`Subject: "Free listing for ${attrs.BUSINESS_NAME||'your business'} on Roam"`,timestamp:new Date(Date.now()-4*86400000),meta:{personalised:'true'}});
-  }
-  if(['followed_up','responded','listed'].includes(attrs.OUTREACH_STATUS||'')){
-    events.push({id:'email2',type:'email_sent',title:'Step 2 follow-up sent via Brevo',body:`Subject: "Just checking in — ${attrs.TOWN||'your area'} on Roam"`,timestamp:new Date(Date.now()-2*86400000)});
-  }
 
   // Engagement events sourced from real Brevo attributes (set by the
   // /api/brevo/webhook handler on opened/click events). These cross-cut
@@ -82,36 +73,28 @@ function buildTimeline(contact:Contact,replies:StoredReply[]=[]):TimelineEvent[]
     events.push({id:'unsub',type:'unsub',title:'Unsubscribed',body:'No further emails will be sent.',timestamp:unsubAt});
   }
 
-  // If we have evidence of a real send (Brevo confirmed delivery, or we
-  // stamped LAST_CONTACT_DATE on send) but OUTREACH_STATUS didn't trigger
-  // the synthetic email_sent above, surface a generic "sent" event so the
-  // SENT stat is non-zero. Avoid double-counting when the synthetic events
-  // already fired.
-  const hasSyntheticSend=events.some(e=>e.type==='email_sent');
   const deliveredAt=parseAttrDate(attrs.LAST_DELIVERED_AT);
   const lastContactDate=parseAttrDate(attrs.LAST_CONTACT_DATE);
   const realSentAt=deliveredAt||lastContactDate;
-  if(!hasSyntheticSend&&realSentAt){
+  if(realSentAt){
     events.push({id:'email-real',type:'email_sent',title:'Email sent via Brevo',body:deliveredAt?'Delivered to recipient.':'Send recorded.',timestamp:realSentAt});
   }
-  if(replies.length>0){
-    for(const r of replies){
-      const truncated=r.bodyText.length>200;
-      events.push({
-        id:`reply-${r.uid}`,
-        type:r.isAutoResponder?'auto_reply':'reply',
-        title:r.isAutoResponder?'Auto-reply received':'Reply received',
-        body:truncated?r.bodyText.slice(0,200)+'…':r.bodyText,
-        timestamp:new Date(r.receivedAt),
-        meta:{
-          subject:r.subject,
-          classification:r.isAutoResponder?'Auto-responder':'Real reply',
-          ...(truncated?{fullBody:r.bodyText}:{}),
-        },
-      });
-    }
-  }else if(['responded','listed'].includes(attrs.OUTREACH_STATUS||'')){events.push({id:'reply',type:'reply',title:'Reply received',body:'"Thanks for getting in touch — we\'d love to be featured. Can you send more details?"',timestamp:new Date(Date.now()-86400000),meta:{classification:'Interested (placeholder)'}});}
-  if(attrs.NOTES){events.push({id:'note',type:'note',title:'Note added',body:attrs.NOTES,user:'Roam Local',timestamp:new Date(Date.now()-3600000)});}
+  for(const r of replies){
+    const truncated=r.bodyText.length>200;
+    events.push({
+      id:`reply-${r.uid}`,
+      type:r.isAutoResponder?'auto_reply':'reply',
+      title:r.isAutoResponder?'Auto-reply received':'Reply received',
+      body:truncated?r.bodyText.slice(0,200)+'…':r.bodyText,
+      timestamp:new Date(r.receivedAt),
+      meta:{
+        subject:r.subject,
+        classification:r.isAutoResponder?'Auto-responder':'Real reply',
+        ...(truncated?{fullBody:r.bodyText}:{}),
+      },
+    });
+  }
+  if(attrs.NOTES){events.push({id:'note',type:'note',title:'Note added',body:attrs.NOTES,user:'Roam Local'});}
   return events.reverse();
 }
 
@@ -263,7 +246,7 @@ function ContactPanel({contact,onClose,onSend,onReset}:{contact:Contact;onClose:
                 <div style={{flex:1,minWidth:0,paddingTop:4}}>
                   <div style={{display:'flex',justifyContent:'space-between',gap:6,marginBottom:3}}>
                     <span style={{fontSize:12,fontWeight:600,color:'var(--ink-900)'}}>{ev.title}</span>
-                    <span style={{fontSize:10,color:'var(--ink-400)',flexShrink:0}}>{timeAgo(ev.timestamp)}</span>
+                    {ev.timestamp&&<span style={{fontSize:10,color:'var(--ink-400)',flexShrink:0}}>{timeAgo(ev.timestamp)}</span>}
                   </div>
                   {ev.body&&(()=>{
                     const isExpandable=!!ev.meta?.fullBody;

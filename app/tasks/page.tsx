@@ -1,6 +1,6 @@
 'use client';
 import {useState,useEffect} from 'react';
-import {Plus,CheckCircle2,Circle,AlertTriangle,Calendar,Brain,Trash2,ChevronDown,ChevronUp,Sparkles} from 'lucide-react';
+import {Plus,CheckCircle2,Circle,AlertTriangle,Calendar,Brain,Trash2,ChevronDown,ChevronUp} from 'lucide-react';
 import {addNotification} from '@/components/NotificationCentre';
 import {loadWithMigration, saveRemote} from '@/lib/client-store';
 
@@ -64,18 +64,11 @@ function getAvatarColor(name:string):string{
   return 'var(--ink-400)';
 }
 
-const AI_SUGGESTIONS:Task[]=[
-  {id:'ai1',title:'Send Day 7 follow-up to non-responders',description:'14 contacts in various lists have not replied after 7 days. Send the final nudge email via Brevo.',priority:'high',category:'ai_suggested',assignee:'Andy',dueDate:new Date().toISOString().split('T')[0],completed:false,createdAt:new Date().toISOString(),aiSuggested:true,actions:[{label:'Go to Queue',href:'/queue'},{label:'Open Roam-io',href:'/hub'}]},
-  {id:'ai2',title:'Activate Whitstable — 12 contacts ready',description:'You have 12 contacts in Whitstable with email addresses. Enough to start outreach and activate the town.',priority:'high',category:'ai_suggested',assignee:'Andy',dueDate:new Date().toISOString().split('T')[0],completed:false,createdAt:new Date().toISOString(),aiSuggested:true,actions:[{label:'View contacts',href:'/contacts'},{label:'Find more businesses',href:'/find'}]},
-  {id:'ai3',title:'Generate social content for active towns',description:'No social posts scheduled this week. Create Instagram and LinkedIn content for your top 3 towns.',priority:'medium',category:'ai_suggested',assignee:'Unassigned',dueDate:new Date(Date.now()+2*86400000).toISOString().split('T')[0],completed:false,createdAt:new Date().toISOString(),aiSuggested:true,actions:[{label:'Social posts',href:'/social'},{label:'Open Roam-io',href:'/hub'}]},
-];
-
 export default function TasksPage(){
   const [tasks,setTasks]=useState<Task[]>([]);
   const [showAdd,setShowAdd]=useState(false);
   const [filter,setFilter]=useState({assignee:'',priority:'',category:''});
   const [showCompleted,setShowCompleted]=useState(false);
-  const [showAiSuggestions,setShowAiSuggestions]=useState(true);
   const [form,setForm]=useState({title:'',description:'',priority:'medium' as 'high'|'medium'|'low',category:'outreach' as Task['category'],assignee:'Andy',dueDate:new Date().toISOString().split('T')[0]});
 
   useEffect(()=>{(async()=>{setTasks(await fetchTasks());})();},[]);
@@ -87,12 +80,6 @@ export default function TasksPage(){
     addNotification({type:'info',title:'Task created',body:form.title});
     setForm({title:'',description:'',priority:'medium',category:'outreach',assignee:'Andy',dueDate:new Date().toISOString().split('T')[0]});
     setShowAdd(false);
-  }
-
-  function acceptAiTask(t:Task){
-    const updated=[{...t,id:Date.now().toString(),aiSuggested:true},...tasks];
-    setTasks(updated);persistTasks(updated);
-    addNotification({type:'info',title:'Task added',body:t.title});
   }
 
   function toggle(id:string){
@@ -133,7 +120,6 @@ export default function TasksPage(){
           <span style={{fontSize:13,fontWeight:600,color:'var(--ink-900)',textDecoration:task.completed?'line-through':'none'}}>{task.title}</span>
           <span style={{fontSize:10,padding:'2px 8px',borderRadius:'var(--r-pill)',background:pColors[task.priority].bg,color:pColors[task.priority].color,fontWeight:500}}>{task.priority}</span>
           <span style={{fontSize:10,padding:'2px 8px',borderRadius:'var(--r-pill)',background:'var(--ink-100)',color:'var(--ink-500)'}}>{cLabels[task.category]}</span>
-          {task.aiSuggested&&<span style={{fontSize:10,padding:'2px 8px',borderRadius:'var(--r-pill)',background:'var(--maroon-50)',color:'var(--maroon-600)',display:'flex',alignItems:'center',gap:3}}><Sparkles size={9}/>AI</span>}
         </div>
         {task.description&&<div style={{fontSize:12,color:'var(--ink-500)',lineHeight:1.5,marginBottom:6}}>{task.description}</div>}
         <div style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap'}}>
@@ -188,39 +174,6 @@ export default function TasksPage(){
         ))}
       </div>
 
-      {/* Roam-io suggestions banner */}
-      {showAiSuggestions&&(
-        <div style={{background:'var(--maroon-50)',border:'1px solid var(--maroon-100)',borderRadius:'var(--r-lg)',padding:'14px 18px',marginBottom:20}}>
-          <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:12}}>
-            <div style={{width:28,height:28,borderRadius:'50%',background:'var(--maroon-50)',border:'1px solid var(--maroon-100)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:14}}>🦁</div>
-            <div style={{flex:1}}>
-              <div style={{fontSize:13,fontWeight:600,color:'var(--ink-900)'}}>Roam-io has {AI_SUGGESTIONS.length} task suggestions</div>
-              <div style={{fontSize:11,color:'var(--ink-500)'}}>Based on your current CRM activity</div>
-            </div>
-            <button onClick={()=>setShowAiSuggestions(false)} style={{background:'none',border:'none',cursor:'pointer',color:'var(--ink-400)',fontSize:18,lineHeight:1}}>×</button>
-          </div>
-          <div style={{display:'flex',flexDirection:'column',gap:8}}>
-            {AI_SUGGESTIONS.map(s=>(
-              <div key={s.id} style={{background:'var(--white)',borderRadius:'var(--r-md)',padding:'12px 14px',border:'1px solid var(--maroon-100)',display:'flex',alignItems:'flex-start',gap:10}}>
-                <Sparkles size={14} color="var(--maroon-600)" style={{marginTop:2,flexShrink:0}}/>
-                <div style={{flex:1,minWidth:0}}>
-                  <div style={{fontSize:13,fontWeight:600,color:'var(--ink-900)',marginBottom:2}}>{s.title}</div>
-                  <div style={{fontSize:11,color:'var(--ink-500)',marginBottom:8}}>{s.description}</div>
-                  <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
-                    <button onClick={()=>acceptAiTask(s)} style={{fontSize:11,padding:'4px 10px',borderRadius:'var(--r-sm)',background:'var(--maroon-700)',color:'white',border:'none',cursor:'pointer',fontFamily:'inherit',display:'inline-flex',alignItems:'center',gap:4}}><Plus size={10}/>Add to tasks</button>
-                    {s.actions?.map(a=>(
-                      <a key={a.label} href={a.href} style={{fontSize:11,padding:'4px 10px',borderRadius:'var(--r-sm)',border:'1px solid var(--ink-200)',background:'var(--white)',color:'var(--ink-600)',textDecoration:'none',display:'inline-flex',alignItems:'center',gap:4}}>{a.label}</a>
-                    ))}
-                    <a href="/hub" style={{fontSize:11,padding:'4px 10px',borderRadius:'var(--r-sm)',border:'1px solid var(--maroon-200)',background:'var(--maroon-50)',color:'var(--maroon-600)',textDecoration:'none',display:'inline-flex',alignItems:'center',gap:4}}><Brain size={10}/>Discuss with Roam-io</a>
-                  </div>
-                </div>
-                <span style={{fontSize:10,padding:'2px 8px',borderRadius:'var(--r-pill)',background:pColors[s.priority].bg,color:pColors[s.priority].color,fontWeight:500,flexShrink:0}}>{s.priority}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* Filters */}
       <div style={{display:'flex',gap:8,marginBottom:16,flexWrap:'wrap'}} className="filter-bar">
         <select value={filter.assignee} onChange={e=>setFilter({...filter,assignee:e.target.value})} style={{...inp,width:'auto',minWidth:130,cursor:'pointer'}}>
@@ -244,7 +197,7 @@ export default function TasksPage(){
           <div style={{padding:48,textAlign:'center'}}>
             <CheckCircle2 size={32} color="var(--ink-200)" style={{margin:'0 auto 12px',display:'block'}}/>
             <div style={{fontFamily:'var(--font-display)',fontSize:18,color:'var(--ink-700)',marginBottom:6}}>No tasks yet</div>
-            <div style={{fontSize:12,color:'var(--ink-400)',marginBottom:16}}>Add your first task or accept one of Roam-io's suggestions above</div>
+            <div style={{fontSize:12,color:'var(--ink-400)',marginBottom:16}}>Add your first task to get started</div>
             <button style={btnP} onClick={()=>setShowAdd(true)}><Plus size={13}/> Add first task</button>
           </div>
         ):(
