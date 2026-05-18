@@ -87,8 +87,8 @@ function resolveRoutingFromAccountId(input: PublishInput): PublishInput {
  * This helper rewrites Unsplash CDN URLs to force JPEG (`fm=jpg`) and
  * pins width to 1080 (Instagram requires 320–1440px wide; 1080 matches
  * Unsplash's `urls.regular` default and is well within both FB and IG
- * limits). Non-Unsplash URLs (Brain uploads, picsum dev placeholders,
- * own-hosted images) pass through untouched.
+ * limits). Non-Unsplash URLs (Brain uploads, own-hosted images) pass
+ * through untouched.
  *
  * We do this at publish time rather than at search time so we don't
  * have to migrate existing scheduled posts whose stored imageUrl
