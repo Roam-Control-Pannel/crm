@@ -55,21 +55,10 @@ export async function GET(req: NextRequest) {
   const accessKey = process.env.UNSPLASH_ACCESS_KEY;
 
   if (!accessKey) {
-    // Dev fallback: picsum.photos placeholders. No attribution fields
-    // because there's no photographer to credit — but keep the shape
-    // consistent with the real response so the client doesn't branch.
-    return NextResponse.json({
-      images: Array.from({length: count}, (_, i) => ({
-        url: `https://picsum.photos/seed/${encodeURIComponent(query+i)}/800/800`,
-        thumb: `https://picsum.photos/seed/${encodeURIComponent(query+i)}/400/400`,
-        credit: 'Placeholder',
-        creditUrl: '',
-        photoUrl: '',
-        unsplashUrl: 'https://unsplash.com' + UTM_SUFFIX,
-        downloadLocation: '',
-        socialHandles: {},
-      }))
-    });
+    return NextResponse.json(
+      { error: 'UNSPLASH_ACCESS_KEY is not configured', images: [] },
+      { status: 503 }
+    );
   }
 
   try {
