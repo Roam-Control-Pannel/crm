@@ -142,9 +142,9 @@ function ContactPanel({contact,onClose,onSend,onReset}:{contact:Contact;onClose:
   const [replies,setReplies]=useState<StoredReply[]>([]);
   const [expandedEvents,setExpandedEvents]=useState<Set<string>>(new Set());
   const toggleEvent=(id:string)=>setExpandedEvents(p=>{const n=new Set(p);n.has(id)?n.delete(id):n.add(id);return n;});
-  // Fetch real replies for this contact when the panel opens. Falls back
-  // silently to the synthetic placeholder if the fetch fails or returns
-  // empty — the timeline still renders.
+  // Fetch real replies for this contact when the panel opens. On failure
+  // or empty response, the timeline still renders with whatever
+  // Brevo-attribute events apply (opens/clicks/bounces/etc.).
   useEffect(()=>{
     let cancelled=false;
     fetch(`/api/replies?email=${encodeURIComponent(contact.email)}`,{cache:'no-store'})
