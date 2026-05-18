@@ -51,17 +51,22 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
       const res = await fetch('/api/pipeline', { cache: 'no-store' });
-      if (res.ok) {
-        const d = await res.json();
-        setData(d);
-        setLastUpdated(new Date());
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error || `Pipeline fetch returned ${res.status}`);
       }
-    } catch (err) {
+      const d = await res.json();
+      setData(d);
+      setLastUpdated(new Date());
+      setError(null);
+    } catch (err: any) {
       console.error('Pipeline load failed:', err);
+      setError(err?.message || 'Could not load pipeline data');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -73,9 +78,20 @@ export default function Dashboard() {
   // Background refresh every 60s so the dashboard reflects fresh webhook
   // events without the user mashing F5. Webhooks fire within seconds of an
   // open/click in Brevo, so this gives near-real-time visibility.
+  //
+  // Skip the tick when the tab is hidden (every call fetches ALL contacts
+  // from Brevo, which is both slow and rate-limited). Refetch immediately
+  // on visibility return so a backgrounded tab catches up the moment it's
+  // focused again.
   useEffect(() => {
-    const interval = setInterval(load, 60_000);
-    return () => clearInterval(interval);
+    const tick = () => { if (!document.hidden) load(); };
+    const interval = setInterval(tick, 60_000);
+    const onVis = () => { if (!document.hidden) load(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVis);
+    };
   }, [load]);
 
   async function handleRefresh() {
@@ -127,22 +143,56 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* Error state — surfaced inline so the rest of the page still renders
+          whatever stale data is in state. Empty data with no error keeps the
+          standard loading/empty UX below. */}
+      {error && (
+        <div className="card" style={{ marginBottom: 20, padding: '14px 18px', borderLeft: '3px solid var(--alert)', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <AlertCircle size={16} color="var(--alert)" />
+          <div style={{ flex: 1, minWidth: 200 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink-900)' }}>Could not load live data</div>
+            <div style={{ fontSize: 12, color: 'var(--ink-500)', marginTop: 2 }}>{error}</div>
+          </div>
+          <button onClick={handleRefresh} disabled={refreshing} className="btn-ghost" style={{ fontSize: 12 }}>
+            {refreshing ? 'Retrying…' : 'Retry'}
+          </button>
+        </div>
+      )}
+
+      {/* First-run empty state — only when Brevo returned successfully and
+          there are genuinely zero contacts. Skips the all-zero funnel + four
+          "no X yet" cards that would otherwise greet a fresh tenant. */}
+      {!loading && !error && data && data.totals.contactsTotal === 0 ? (
+        <div className="card" style={{ padding: 36, textAlign: 'center' }}>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: 22, color: 'var(--ink-900)', marginBottom: 6 }}>No contacts yet</div>
+          <div style={{ fontSize: 13, color: 'var(--ink-500)', marginBottom: 18, lineHeight: 1.5 }}>
+            Add your first business or run a search to start filling the pipeline.
+          </div>
+          <div style={{ display: 'inline-flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+            <Link href="/find" className="btn-ghost" style={{ fontSize: 12.5 }}>⚡ Find businesses</Link>
+            <Link href="/contacts" className="btn-primary" style={{ fontSize: 12.5 }}>+ Add contact</Link>
+          </div>
+        </div>
+      ) : (
+      <>
+
       {/* Funnel visualisation */}
       <div className="card" style={{ marginBottom: 20 }}>
         <div className="card-header">
           <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink-800)' }}>🗺 Outreach Pipeline</span>
           <Link href="/contacts" style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--maroon-600)', textDecoration: 'none' }}>View all contacts →</Link>
         </div>
-        <div style={{ padding: '20px', overflowX: 'auto' }}>
+        <div style={{ padding: '20px' }}>
           {loading ? (
             <div style={{ color: 'var(--ink-400)', fontSize: 13, padding: 20 }}>Loading pipeline…</div>
           ) : (
             <>
-              <div style={{ display: 'flex', alignItems: 'stretch', gap: 8, marginBottom: 20, minWidth: 600 }}>
+              <div className="dash-funnel" style={{ display: 'flex', alignItems: 'stretch', gap: 8, marginBottom: 20 }}>
                 {funnel.map((s, i) => (
-                  <div key={s.key} style={{ display: 'flex', alignItems: 'stretch', flex: 1 }}>
+                  <div key={s.key} className="dash-funnel-step" style={{ display: 'flex', alignItems: 'stretch', flex: 1 }}>
                     <Link
                       href={`/contacts?stage=${s.key}`}
+                      className="dash-funnel-tile"
                       style={{
                         flex: 1,
                         textAlign: 'center',
@@ -154,14 +204,12 @@ export default function Dashboard() {
                         cursor: 'pointer',
                         transition: 'all 0.15s',
                       }}
-                      onMouseOver={(e) => { e.currentTarget.style.background = `${s.color}22`; }}
-                      onMouseOut={(e) => { e.currentTarget.style.background = `${s.color}11`; }}
                     >
-                      <div style={{ fontFamily: 'var(--font-display)', fontSize: 28, fontWeight: 400, color: s.color, lineHeight: 1 }}>{s.count}</div>
-                      <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--ink-500)', marginTop: 6, letterSpacing: '0.04em', textTransform: 'uppercase' }}>{s.label}</div>
+                      <div className="dash-funnel-num" style={{ fontFamily: 'var(--font-display)', fontSize: 28, fontWeight: 400, color: s.color, lineHeight: 1 }}>{s.count}</div>
+                      <div className="dash-funnel-label" style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--ink-500)', marginTop: 6, letterSpacing: '0.04em', textTransform: 'uppercase' }}>{s.label}</div>
                     </Link>
                     {i < funnel.length - 1 && (
-                      <div style={{ display: 'flex', alignItems: 'center', padding: '0 4px', color: 'var(--ink-300)' }}>
+                      <div className="dash-funnel-arrow" style={{ display: 'flex', alignItems: 'center', padding: '0 4px', color: 'var(--ink-300)' }}>
                         <ArrowRight size={14} />
                       </div>
                     )}
@@ -245,6 +293,9 @@ export default function Dashboard() {
           <StatTile icon={<MousePointerClick size={14}/>} label="Clicks" value={data.engagement.clicked} sub={data.engagement.clicked ? 'Hot lead signals' : 'No clicks yet'} color="#1a6b9a" />
           <StatTile icon={<AlertCircle size={14}/>} label="Bounces" value={data.engagement.bounced} sub={data.engagement.bounced ? 'Invalid addresses' : 'No bounces'} color={data.engagement.bounced ? '#b53939' : '#7d6e70'} />
         </div>
+      )}
+
+      </>
       )}
 
       <style>{`
