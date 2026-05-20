@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { sendTransactionalEmail, updateContact } from '@/lib/brevo';
-
-const SENDER_NAME = 'Roam Local Team';
-const SENDER_EMAIL = 'hello@roam-everywhere.com';
+import { getAppSettings } from '@/lib/app-settings';
 
 const signature = `
 <table style="margin-top:24px;padding-top:16px;border-top:1px solid #e4d8dc;font-family:Arial,sans-serif">
@@ -64,7 +62,10 @@ export async function POST(req:NextRequest){
     const {email,businessName,town,knownFor,step}=await req.json();
     if(!email||!businessName||!town) return NextResponse.json({error:'missing required fields'},{status:400});
     const {subject,htmlContent}=buildEmail(step||1,businessName,town,knownFor||'its independent spirit');
-    await sendTransactionalEmail({to:[{email,name:businessName}],subject,htmlContent,senderName:SENDER_NAME,senderEmail:SENDER_EMAIL});
+    // Pull sender from settings each send so the Settings page changes
+    // propagate without a redeploy. Defaults match the previous constants.
+    const { sender } = await getAppSettings();
+    await sendTransactionalEmail({to:[{email,name:businessName}],subject,htmlContent,senderName:sender.name,senderEmail:sender.email,replyToEmail:sender.replyTo});
 
     // Update LAST_CONTACT_DATE so cron can calculate follow-up timing.
     // Routed through lib/brevo so failures throw rather than silently

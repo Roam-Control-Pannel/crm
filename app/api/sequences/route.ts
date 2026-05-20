@@ -2,10 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   recordCronRun,
   sendsToday,
-  DAILY_SEND_CAP,
   type CronRunRecord,
 } from '@/lib/cron-status';
-import { REPLY_TO_ADDRESS, fetchAllContacts } from '@/lib/brevo';
+import { fetchAllContacts } from '@/lib/brevo';
+import { getAppSettings } from '@/lib/app-settings';
 import { safeEqual } from '@/lib/safe-equal';
 
 export const dynamic = 'force-dynamic';
@@ -35,7 +35,12 @@ interface BrevoContact {
 }
 
 const BREVO_BASE = 'https://api.brevo.com/v3';
-const SENDER = { name: 'Roam Local Team', email: 'hello@roam-everywhere.com' };
+
+interface SenderOpts {
+  name: string;
+  email: string;
+  replyTo: string;
+}
 
 function redactEmail(email: string): string {
   const at = email.indexOf('@');
@@ -60,7 +65,8 @@ function authorize(req: NextRequest): { ok: boolean; reason?: string } {
 
 async function sendFollowUp(
   contact: BrevoContact,
-  step: 2 | 3
+  step: 2 | 3,
+  sender: SenderOpts
 ): Promise<boolean> {
   const name = contact.attributes?.BUSINESS_NAME || contact.attributes?.FIRSTNAME || contact.email;
   const town = contact.attributes?.TOWN || 'your area';
@@ -95,11 +101,11 @@ async function sendFollowUp(
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        sender: SENDER,
+        sender: { name: sender.name, email: sender.email },
         to: [{ email: contact.email, name }],
         subject: subjects[step],
         htmlContent: bodies[step],
-        replyTo: { email: REPLY_TO_ADDRESS, name: SENDER.name },
+        replyTo: { email: sender.replyTo, name: sender.name },
       }),
     });
     return res.ok;
@@ -149,6 +155,20 @@ export async function GET(req: NextRequest) {
   let capped = false;
 
   try {
+    // Cadence + cap come from the Settings page (Netlify Blobs). Defaults
+    // mirror the previously hardcoded values so an empty blob preserves
+    // existing behaviour.
+    const settings = await getAppSettings();
+    const senderOpts: SenderOpts = {
+      name: settings.sender.name,
+      email: settings.sender.email,
+      replyTo: settings.sender.replyTo,
+    };
+    const followUpDays = settings.cadence.followUpDays;
+    const finalNudgeDays = settings.cadence.finalNudgeDays;
+    const coldDays = settings.cadence.coldDays;
+    const dailyCap = settings.cadence.dailySendCap;
+
     // Pull every contact across all pages — sequences must reach the full
     // 11k+ list, not just the most recent 500 (see lib/brevo.ts > fetchAllContacts).
     const { contacts } = await fetchAllContacts({ listId });
@@ -171,12 +191,12 @@ export async function GET(req: NextRequest) {
       );
 
       // Day 2 — follow-up
-      if (status === 'email_sent' && daysSince >= 2) {
-        if (alreadySent >= DAILY_SEND_CAP) {
+      if (status === 'email_sent' && daysSince >= followUpDays) {
+        if (alreadySent >= dailyCap) {
           capped = true;
           continue;
         }
-        const sent = await sendFollowUp(contact, 2);
+        const sent = await sendFollowUp(contact, 2, senderOpts);
         if (sent) {
           // Send already happened; if the status update fails we MUST count
           // this as an error — otherwise the next cron run sees the contact
@@ -193,12 +213,12 @@ export async function GET(req: NextRequest) {
         }
       }
       // Day 7 — final nudge
-      else if (status === 'followed_up' && daysSince >= 7) {
-        if (alreadySent >= DAILY_SEND_CAP) {
+      else if (status === 'followed_up' && daysSince >= finalNudgeDays) {
+        if (alreadySent >= dailyCap) {
           capped = true;
           continue;
         }
-        const sent = await sendFollowUp(contact, 3);
+        const sent = await sendFollowUp(contact, 3, senderOpts);
         if (sent) {
           const statusOk = await updateStatus(contact.email, {
             OUTREACH_STATUS: 'final_nudge',
@@ -212,14 +232,14 @@ export async function GET(req: NextRequest) {
         }
       }
       // Day 14 — mark cold
-      else if (status === 'final_nudge' && daysSince >= 14) {
+      else if (status === 'final_nudge' && daysSince >= coldDays) {
         const statusOk = await updateStatus(contact.email, { OUTREACH_STATUS: 'cold' });
         if (statusOk) counts.day14++;
         else counts.errors++;
       }
     }
 
-    const message = `Processed ${counts.processed} contacts · Day 2: ${counts.day2} · Day 7: ${counts.day7} · Day 14: ${counts.day14} cold${capped ? ' · CAPPED at ' + DAILY_SEND_CAP : ''}${counts.errors ? ' · ' + counts.errors + ' errors' : ''}`;
+    const message = `Processed ${counts.processed} contacts · Day ${followUpDays}: ${counts.day2} · Day ${finalNudgeDays}: ${counts.day7} · Day ${coldDays}: ${counts.day14} cold${capped ? ' · CAPPED at ' + dailyCap : ''}${counts.errors ? ' · ' + counts.errors + ' errors' : ''}`;
 
     const record: CronRunRecord = {
       ranAt: now.toISOString(),

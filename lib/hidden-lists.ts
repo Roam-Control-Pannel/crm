@@ -42,3 +42,14 @@ export async function setListHidden(listId: number, hidden: boolean): Promise<nu
   }
   return next;
 }
+
+/** Replace the full set in one write — used by the Settings page's bulk unhide. */
+export async function setHiddenListIds(ids: number[]): Promise<number[]> {
+  const next = Array.from(new Set(ids.filter(id => Number.isInteger(id) && id > 0))).sort((a, b) => a - b);
+  try {
+    await store().setJSON(KEY, { hiddenListIds: next } as any);
+  } catch (err) {
+    console.error('[hidden-lists] bulk write failed:', err);
+  }
+  return next;
+}

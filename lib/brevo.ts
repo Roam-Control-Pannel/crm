@@ -108,6 +108,7 @@ export async function sendTransactionalEmail(data: {
   htmlContent: string;
   senderName?: string;
   senderEmail?: string;
+  replyToEmail?: string;
 }) {
   return brevoFetch('/smtp/email', {
     method: 'POST',
@@ -120,7 +121,7 @@ export async function sendTransactionalEmail(data: {
       subject: data.subject,
       htmlContent: data.htmlContent,
       replyTo: {
-        email: REPLY_TO_ADDRESS,
+        email: data.replyToEmail || REPLY_TO_ADDRESS,
         name: data.senderName || 'Roam Local Team',
       },
     }),
