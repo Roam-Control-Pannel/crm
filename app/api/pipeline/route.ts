@@ -79,6 +79,20 @@ export async function GET(req: NextRequest) {
     const goingCold: AttentionContact[] = []; // final_nudge sent, day 12+ (will auto-cold soon)
     const replied: AttentionContact[] = [];   // status=responded, with reply preview
 
+    // Per-town tally so the dashboard can show which towns/lists have
+    // outbound activity in flight (i.e. at least one contact past
+    // not_contacted). Keyed by lowercased town to dedupe casing variants.
+    interface TownStats {
+      town: string;
+      total: number;
+      contacted: number;
+      opens: number;
+      clicks: number;
+      replies: number;
+      lastActivityAt: string | null;
+    }
+    const townMap = new Map<string, TownStats>();
+
     let contactErrors = 0;
     for (const c of contacts) {
       try {
@@ -102,6 +116,29 @@ export async function GET(req: NextRequest) {
         if (a.LAST_OPENED_AT) opened++;
         if (a.LAST_CLICKED_AT) clicked++;
         if (a.BOUNCED_AT) bounced++;
+
+        // Town breakdown.
+        if (town) {
+          const key = town.trim().toLowerCase();
+          let t = townMap.get(key);
+          if (!t) {
+            t = { town: town.trim(), total: 0, contacted: 0, opens: 0, clicks: 0, replies: 0, lastActivityAt: null };
+            townMap.set(key, t);
+          }
+          t.total++;
+          if (status !== 'not_contacted') t.contacted++;
+          if (a.LAST_OPENED_AT) t.opens++;
+          if (a.LAST_CLICKED_AT) t.clicks++;
+          if (status === 'responded') t.replies++;
+          // Track the most recent outbound signal so we can sort by recency
+          // and show "last activity Xd ago" in the UI later if useful.
+          const candidates = [a.LAST_CONTACT_DATE, a.LAST_OPENED_AT, a.LAST_CLICKED_AT, a.LAST_REPLIED_AT].filter(Boolean) as string[];
+          for (const iso of candidates) {
+            if (!t.lastActivityAt || new Date(iso).getTime() > new Date(t.lastActivityAt).getTime()) {
+              t.lastActivityAt = iso;
+            }
+          }
+        }
 
         // ATTENTION QUEUES
 
@@ -220,6 +257,15 @@ export async function GET(req: NextRequest) {
         goingColdTotal: goingCold.length,
         repliedTotal: replied.length,
       },
+      // Towns with outbound activity in flight (≥1 contact past not_contacted).
+      // Sorted by recency so the most recently-worked towns surface first.
+      towns: Array.from(townMap.values())
+        .filter(t => t.contacted > 0)
+        .sort((a, b) => {
+          const ta = a.lastActivityAt ? new Date(a.lastActivityAt).getTime() : 0;
+          const tb = b.lastActivityAt ? new Date(b.lastActivityAt).getTime() : 0;
+          return tb - ta;
+        }),
       totals: {
         contactsInResults: contacts.length,
         contactsTotal: totalInBrevo,

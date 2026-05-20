@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
-import { Flame, Clock, Snowflake, RefreshCw, ArrowRight, MapPin, Mail, MousePointerClick, CheckCircle, AlertCircle, MessageSquare } from 'lucide-react';
+import { Flame, Clock, Snowflake, RefreshCw, ArrowRight, MapPin, Mail, MousePointerClick, CheckCircle, AlertCircle, MessageSquare, Layers } from 'lucide-react';
 import type { AttentionContact } from '@/lib/types';
 
 interface PipelineStages {
@@ -21,6 +21,16 @@ interface PipelineEngagement {
   bounced: number;
 }
 
+interface TownActivity {
+  town: string;
+  total: number;
+  contacted: number;
+  opens: number;
+  clicks: number;
+  replies: number;
+  lastActivityAt: string | null;
+}
+
 interface PipelineResponse {
   stages: PipelineStages;
   engagement: PipelineEngagement;
@@ -34,6 +44,7 @@ interface PipelineResponse {
     goingColdTotal: number;
     repliedTotal: number;
   };
+  towns: TownActivity[];
   totals: { contactsInResults: number; contactsTotal: number };
 }
 
@@ -285,6 +296,10 @@ export default function Dashboard() {
         />
       </div>
 
+      {/* Active towns — lists/towns with outbound in flight (≥1 contact past
+          not_contacted). Lets you see which areas are actually being worked. */}
+      <ActiveListsCard towns={data?.towns || null} loading={loading} />
+
       {/* Quick stats row */}
       {data && (
         <div className="stat-grid" style={{ marginBottom: 20 }}>
@@ -304,6 +319,80 @@ export default function Dashboard() {
           to   { transform: rotate(360deg); }
         }
       `}</style>
+    </div>
+  );
+}
+
+function ActiveListsCard({ towns, loading }: { towns: TownActivity[] | null; loading: boolean }) {
+  // The pipeline endpoint already filters to towns with ≥1 contact past
+  // not_contacted, so anything that lands here is "active outbound".
+  const active = towns || [];
+  const totalContacted = active.reduce((s, t) => s + t.contacted, 0);
+
+  return (
+    <div className="card" style={{ marginBottom: 20 }}>
+      <div className="card-header">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Layers size={14} color="var(--ink-600)" />
+          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink-800)' }}>Active Towns</span>
+          {!loading && active.length > 0 && (
+            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-400)' }}>
+              ({active.length} town{active.length === 1 ? '' : 's'} · {totalContacted} contacted)
+            </span>
+          )}
+        </div>
+        <span style={{ fontSize: 11.5, color: 'var(--ink-400)' }}>Towns with outbound in flight</span>
+      </div>
+      <div style={{ padding: '16px 18px' }}>
+        {loading ? (
+          <div style={{ color: 'var(--ink-400)', fontSize: 13 }}>Loading towns…</div>
+        ) : active.length === 0 ? (
+          <div style={{ color: 'var(--ink-400)', fontSize: 12.5, textAlign: 'center', padding: '12px 0' }}>
+            No outbound activity yet — send emails to a list to start tracking a town here.
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
+            {active.map(t => (
+              <Link
+                key={t.town}
+                href={`/contacts?search=${encodeURIComponent(t.town)}`}
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 6,
+                  padding: '12px 14px',
+                  background: 'var(--paper)',
+                  border: '1px solid var(--ink-100)',
+                  borderRadius: 'var(--r-md)',
+                  textDecoration: 'none',
+                  color: 'inherit',
+                  transition: 'all 0.15s',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                    <MapPin size={11} color="var(--maroon-600)" />
+                    <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--ink-900)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textTransform: 'capitalize' }}>
+                      {t.town}
+                    </span>
+                  </div>
+                  {t.lastActivityAt && (
+                    <span style={{ fontSize: 10.5, fontWeight: 500, color: 'var(--ink-400)', whiteSpace: 'nowrap' }}>
+                      {timeAgo(t.lastActivityAt)}
+                    </span>
+                  )}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--ink-500)', display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  <span><strong style={{ color: 'var(--ink-800)' }}>{t.contacted}</strong>/{t.total} contacted</span>
+                  {t.opens > 0 && <span style={{ color: '#1a6b9a' }}>{t.opens} opens</span>}
+                  {t.clicks > 0 && <span style={{ color: '#6a3d8c' }}>{t.clicks} clicks</span>}
+                  {t.replies > 0 && <span style={{ color: '#3a7a4d' }}>{t.replies} replies</span>}
+                </div>
+              </Link>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
