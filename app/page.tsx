@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
-import { Flame, Clock, Snowflake, RefreshCw, ArrowRight, MapPin, Mail, MousePointerClick, CheckCircle, AlertCircle, MessageSquare, Layers } from 'lucide-react';
+import { Flame, Clock, Snowflake, RefreshCw, ArrowRight, MapPin, Mail, MousePointerClick, CheckCircle, AlertCircle, MessageSquare, Layers, EyeOff, Eye, X } from 'lucide-react';
 import type { AttentionContact } from '@/lib/types';
 
 interface PipelineStages {
@@ -30,6 +30,7 @@ interface TownActivity {
   clicks: number;
   replies: number;
   lastActivityAt: string | null;
+  hidden: boolean;
 }
 
 interface PipelineResponse {
@@ -299,7 +300,7 @@ export default function Dashboard() {
 
       {/* Active towns — lists/towns with outbound in flight (≥1 contact past
           not_contacted). Lets you see which areas are actually being worked. */}
-      <ActiveListsCard towns={data?.towns || null} loading={loading} />
+      <ActiveListsCard towns={data?.towns || null} loading={loading} onChange={load} />
 
       {/* Quick stats row */}
       {data && (
@@ -324,11 +325,32 @@ export default function Dashboard() {
   );
 }
 
-function ActiveListsCard({ towns, loading }: { towns: TownActivity[] | null; loading: boolean }) {
-  // The pipeline endpoint already filters to towns with ≥1 contact past
-  // not_contacted, so anything that lands here is "active outbound".
-  const active = towns || [];
-  const totalContacted = active.reduce((s, t) => s + t.contacted, 0);
+function ActiveListsCard({ towns, loading, onChange }: { towns: TownActivity[] | null; loading: boolean; onChange: () => void | Promise<void> }) {
+  const [showHidden, setShowHidden] = useState(false);
+  // Track in-flight hide/unhide requests so a tile that's been clicked
+  // greys out immediately rather than waiting for the pipeline refetch.
+  const [pendingIds, setPendingIds] = useState<Set<number>>(new Set());
+
+  const all = towns || [];
+  const visible = all.filter(t => !t.hidden);
+  const hidden = all.filter(t => t.hidden);
+  const totalContacted = visible.reduce((s, t) => s + t.contacted, 0);
+
+  async function toggleHidden(listId: number, hidden: boolean) {
+    setPendingIds(prev => { const n = new Set(prev); n.add(listId); return n; });
+    try {
+      await fetch('/api/lists/hidden', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ listId, hidden }),
+      });
+      await onChange();
+    } catch (err) {
+      console.error('toggle hidden failed:', err);
+    } finally {
+      setPendingIds(prev => { const n = new Set(prev); n.delete(listId); return n; });
+    }
+  }
 
   return (
     <div className="card" style={{ marginBottom: 20 }}>
@@ -336,64 +358,140 @@ function ActiveListsCard({ towns, loading }: { towns: TownActivity[] | null; loa
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <Layers size={14} color="var(--ink-600)" />
           <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink-800)' }}>Active Towns</span>
-          {!loading && active.length > 0 && (
+          {!loading && visible.length > 0 && (
             <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-400)' }}>
-              ({active.length} town{active.length === 1 ? '' : 's'} · {totalContacted} contacted)
+              ({visible.length} town{visible.length === 1 ? '' : 's'} · {totalContacted} contacted)
             </span>
           )}
         </div>
-        <span style={{ fontSize: 11.5, color: 'var(--ink-400)' }}>Towns with outbound in flight</span>
+        {!loading && hidden.length > 0 && (
+          <button
+            onClick={() => setShowHidden(v => !v)}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 5,
+              padding: '4px 10px',
+              background: 'transparent',
+              border: '1px solid var(--ink-200)',
+              borderRadius: 'var(--r-sm)',
+              fontSize: 11,
+              fontWeight: 600,
+              color: 'var(--ink-500)',
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+            }}
+          >
+            {showHidden ? <Eye size={11} /> : <EyeOff size={11} />}
+            {showHidden ? `Hide ${hidden.length} hidden` : `Show ${hidden.length} hidden`}
+          </button>
+        )}
       </div>
       <div style={{ padding: '16px 18px' }}>
         {loading ? (
           <div style={{ color: 'var(--ink-400)', fontSize: 13 }}>Loading towns…</div>
-        ) : active.length === 0 ? (
+        ) : visible.length === 0 && hidden.length === 0 ? (
           <div style={{ color: 'var(--ink-400)', fontSize: 12.5, textAlign: 'center', padding: '12px 0' }}>
             No outbound activity yet — send emails to a list to start tracking a town here.
           </div>
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
-            {active.map(t => (
-              <Link
-                key={t.listId}
-                href={`/contacts?listId=${t.listId}`}
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 6,
-                  padding: '12px 14px',
-                  background: 'var(--paper)',
-                  border: '1px solid var(--ink-100)',
-                  borderRadius: 'var(--r-md)',
-                  textDecoration: 'none',
-                  color: 'inherit',
-                  transition: 'all 0.15s',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                    <MapPin size={11} color="var(--maroon-600)" />
-                    <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--ink-900)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {t.name}
-                    </span>
-                  </div>
-                  {t.lastActivityAt && (
-                    <span style={{ fontSize: 10.5, fontWeight: 500, color: 'var(--ink-400)', whiteSpace: 'nowrap' }}>
-                      {timeAgo(t.lastActivityAt)}
-                    </span>
-                  )}
+          <>
+            {visible.length > 0 && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
+                {visible.map(t => (
+                  <TownTile key={t.listId} town={t} pending={pendingIds.has(t.listId)} onToggle={toggleHidden} />
+                ))}
+              </div>
+            )}
+            {visible.length === 0 && hidden.length > 0 && !showHidden && (
+              <div style={{ color: 'var(--ink-400)', fontSize: 12.5, textAlign: 'center', padding: '12px 0' }}>
+                All {hidden.length} active town{hidden.length === 1 ? ' is' : 's are'} hidden.
+              </div>
+            )}
+            {showHidden && hidden.length > 0 && (
+              <div style={{ marginTop: visible.length > 0 ? 16 : 0, paddingTop: visible.length > 0 ? 16 : 0, borderTop: visible.length > 0 ? '1px solid var(--ink-100)' : 'none' }}>
+                <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--ink-400)', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 10 }}>
+                  Hidden
                 </div>
-                <div style={{ fontSize: 11, color: 'var(--ink-500)', display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                  <span><strong style={{ color: 'var(--ink-800)' }}>{t.contacted}</strong>/{t.total} contacted</span>
-                  {t.opens > 0 && <span style={{ color: '#1a6b9a' }}>{t.opens} opens</span>}
-                  {t.clicks > 0 && <span style={{ color: '#6a3d8c' }}>{t.clicks} clicks</span>}
-                  {t.replies > 0 && <span style={{ color: '#3a7a4d' }}>{t.replies} replies</span>}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
+                  {hidden.map(t => (
+                    <TownTile key={t.listId} town={t} pending={pendingIds.has(t.listId)} onToggle={toggleHidden} />
+                  ))}
                 </div>
-              </Link>
-            ))}
-          </div>
+              </div>
+            )}
+          </>
         )}
       </div>
+    </div>
+  );
+}
+
+function TownTile({ town: t, pending, onToggle }: { town: TownActivity; pending: boolean; onToggle: (listId: number, hidden: boolean) => void }) {
+  return (
+    <div
+      style={{
+        position: 'relative',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 6,
+        padding: '12px 14px',
+        background: 'var(--paper)',
+        border: '1px solid var(--ink-100)',
+        borderRadius: 'var(--r-md)',
+        opacity: pending ? 0.5 : t.hidden ? 0.65 : 1,
+        transition: 'opacity 0.15s',
+      }}
+    >
+      <button
+        onClick={() => onToggle(t.listId, !t.hidden)}
+        disabled={pending}
+        title={t.hidden ? 'Unhide this town' : 'Hide this town from the dashboard'}
+        aria-label={t.hidden ? 'Unhide this town' : 'Hide this town'}
+        style={{
+          position: 'absolute',
+          top: 6,
+          right: 6,
+          width: 20,
+          height: 20,
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: 0,
+          background: 'transparent',
+          border: 'none',
+          borderRadius: 'var(--r-sm)',
+          color: 'var(--ink-400)',
+          cursor: pending ? 'wait' : 'pointer',
+          fontFamily: 'inherit',
+        }}
+      >
+        {t.hidden ? <Eye size={12} /> : <X size={13} />}
+      </button>
+      <Link
+        href={`/contacts?listId=${t.listId}`}
+        style={{ display: 'flex', flexDirection: 'column', gap: 6, textDecoration: 'none', color: 'inherit', paddingRight: 18 }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+            <MapPin size={11} color="var(--maroon-600)" />
+            <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--ink-900)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {t.name}
+            </span>
+          </div>
+          {t.lastActivityAt && (
+            <span style={{ fontSize: 10.5, fontWeight: 500, color: 'var(--ink-400)', whiteSpace: 'nowrap' }}>
+              {timeAgo(t.lastActivityAt)}
+            </span>
+          )}
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--ink-500)', display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          <span><strong style={{ color: 'var(--ink-800)' }}>{t.contacted}</strong>/{t.total} contacted</span>
+          {t.opens > 0 && <span style={{ color: '#1a6b9a' }}>{t.opens} opens</span>}
+          {t.clicks > 0 && <span style={{ color: '#6a3d8c' }}>{t.clicks} clicks</span>}
+          {t.replies > 0 && <span style={{ color: '#3a7a4d' }}>{t.replies} replies</span>}
+        </div>
+      </Link>
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { mostRecentReplyForContact } from '@/lib/replies';
 import { fetchAllContacts } from '@/lib/brevo';
+import { getHiddenListIds } from '@/lib/hidden-lists';
 import type { AttentionContact } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
@@ -52,9 +53,9 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    // Fetch contacts and the list-of-lists in parallel — we need list names
-    // (and ideally the list-level subscriber count) to label the Active Towns
-    // card. Each Brevo list represents a town in this CRM.
+    // Step 1: pull the list-of-lists (each list = one town) and the global
+    // contacts feed in parallel. The global feed drives the funnel/attention
+    // stats; the lists drive the per-list activity tally below.
     const [{ contacts, totalInBrevo }, listsResp] = await Promise.all([
       fetchAllContacts({ listId }),
       fetch(`${BREVO_BASE}/contacts/lists?limit=50&sort=desc`, {
@@ -64,6 +65,53 @@ export async function GET(req: NextRequest) {
     console.log(`[pipeline] fetched ${contacts.length} contacts in ${Date.now() - startedAt}ms`);
 
     const brevoLists: { id: number; name: string; uniqueSubscribers?: number }[] = listsResp?.lists || [];
+
+    // Step 2: fetch contacts per list in parallel. Brevo's global /contacts
+    // endpoint doesn't always populate listIds on every record, so we can't
+    // rely on it for accurate list membership — the per-list endpoint is the
+    // authoritative source. We only need the attributes (status, open/click
+    // timestamps) to compute activity, which the list endpoint returns.
+    //
+    // If the global fetch was already scoped to a single listId, skip the
+    // per-list explosion and just attribute everything to that one list.
+    const listContactsByListId = new Map<number, BrevoContact[]>();
+    if (listId) {
+      const onlyId = Number(listId);
+      if (Number.isInteger(onlyId)) {
+        listContactsByListId.set(onlyId, contacts as BrevoContact[]);
+      }
+    } else {
+      await Promise.all(
+        brevoLists.map(async (bl) => {
+          try {
+            const all: BrevoContact[] = [];
+            let offset = 0;
+            const PAGE = 1000;
+            // Mirror fetchAllContacts' pagination so a 500-contact list isn't truncated.
+            // Cap per-list at 5k pages to keep one runaway list from blowing the timeout.
+            while (offset < 5_000) {
+              const r = await fetch(
+                `${BREVO_BASE}/contacts/lists/${bl.id}/contacts?limit=${PAGE}&offset=${offset}`,
+                { headers: { 'api-key': process.env.BREVO_API_KEY!, 'Content-Type': 'application/json' } }
+              );
+              if (!r.ok) {
+                console.warn(`[pipeline] list ${bl.id} (${bl.name}) fetch returned ${r.status}`);
+                break;
+              }
+              const data = await r.json();
+              const page: BrevoContact[] = data.contacts || [];
+              all.push(...page);
+              if (page.length < PAGE) break;
+              offset += PAGE;
+            }
+            listContactsByListId.set(bl.id, all);
+          } catch (err: any) {
+            console.warn(`[pipeline] list ${bl.id} (${bl.name}) fetch failed:`, err?.message);
+            listContactsByListId.set(bl.id, []);
+          }
+        })
+      );
+    }
 
     const now = new Date();
 
@@ -89,11 +137,9 @@ export async function GET(req: NextRequest) {
     const goingCold: AttentionContact[] = []; // final_nudge sent, day 12+ (will auto-cold soon)
     const replied: AttentionContact[] = [];   // status=responded, with reply preview
 
-    // Per-list tally so the dashboard can show which lists/towns have
-    // outbound activity in flight. We key by Brevo listId (the real source
-    // of truth — TOWN attribute is free-form and unreliable). Seed the map
-    // up-front so lists with names but zero matching contacts still get a
-    // total of 0 (and stay filtered out by contacted>0 downstream).
+    // Per-list activity stats. Computed below from the per-list contact
+    // fetches, not from listIds on the global feed (that field isn't always
+    // populated, which caused active lists like Darlington to silently drop).
     interface ListStats {
       listId: number;
       name: string;
@@ -103,20 +149,9 @@ export async function GET(req: NextRequest) {
       clicks: number;
       replies: number;
       lastActivityAt: string | null;
+      hidden: boolean;
     }
-    const listMap = new Map<number, ListStats>();
-    for (const bl of brevoLists) {
-      listMap.set(bl.id, {
-        listId: bl.id,
-        name: bl.name,
-        total: 0,
-        contacted: 0,
-        opens: 0,
-        clicks: 0,
-        replies: 0,
-        lastActivityAt: null,
-      });
-    }
+    const hiddenListIds = new Set(await getHiddenListIds());
 
     let contactErrors = 0;
     for (const c of contacts) {
@@ -142,33 +177,8 @@ export async function GET(req: NextRequest) {
         if (a.LAST_CLICKED_AT) clicked++;
         if (a.BOUNCED_AT) bounced++;
 
-        // List/town breakdown — tally per Brevo list the contact belongs to.
-        // A contact in multiple lists contributes to each (intentional: both
-        // lists are genuinely "in flight" for that contact).
-        const contactLists = c.listIds || [];
-        if (contactLists.length > 0) {
-          const candidates = [a.LAST_CONTACT_DATE, a.LAST_OPENED_AT, a.LAST_CLICKED_AT, a.LAST_REPLIED_AT].filter(Boolean) as string[];
-          for (const lid of contactLists) {
-            let t = listMap.get(lid);
-            if (!t) {
-              // Contact references a list we didn't get from /contacts/lists
-              // (e.g. archived, or the lists endpoint capped at 50). Create a
-              // stub so we still surface it rather than silently dropping.
-              t = { listId: lid, name: `List ${lid}`, total: 0, contacted: 0, opens: 0, clicks: 0, replies: 0, lastActivityAt: null };
-              listMap.set(lid, t);
-            }
-            t.total++;
-            if (status !== 'not_contacted') t.contacted++;
-            if (a.LAST_OPENED_AT) t.opens++;
-            if (a.LAST_CLICKED_AT) t.clicks++;
-            if (status === 'responded') t.replies++;
-            for (const iso of candidates) {
-              if (!t.lastActivityAt || new Date(iso).getTime() > new Date(t.lastActivityAt).getTime()) {
-                t.lastActivityAt = iso;
-              }
-            }
-          }
-        }
+        // Per-list breakdown happens AFTER this loop, from the per-list
+        // fetches (authoritative for membership). Nothing to do here.
 
         // ATTENTION QUEUES
 
@@ -236,6 +246,39 @@ export async function GET(req: NextRequest) {
     if (contactErrors > 0) {
       console.warn(`[pipeline] skipped ${contactErrors} contacts due to errors`);
     }
+
+    // Build per-list activity from the per-list contact fetches.
+    const listMap = new Map<number, ListStats>();
+    for (const bl of brevoLists) {
+      const listContacts = listContactsByListId.get(bl.id) || [];
+      const stat: ListStats = {
+        listId: bl.id,
+        name: bl.name,
+        total: listContacts.length,
+        contacted: 0,
+        opens: 0,
+        clicks: 0,
+        replies: 0,
+        lastActivityAt: null,
+        hidden: hiddenListIds.has(bl.id),
+      };
+      for (const c of listContacts) {
+        const a = c.attributes || {};
+        const status = a.OUTREACH_STATUS || 'not_contacted';
+        if (status !== 'not_contacted') stat.contacted++;
+        if (a.LAST_OPENED_AT) stat.opens++;
+        if (a.LAST_CLICKED_AT) stat.clicks++;
+        if (status === 'responded') stat.replies++;
+        const candidates = [a.LAST_CONTACT_DATE, a.LAST_OPENED_AT, a.LAST_CLICKED_AT, a.LAST_REPLIED_AT].filter(Boolean) as string[];
+        for (const iso of candidates) {
+          if (!stat.lastActivityAt || new Date(iso).getTime() > new Date(stat.lastActivityAt).getTime()) {
+            stat.lastActivityAt = iso;
+          }
+        }
+      }
+      listMap.set(bl.id, stat);
+    }
+    console.log(`[pipeline] per-list tally: ${Array.from(listMap.values()).map(l => `${l.name}=${l.contacted}/${l.total}`).join(', ')}`);
 
     // Sort attention queues so the most urgent surface first.
     hottest.sort((a, b) => new Date(b.signalAt).getTime() - new Date(a.signalAt).getTime());
