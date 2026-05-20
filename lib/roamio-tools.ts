@@ -153,6 +153,68 @@ const BRAIN_TOOLS = [
       required: ['content', 'description', 'tags'],
     },
   },
+  {
+    name: 'search_brain',
+    description:
+      'Search the user\'s Brain knowledge base for items matching a query, tags, or folder. ' +
+      'Use this BEFORE answering questions that reference past saves, uploaded documents, or ' +
+      'anything the user may have stored. Returns matching items with description, tags, and ' +
+      'mime type — but NOT full content. To read the body of a specific item, call read_brain_item ' +
+      'with its id. Prefer narrowing by tags when the user mentions a topic (e.g. partnership, ' +
+      'darlington) and by folder when they say "in my documents" or similar.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        q: { type: 'string', description: 'Free-text query matched against description and tags. Optional.' },
+        tags: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Tags that must all match (case-insensitive). Optional.',
+        },
+        folder: { type: 'string', description: 'Folder name or id to restrict the search to. Optional.' },
+        type: { type: 'string', enum: ['document', 'image', 'all'], description: 'Filter by item type. Default "all". Use "document" for saved text/markdown/PDFs.' },
+        limit: { type: 'number', description: 'Max results to return. Default 10, max 50.' },
+      },
+    },
+  },
+  {
+    name: 'read_brain_item',
+    description:
+      'Fetch the full text content of a single Brain item by id. Returns the markdown/text body ' +
+      'so you can quote, summarise, or build on it. Binary items (PDFs, images) return metadata ' +
+      'only with a URL — tell the user to open the item directly rather than trying to read it. ' +
+      'Get item ids from search_brain.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        id: { type: 'string', description: 'The Brain item id (starts with "itm_").' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'generate_document',
+    description:
+      'Write a new document into the Brain. Use when the user asks you to draft, write, produce, ' +
+      'or compile something they want to keep — strategy notes, meeting recaps, partnership briefs, ' +
+      'town research, etc. Content should be well-formatted markdown with headings and sections. ' +
+      'The document lands in the "Roam-io documents" folder and is downloadable as Markdown or PDF ' +
+      'from the Brain page. Before writing, call search_brain + read_brain_item to gather any ' +
+      'relevant context the user has already saved.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        title: { type: 'string', description: 'Document title. Used as the Brain card description, max 140 chars.' },
+        content: { type: 'string', description: 'The full document body in markdown. Use ## for sections.' },
+        tags: {
+          type: 'array',
+          items: { type: 'string' },
+          description: '2-6 short lowercase kebab-case tags so the doc is findable later. Include topic + type (e.g. "darlington", "strategy", "outreach-plan").',
+        },
+      },
+      required: ['title', 'content', 'tags'],
+    },
+  },
 ];
 
 // =================================================================
@@ -169,6 +231,9 @@ export const REQUIRES_CONFIRM: Record<string, boolean> = {
   delete_task: true,     // definitely confirm
   // Brain
   save_to_brain: true,   // user should see what's being saved before it lands
+  search_brain: false,   // read, no side effects
+  read_brain_item: false,// read, no side effects
+  generate_document: true, // creating a new doc — let the user see the title before it lands
   // Social — reads silent, edits silent, destructive/expensive confirm.
   list_briefs: false,
   list_themes: false,
@@ -502,6 +567,94 @@ export async function executeTool(name: string, input: any): Promise<any> {
         savedTo: data.item?.folderId ? 'Brain' : 'Brain (root)',
         description: data.item?.description,
         tags: data.item?.tags,
+      };
+    }
+
+    case 'search_brain': {
+      const baseUrl = process.env.URL || process.env.DEPLOY_PRIME_URL || 'http://localhost:3000';
+      const params = new URLSearchParams();
+      if (input.q) params.set('q', String(input.q));
+      if (Array.isArray(input.tags) && input.tags.length > 0) params.set('tags', input.tags.join(','));
+      if (input.folder) params.set('folder', String(input.folder));
+      if (input.type) params.set('type', String(input.type));
+      params.set('limit', String(Math.min(50, Math.max(1, Number(input.limit) || 10))));
+      const res = await fetch(`${baseUrl}/api/brain/search?${params.toString()}`);
+      const data = await res.json();
+      if (!data.ok) return { ok: false, error: data.error || 'Search failed' };
+      // Trim per-item payload — the AI just needs id, description, tags,
+      // mime to decide whether to read_brain_item next. Skip URL etc.
+      return {
+        ok: true,
+        count: data.count,
+        items: (data.items || []).map((i: any) => ({
+          id: i.id,
+          description: i.description,
+          tags: i.tags,
+          mime: i.mime,
+          folder: i.folder,
+          uploadedAt: i.uploadedAt,
+        })),
+      };
+    }
+
+    case 'read_brain_item': {
+      const baseUrl = process.env.URL || process.env.DEPLOY_PRIME_URL || 'http://localhost:3000';
+      const id = String(input.id || '');
+      if (!id) return { ok: false, error: 'id required' };
+      const res = await fetch(`${baseUrl}/api/brain/items/${encodeURIComponent(id)}/content`);
+      const data = await res.json();
+      if (!data.ok) return { ok: false, error: data.error || 'Read failed' };
+      if (data.binary) {
+        return {
+          ok: true,
+          binary: true,
+          description: data.item?.description,
+          tags: data.item?.tags,
+          mime: data.item?.mime,
+          message: 'This item is a binary file (PDF or image). Tell the user to open it from the Brain page — you cannot read its contents directly.',
+        };
+      }
+      // Cap content the model sees to avoid blowing the context on huge
+      // saves. The user is welcome to open the full item from the Brain UI.
+      const MAX = 30_000;
+      const content: string = data.content || '';
+      return {
+        ok: true,
+        description: data.item?.description,
+        tags: data.item?.tags,
+        truncated: content.length > MAX,
+        content: content.length > MAX ? content.slice(0, MAX) + '\n\n…[truncated]' : content,
+      };
+    }
+
+    case 'generate_document': {
+      const baseUrl = process.env.URL || process.env.DEPLOY_PRIME_URL || 'http://localhost:3000';
+      const title = String(input.title || '').slice(0, 140);
+      const content = String(input.content || '');
+      const tags: string[] = Array.isArray(input.tags) ? input.tags.slice(0, 6) : [];
+      if (!title || !content) return { ok: false, error: 'title and content required' };
+      // Prepend a title heading if the content doesn't already lead with one.
+      const body = /^\s*#\s+/.test(content) ? content : `# ${title}\n\n${content}`;
+      const res = await fetch(`${baseUrl}/api/brain/items`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content: body,
+          tags: Array.from(new Set([...tags, 'ai-generated'])),
+          description: title,
+          source: 'roam-io-document',
+          folderName: 'Roam-io documents',
+        }),
+      });
+      const data = await res.json();
+      if (!data.ok) return { ok: false, error: data.error || 'Save failed' };
+      return {
+        ok: true,
+        id: data.item?.id,
+        title,
+        tags: data.item?.tags,
+        folder: 'Roam-io documents',
+        message: 'Document saved. The user can open it from the Brain page and download as Markdown or print to PDF.',
       };
     }
 
