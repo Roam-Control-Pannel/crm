@@ -194,6 +194,7 @@ export interface BrevoContactRecord {
   id: number;
   email: string;
   attributes?: Record<string, string>;
+  listIds?: number[];
 }
 
 export async function fetchAllContacts(

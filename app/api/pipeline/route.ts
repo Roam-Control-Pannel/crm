@@ -52,8 +52,18 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const { contacts, totalInBrevo } = await fetchAllContacts({ listId });
+    // Fetch contacts and the list-of-lists in parallel — we need list names
+    // (and ideally the list-level subscriber count) to label the Active Towns
+    // card. Each Brevo list represents a town in this CRM.
+    const [{ contacts, totalInBrevo }, listsResp] = await Promise.all([
+      fetchAllContacts({ listId }),
+      fetch(`${BREVO_BASE}/contacts/lists?limit=50&sort=desc`, {
+        headers: { 'api-key': process.env.BREVO_API_KEY!, 'Content-Type': 'application/json' },
+      }).then(r => r.ok ? r.json() : { lists: [] }).catch(() => ({ lists: [] })),
+    ]);
     console.log(`[pipeline] fetched ${contacts.length} contacts in ${Date.now() - startedAt}ms`);
+
+    const brevoLists: { id: number; name: string; uniqueSubscribers?: number }[] = listsResp?.lists || [];
 
     const now = new Date();
 
@@ -79,11 +89,14 @@ export async function GET(req: NextRequest) {
     const goingCold: AttentionContact[] = []; // final_nudge sent, day 12+ (will auto-cold soon)
     const replied: AttentionContact[] = [];   // status=responded, with reply preview
 
-    // Per-town tally so the dashboard can show which towns/lists have
-    // outbound activity in flight (i.e. at least one contact past
-    // not_contacted). Keyed by lowercased town to dedupe casing variants.
-    interface TownStats {
-      town: string;
+    // Per-list tally so the dashboard can show which lists/towns have
+    // outbound activity in flight. We key by Brevo listId (the real source
+    // of truth — TOWN attribute is free-form and unreliable). Seed the map
+    // up-front so lists with names but zero matching contacts still get a
+    // total of 0 (and stay filtered out by contacted>0 downstream).
+    interface ListStats {
+      listId: number;
+      name: string;
       total: number;
       contacted: number;
       opens: number;
@@ -91,7 +104,19 @@ export async function GET(req: NextRequest) {
       replies: number;
       lastActivityAt: string | null;
     }
-    const townMap = new Map<string, TownStats>();
+    const listMap = new Map<number, ListStats>();
+    for (const bl of brevoLists) {
+      listMap.set(bl.id, {
+        listId: bl.id,
+        name: bl.name,
+        total: 0,
+        contacted: 0,
+        opens: 0,
+        clicks: 0,
+        replies: 0,
+        lastActivityAt: null,
+      });
+    }
 
     let contactErrors = 0;
     for (const c of contacts) {
@@ -117,25 +142,30 @@ export async function GET(req: NextRequest) {
         if (a.LAST_CLICKED_AT) clicked++;
         if (a.BOUNCED_AT) bounced++;
 
-        // Town breakdown.
-        if (town) {
-          const key = town.trim().toLowerCase();
-          let t = townMap.get(key);
-          if (!t) {
-            t = { town: town.trim(), total: 0, contacted: 0, opens: 0, clicks: 0, replies: 0, lastActivityAt: null };
-            townMap.set(key, t);
-          }
-          t.total++;
-          if (status !== 'not_contacted') t.contacted++;
-          if (a.LAST_OPENED_AT) t.opens++;
-          if (a.LAST_CLICKED_AT) t.clicks++;
-          if (status === 'responded') t.replies++;
-          // Track the most recent outbound signal so we can sort by recency
-          // and show "last activity Xd ago" in the UI later if useful.
+        // List/town breakdown — tally per Brevo list the contact belongs to.
+        // A contact in multiple lists contributes to each (intentional: both
+        // lists are genuinely "in flight" for that contact).
+        const contactLists = c.listIds || [];
+        if (contactLists.length > 0) {
           const candidates = [a.LAST_CONTACT_DATE, a.LAST_OPENED_AT, a.LAST_CLICKED_AT, a.LAST_REPLIED_AT].filter(Boolean) as string[];
-          for (const iso of candidates) {
-            if (!t.lastActivityAt || new Date(iso).getTime() > new Date(t.lastActivityAt).getTime()) {
-              t.lastActivityAt = iso;
+          for (const lid of contactLists) {
+            let t = listMap.get(lid);
+            if (!t) {
+              // Contact references a list we didn't get from /contacts/lists
+              // (e.g. archived, or the lists endpoint capped at 50). Create a
+              // stub so we still surface it rather than silently dropping.
+              t = { listId: lid, name: `List ${lid}`, total: 0, contacted: 0, opens: 0, clicks: 0, replies: 0, lastActivityAt: null };
+              listMap.set(lid, t);
+            }
+            t.total++;
+            if (status !== 'not_contacted') t.contacted++;
+            if (a.LAST_OPENED_AT) t.opens++;
+            if (a.LAST_CLICKED_AT) t.clicks++;
+            if (status === 'responded') t.replies++;
+            for (const iso of candidates) {
+              if (!t.lastActivityAt || new Date(iso).getTime() > new Date(t.lastActivityAt).getTime()) {
+                t.lastActivityAt = iso;
+              }
             }
           }
         }
@@ -257,9 +287,10 @@ export async function GET(req: NextRequest) {
         goingColdTotal: goingCold.length,
         repliedTotal: replied.length,
       },
-      // Towns with outbound activity in flight (≥1 contact past not_contacted).
-      // Sorted by recency so the most recently-worked towns surface first.
-      towns: Array.from(townMap.values())
+      // Lists/towns with outbound activity in flight (≥1 contact past
+      // not_contacted). Sorted by recency so the most recently-worked
+      // surface first. Empty placeholder lists are filtered out.
+      towns: Array.from(listMap.values())
         .filter(t => t.contacted > 0)
         .sort((a, b) => {
           const ta = a.lastActivityAt ? new Date(a.lastActivityAt).getTime() : 0;
