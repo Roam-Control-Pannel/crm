@@ -10,6 +10,18 @@ interface Contact {
   listIds?: number[];
 }
 
+interface TownActivity {
+  listId: number;
+  name: string;
+  total: number;
+  contacted: number;
+  opens: number;
+  clicks: number;
+  replies: number;
+  lastActivityAt: string | null;
+  hidden: boolean;
+}
+
 type SendState = 'idle' | 'sending' | 'done' | 'error';
 
 /**
@@ -129,6 +141,12 @@ export default function QueuePage() {
   const [activeListId, setActiveListId] = useState<number | null>(null);
   const [sendStates, setSendStates] = useState<Record<string, SendState>>({});
   const [pendingPause, setPendingPause] = useState<Set<string>>(new Set());
+  // Active towns share the same data as the dashboard's Active Towns card —
+  // the /api/pipeline endpoint computes per-list activity stats and respects
+  // hidden lists. Reusing that means the queue filter strip and the
+  // dashboard tell the same story without an extra endpoint.
+  const [towns, setTowns] = useState<TownActivity[]>([]);
+  const [townsLoading, setTownsLoading] = useState(true);
 
   const loadContacts = useCallback(async () => {
     setLoading(true);
@@ -145,7 +163,21 @@ export default function QueuePage() {
     }
   }, [activeListId]);
 
+  const loadTowns = useCallback(async () => {
+    try {
+      const res = await fetch('/api/pipeline', { cache: 'no-store' });
+      if (!res.ok) return;
+      const d = await res.json();
+      setTowns(Array.isArray(d.towns) ? d.towns : []);
+    } catch (err) {
+      console.error('loadTowns failed:', err);
+    } finally {
+      setTownsLoading(false);
+    }
+  }, []);
+
   useEffect(() => { loadContacts(); }, [loadContacts]);
+  useEffect(() => { loadTowns(); }, [loadTowns]);
 
   // Bucket contacts by column. Single pass; uses our COLUMN_DEFS to keep
   // the column order and status mapping in one place.
@@ -234,8 +266,15 @@ export default function QueuePage() {
         </p>
       </div>
 
+      <TownFilterStrip
+        towns={towns}
+        loading={townsLoading}
+        activeListId={activeListId}
+        onSelect={setActiveListId}
+      />
+
       <div style={{ marginBottom: 16 }}>
-        <BrevoListSelector value={activeListId} onChange={setActiveListId} onSync={loadContacts} />
+        <BrevoListSelector value={activeListId} onChange={setActiveListId} onSync={async () => { await Promise.all([loadContacts(), loadTowns()]); }} />
       </div>
 
       {loading ? (
@@ -286,6 +325,106 @@ export default function QueuePage() {
         }
       `}</style>
     </div>
+  );
+}
+
+function TownFilterStrip({ towns, loading, activeListId, onSelect }: {
+  towns: TownActivity[];
+  loading: boolean;
+  activeListId: number | null;
+  onSelect: (id: number | null) => void;
+}) {
+  // Hidden towns stay hidden here too — same data as the dashboard card.
+  const visible = towns.filter(t => !t.hidden);
+  const totalContacted = visible.reduce((s, t) => s + t.contacted, 0);
+
+  return (
+    <div className="card" style={{ marginBottom: 12 }}>
+      <div className="card-header">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <MapPin size={13} color="var(--ink-600)" />
+          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink-800)' }}>Filter by town</span>
+          {!loading && visible.length > 0 && (
+            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-400)' }}>
+              ({visible.length} active · {totalContacted} contacted)
+            </span>
+          )}
+        </div>
+      </div>
+      <div style={{ padding: '12px 14px' }}>
+        {loading ? (
+          <div style={{ fontSize: 12, color: 'var(--ink-400)' }}>Loading towns…</div>
+        ) : visible.length === 0 ? (
+          <div style={{ fontSize: 12, color: 'var(--ink-400)' }}>
+            No active towns yet. Enrol a business below to start one.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            <FilterChip
+              label="All towns"
+              meta={`${totalContacted} contacted`}
+              selected={activeListId === null}
+              onClick={() => onSelect(null)}
+            />
+            {visible.map(t => (
+              <FilterChip
+                key={t.listId}
+                label={t.name}
+                meta={`${t.contacted}/${t.total} · ${t.opens} opens · ${t.clicks} clicks${t.replies ? ` · ${t.replies} replies` : ''}`}
+                selected={activeListId === t.listId}
+                onClick={() => onSelect(t.listId)}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function FilterChip({ label, meta, selected, onClick }: { label: string; meta: string; selected: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        display: 'inline-flex',
+        flexDirection: 'column',
+        alignItems: 'flex-start',
+        gap: 2,
+        padding: '8px 12px',
+        background: selected ? 'var(--maroon-600)' : 'var(--paper)',
+        color: selected ? '#fff' : 'var(--ink-800)',
+        border: `1px solid ${selected ? 'var(--maroon-600)' : 'var(--ink-100)'}`,
+        borderRadius: 'var(--r-md)',
+        fontFamily: 'inherit',
+        cursor: 'pointer',
+        textAlign: 'left',
+        maxWidth: 260,
+        transition: 'all 0.12s',
+      }}
+    >
+      <span style={{
+        fontSize: 12.5,
+        fontWeight: 700,
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+        maxWidth: '100%',
+      }}>
+        {label}
+      </span>
+      <span style={{
+        fontSize: 10.5,
+        fontWeight: 500,
+        opacity: selected ? 0.85 : 0.7,
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+        maxWidth: '100%',
+      }}>
+        {meta}
+      </span>
+    </button>
   );
 }
 
