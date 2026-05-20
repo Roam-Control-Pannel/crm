@@ -29,6 +29,7 @@ function blankBrief(): Brief {
     color: COLORS[0],
     active: true,
     createdAt: new Date().toISOString(),
+    brandVoice: '',
   };
 }
 
@@ -171,6 +172,18 @@ export default function BriefsPage() {
 
             <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-500)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Content brief</label>
             <textarea value={form.contentBrief} onChange={e => setForm({ ...form, contentBrief: e.target.value })} placeholder="What kind of content lives in this track?" rows={3} style={{ width: '100%', padding: '8px 10px', border: '1.5px solid var(--ink-200)', borderRadius: 'var(--r-sm)', fontSize: 13, marginTop: 4, marginBottom: 12, fontFamily: 'inherit', resize: 'vertical' }} />
+
+            <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-500)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Brand voice guide</label>
+            <textarea
+              value={form.brandVoice || ''}
+              onChange={e => setForm({ ...form, brandVoice: e.target.value })}
+              placeholder={'Phrasing, vocabulary, do/don\'ts, taglines. Anything the AI should follow when writing for this brand.\n\nExample:\n- Always use "discover", never "find"\n- Sentence-case headings, never title-case\n- Avoid corporate jargon — write like a knowledgeable friend\n- Tagline: "Discover the best of your town"'}
+              rows={8}
+              style={{ width: '100%', padding: '8px 10px', border: '1.5px solid var(--ink-200)', borderRadius: 'var(--r-sm)', fontSize: 13, marginTop: 4, marginBottom: 4, fontFamily: 'inherit', resize: 'vertical', lineHeight: 1.5 }}
+            />
+            <div style={{ fontSize: 10.5, color: 'var(--ink-400)', marginBottom: 12 }}>
+              Roam-io reads this whenever writing or rewriting content for this brief.
+            </div>
 
             <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-500)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Hashtags</label>
             <input value={form.hashtags} onChange={e => setForm({ ...form, hashtags: e.target.value })} placeholder="#RoamLocal #HiddenGems" style={{ width: '100%', padding: '8px 10px', border: '1.5px solid var(--ink-200)', borderRadius: 'var(--r-sm)', fontSize: 13, marginTop: 4, marginBottom: 12, fontFamily: 'inherit' }} />

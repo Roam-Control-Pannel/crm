@@ -14,6 +14,13 @@ export interface Brief {
   color: string;
   active: boolean;
   createdAt: string;
+  /**
+   * Long-form brand voice guide for this brief. Free-text — usually a few
+   * paragraphs covering vocabulary, phrasing dos/don'ts, taglines, and any
+   * other voice rules the AI should follow when writing for this brand.
+   * Injected into the Roam-io system prompt so generated content sounds on-brand.
+   */
+  brandVoice?: string;
 }
 
 export const DEFAULT_BRIEFS: Brief[] = [

@@ -11,6 +11,7 @@ const ITEMS_KEY = 'items';
 interface Item {
   id: string; blobId: string; folderId: string | null;
   tags: string[]; description: string; mime: string; size: number; uploadedAt: string;
+  sourceUrl?: string;
 }
 
 interface RouteParams { params: { id: string } }
@@ -40,6 +41,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams) {
       uploadedAt: item.uploadedAt,
       folderId: item.folderId,
       url: `/api/images/${item.blobId}`,
+      ...(item.sourceUrl ? { sourceUrl: item.sourceUrl } : {}),
     };
 
     // Text-ish content → return the body inline so the AI tool can read it

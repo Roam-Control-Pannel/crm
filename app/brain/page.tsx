@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, useMemo, useRef } from 'react';
 import Link from 'next/link';
-import { Plus, FolderPlus, Folder as FolderIcon, ChevronRight, Upload, X, Edit3, Trash2, Search, Brain as BrainIcon, ChevronDown, Image as ImageIcon, Loader, FileText, Download, Printer, Sparkles, ExternalLink } from 'lucide-react';
+import { Plus, FolderPlus, Folder as FolderIcon, ChevronRight, Upload, X, Edit3, Trash2, Search, Brain as BrainIcon, ChevronDown, Image as ImageIcon, Loader, FileText, Download, Printer, Sparkles, ExternalLink, Link as LinkIcon, Globe } from 'lucide-react';
 import {
   Folder, BrainItem, FolderNode,
   fetchFolders, createFolder, renameFolder, deleteFolder,
@@ -46,6 +46,12 @@ export default function BrainPage() {
 
   const [uploading, setUploading] = useState(0); // count of in-flight uploads
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // URL save modal
+  const [showUrlModal, setShowUrlModal] = useState(false);
+  const [urlForm, setUrlForm] = useState({ url: '', tags: '' });
+  const [urlSaving, setUrlSaving] = useState(false);
+  const [urlError, setUrlError] = useState<string | null>(null);
 
   // Initial load
   async function load() {
@@ -149,6 +155,38 @@ export default function BrainPage() {
     return () => { cancelled = true; };
   }, [editing?.id, editing?.mime]);
 
+  async function submitUrl() {
+    const url = urlForm.url.trim();
+    if (!url) return;
+    setUrlSaving(true);
+    setUrlError(null);
+    try {
+      const tags = urlForm.tags.split(',').map(t => t.trim()).filter(Boolean);
+      const res = await fetch('/api/brain/items', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url,
+          tags,
+          folderName: 'Roam-io documents',
+          source: 'roam-io-url',
+        }),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        setUrlError(data.error || 'Could not save URL');
+        return;
+      }
+      setShowUrlModal(false);
+      setUrlForm({ url: '', tags: '' });
+      await load();
+    } catch (err: any) {
+      setUrlError(err?.message || 'Network error');
+    } finally {
+      setUrlSaving(false);
+    }
+  }
+
   async function downloadAsMarkdown(item: BrainItem) {
     const res = await fetch(`/api/brain/items/${item.id}/content`);
     const d = await res.json();
@@ -243,6 +281,7 @@ export default function BrainPage() {
           >
             <Sparkles size={13}/> Generate with Roam-io
           </Link>
+          <button onClick={() => { setUrlForm({ url: '', tags: '' }); setUrlError(null); setShowUrlModal(true); }} style={btnG}><LinkIcon size={13}/> Add URL</button>
           <button onClick={() => setCreatingFolder(true)} style={btnG}><FolderPlus size={13}/> New folder</button>
           <button onClick={() => fileInputRef.current?.click()} style={btnP} disabled={uploading > 0}>
             {uploading > 0 ? <><Loader size={13} className="spin"/> Uploading {uploading}…</> : <><Upload size={13}/> Upload</>}
@@ -393,12 +432,17 @@ export default function BrainPage() {
                             <FileText size={32} />
                             <div style={{ fontSize: 9, fontWeight: 600, letterSpacing: '0.08em' }}>PDF</div>
                           </div>
-                        : <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(135deg, #f5ecef 0%, #fff4e0 100%)', color: 'var(--maroon-700)', gap: 6 }}>
-                            <FileText size={32} />
-                            <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
-                              {item.tags?.includes('ai-generated') ? 'AI Document' : 'Document'}
+                        : item.sourceUrl
+                          ? <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(135deg, #e8f1f8 0%, #f1e8f5 100%)', color: '#1a6b9a', gap: 6 }}>
+                              <Globe size={32} />
+                              <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' }}>Web page</div>
                             </div>
-                          </div>}
+                          : <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(135deg, #f5ecef 0%, #fff4e0 100%)', color: 'var(--maroon-700)', gap: 6 }}>
+                              <FileText size={32} />
+                              <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+                                {item.tags?.includes('ai-generated') ? 'AI Document' : 'Document'}
+                              </div>
+                            </div>}
                   </div>
                   <div style={{ padding: 10 }}>
                     <div style={{ fontSize: 11, color: 'var(--ink-700)', lineHeight: 1.4, height: 30, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', textOverflow: 'ellipsis' }}>
@@ -440,6 +484,26 @@ export default function BrainPage() {
                 <img src={imageUrl(editing)} alt="" style={{ width: '100%', maxHeight: 280, objectFit: 'contain', background: 'var(--paper)', borderRadius: 'var(--r-md)', marginBottom: 14 }}/>
               ) : (editing.mime === 'text/markdown' || editing.mime === 'text/plain' || editing.mime?.startsWith('text/')) ? (
                 <>
+                  {editing.sourceUrl && (
+                    <div style={{
+                      display: 'flex', alignItems: 'center', gap: 6,
+                      padding: '8px 12px', marginBottom: 12,
+                      background: '#e8f1f8', border: '1px solid #cbe0ef',
+                      borderRadius: 'var(--r-sm)', fontSize: 12,
+                    }}>
+                      <Globe size={12} color="#1a6b9a" />
+                      <span style={{ color: 'var(--ink-500)', fontWeight: 600 }}>Source:</span>
+                      <a
+                        href={editing.sourceUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ color: '#1a6b9a', textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}
+                      >
+                        {editing.sourceUrl}
+                      </a>
+                      <ExternalLink size={11} color="#1a6b9a" />
+                    </div>
+                  )}
                   <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
                     <button onClick={() => downloadAsMarkdown(editing)} style={{ ...btnG, fontSize: 12 }}>
                       <Download size={12}/> Download .md
@@ -512,6 +576,60 @@ export default function BrainPage() {
               <div style={{ display: 'flex', gap: 8 }}>
                 <button onClick={() => setEditing(null)} style={btnG}>Cancel</button>
                 <button onClick={saveEdit} style={btnP}>Save</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add URL modal — paste a link, optionally tag it, scrape & save. */}
+      {showUrlModal && (
+        <div
+          className="soc-modal-overlay"
+          style={{ zIndex: 500 }}
+          onClick={e => { if (e.target === e.currentTarget && !urlSaving) setShowUrlModal(false); }}
+        >
+          <div className="soc-modal-panel" style={{ width: 520 }}>
+            <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--ink-100)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontFamily: 'var(--font-display)', fontSize: 18, color: 'var(--ink-900)' }}>
+                <LinkIcon size={16}/> Add a URL to your Brain
+              </div>
+              <button onClick={() => { if (!urlSaving) setShowUrlModal(false); }} style={{ ...btnG, padding: '4px 8px' }}><X size={13}/></button>
+            </div>
+            <div style={{ padding: 20 }}>
+              <p style={{ fontSize: 12.5, color: 'var(--ink-500)', marginTop: 0, marginBottom: 14, lineHeight: 1.5 }}>
+                We'll fetch the page once and store its text so Roam-io can search and quote it later. The source link is kept on the item so you can re-open the original any time.
+              </p>
+
+              <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--ink-600)', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.06em' }}>URL</label>
+              <input
+                autoFocus
+                type="url"
+                value={urlForm.url}
+                onChange={e => setUrlForm(f => ({ ...f, url: e.target.value }))}
+                placeholder="https://example.com/article"
+                style={inp}
+              />
+
+              <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--ink-600)', marginTop: 12, marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Tags <span style={{ fontWeight: 400, color: 'var(--ink-400)', textTransform: 'none' }}>(comma-separated)</span></label>
+              <input
+                value={urlForm.tags}
+                onChange={e => setUrlForm(f => ({ ...f, tags: e.target.value }))}
+                placeholder="darlington, partnership, research"
+                style={inp}
+              />
+
+              {urlError && (
+                <div style={{ marginTop: 12, padding: '8px 12px', background: '#fde9e9', border: '1px solid #f5c0c0', borderRadius: 'var(--r-sm)', fontSize: 12, color: '#b53939' }}>
+                  {urlError}
+                </div>
+              )}
+
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
+                <button onClick={() => { if (!urlSaving) setShowUrlModal(false); }} style={btnG} disabled={urlSaving}>Cancel</button>
+                <button onClick={submitUrl} disabled={urlSaving || !urlForm.url.trim()} style={{ ...btnP, opacity: urlSaving || !urlForm.url.trim() ? 0.5 : 1 }}>
+                  {urlSaving ? <><Loader size={12} className="spin"/> Scraping…</> : <><Globe size={12}/> Scrape and save</>}
+                </button>
               </div>
             </div>
           </div>

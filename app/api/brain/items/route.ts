@@ -20,6 +20,17 @@ export interface Item {
   mime: string;
   size: number;
   uploadedAt: string;
+  /** Source URL for scraped web items. Lets the Brain UI surface the
+   *  original link and lets users re-scrape if the page changed. */
+  sourceUrl?: string;
+}
+
+function composeUrlMarkdown(url: string, title: string | undefined, body: string): string {
+  // Stored body for URL items — keeps the link prominently in the doc so
+  // anyone reading it later (including the AI) sees where it came from.
+  const heading = title || url;
+  const meta = `_Source:_ [${url}](${url})  · _Scraped:_ ${new Date().toISOString().slice(0, 10)}`;
+  return `# ${heading}\n\n${meta}\n\n${body.trim()}`;
 }
 
 async function getItems(): Promise<Item[]> {
@@ -270,6 +281,26 @@ async function handleFileUpload(req: NextRequest) {
 async function handleJsonSave(req: NextRequest) {
   try {
     const body = await req.json();
+
+    // URL save flow: when a sourceUrl is provided, scrape it server-side
+    // and use the result as the body. The user can also pass `content`
+    // explicitly to override the scraped text (e.g. they pasted their own
+    // summary).
+    let sourceUrl: string | undefined;
+    let scrapedTitle: string | undefined;
+    if (typeof body.url === 'string' && body.url.trim()) {
+      sourceUrl = body.url.trim();
+      if (!body.content) {
+        const { scrapeUrl } = await import('@/lib/scrape');
+        const scraped = await scrapeUrl(sourceUrl);
+        if (!scraped.ok) {
+          return NextResponse.json({ ok: false, error: scraped.error || 'Scrape failed', sourceUrl }, { status: 422 });
+        }
+        body.content = composeUrlMarkdown(sourceUrl, scraped.title, scraped.text || '');
+        scrapedTitle = scraped.title;
+      }
+    }
+
     const content: string = (body.content || '').toString();
     if (!content.trim()) {
       return NextResponse.json({ ok: false, error: 'content required' }, { status: 400 });
@@ -279,11 +310,11 @@ async function handleJsonSave(req: NextRequest) {
     }
 
     const tags: string[] = Array.isArray(body.tags) ? body.tags.slice(0, 12) : [];
-    const description: string = (body.description || '').toString().slice(0, 300);
-    const source: string = (body.source || 'roam-io-chat').toString();
+    const description: string = (body.description || scrapedTitle || '').toString().slice(0, 300);
+    const source: string = (body.source || (sourceUrl ? 'roam-io-url' : 'roam-io-chat')).toString();
     const autoFolder: boolean = body.autoFolder !== false; // default true
     let folderId: string | null = body.folderId || null;
-    const folderName: string | null = body.folderName || null;
+    const folderName: string | null = body.folderName || (sourceUrl ? 'Roam-io documents' : null);
     const contextBefore: string = (body.contextBefore || '').toString();
     const contextAfter: string = (body.contextAfter || '').toString();
 
@@ -326,7 +357,8 @@ async function handleJsonSave(req: NextRequest) {
     // Compose description if not provided — first ~140 chars of content.
     const finalDescription = description || content.trim().split('\n')[0].slice(0, 140);
     // Always tag with the source so future retrieval can filter to chat saves.
-    const finalTags = Array.from(new Set([...tags, source]));
+    // URL items get an extra `web-source` tag for easier filtering.
+    const finalTags = Array.from(new Set([...tags, source, ...(sourceUrl ? ['web-source'] : [])]));
 
     const item: Item = {
       id: 'itm_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
@@ -337,6 +369,7 @@ async function handleJsonSave(req: NextRequest) {
       mime: 'text/markdown',
       size: composed.length,
       uploadedAt: new Date().toISOString(),
+      ...(sourceUrl ? { sourceUrl } : {}),
     };
     const items = await getItems();
     items.push(item);

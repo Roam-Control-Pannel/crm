@@ -11,6 +11,7 @@ const FOLDERS_KEY = 'folders';
 interface Item {
   id: string; blobId: string; folderId: string | null;
   tags: string[]; description: string; mime: string; size: number; uploadedAt: string;
+  sourceUrl?: string;
 }
 
 interface Folder { id: string; name: string }
@@ -83,6 +84,7 @@ export async function GET(req: NextRequest) {
         uploadedAt: i.uploadedAt,
         folder: folderName(i.folderId),
         url: `/api/images/${i.blobId}`,
+        ...(i.sourceUrl ? { sourceUrl: i.sourceUrl } : {}),
       }));
 
     return NextResponse.json({ ok: true, count: matched.length, items: matched });
