@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { Plus, FolderPlus, Folder as FolderIcon, ChevronRight, Upload, X, Edit3, Trash2, Search, Brain as BrainIcon, ChevronDown, Image as ImageIcon, Loader, FileText } from 'lucide-react';
+import Link from 'next/link';
+import { Plus, FolderPlus, Folder as FolderIcon, ChevronRight, Upload, X, Edit3, Trash2, Search, Brain as BrainIcon, ChevronDown, Image as ImageIcon, Loader, FileText, Download, Printer, Sparkles, ExternalLink } from 'lucide-react';
 import {
   Folder, BrainItem, FolderNode,
   fetchFolders, createFolder, renameFolder, deleteFolder,
@@ -35,6 +36,10 @@ export default function BrainPage() {
 
   const [editing, setEditing] = useState<BrainItem | null>(null);
   const [editForm, setEditForm] = useState({ tags: '', description: '', folderId: '' });
+  // Lazy-loaded text content for the currently-open item (markdown/text only).
+  // Cleared whenever the modal closes so we don't carry stale text across opens.
+  const [previewContent, setPreviewContent] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
 
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
@@ -126,6 +131,37 @@ export default function BrainPage() {
     });
   }
 
+  // Fetch the body of the open item when it's a markdown/text item, so the
+  // user can actually read what's been saved. Binary items use the existing
+  // iframe preview path.
+  useEffect(() => {
+    if (!editing) { setPreviewContent(null); return; }
+    const mime = editing.mime || '';
+    const isText = mime === 'text/markdown' || mime === 'text/plain' || mime.startsWith('text/');
+    if (!isText) { setPreviewContent(null); return; }
+    let cancelled = false;
+    setPreviewLoading(true);
+    fetch(`/api/brain/items/${editing.id}/content`)
+      .then(r => r.json())
+      .then(d => { if (!cancelled) setPreviewContent(d.ok ? (d.content || '') : null); })
+      .catch(() => { if (!cancelled) setPreviewContent(null); })
+      .finally(() => { if (!cancelled) setPreviewLoading(false); });
+    return () => { cancelled = true; };
+  }, [editing?.id, editing?.mime]);
+
+  async function downloadAsMarkdown(item: BrainItem) {
+    const res = await fetch(`/api/brain/items/${item.id}/content`);
+    const d = await res.json();
+    if (!d.ok || d.binary) return;
+    const blob = new Blob([d.content || ''], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${(item.description || 'document').replace(/[^a-z0-9-_ ]/gi, '').trim() || 'document'}.md`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
   async function saveEdit() {
     if (!editing) return;
     const tags = editForm.tags.split(',').map(t => t.trim()).filter(Boolean);
@@ -199,7 +235,14 @@ export default function BrainPage() {
             Your knowledge base. Upload images and Roam-io will tag them automatically. The richer the brain, the smarter the AI generation.
           </p>
         </div>
-        <div className="brain-header-actions" style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+        <div className="brain-header-actions" style={{ display: 'flex', gap: 8, flexShrink: 0, flexWrap: 'wrap' }}>
+          <Link
+            href="/hub?prompt=Draft%20a%20new%20document%20based%20on%20what%27s%20in%20my%20Brain.%20Search%20first%2C%20then%20write%20it."
+            style={{ ...btnG, color: 'var(--maroon-700)', borderColor: 'var(--maroon-200, #d4c0c6)', textDecoration: 'none' }}
+            title="Open Roam-io with a doc-writing prompt"
+          >
+            <Sparkles size={13}/> Generate with Roam-io
+          </Link>
           <button onClick={() => setCreatingFolder(true)} style={btnG}><FolderPlus size={13}/> New folder</button>
           <button onClick={() => fileInputRef.current?.click()} style={btnP} disabled={uploading > 0}>
             {uploading > 0 ? <><Loader size={13} className="spin"/> Uploading {uploading}…</> : <><Upload size={13}/> Upload</>}
@@ -207,7 +250,7 @@ export default function BrainPage() {
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/*"
+            accept="image/*,application/pdf,.md,.txt,.markdown"
             multiple
             onChange={async e => {
               const files = e.target.files;
@@ -345,10 +388,17 @@ export default function BrainPage() {
                   <div className="brain-card-image" style={{ width: '100%', height: 130, background: 'var(--paper)', position: 'relative' }}>
                     {item.mime?.startsWith('image/')
                       ? <img src={imageUrl(item)} alt={item.description} style={{ width: '100%', height: '100%', objectFit: 'cover' }}/>
-                      : <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#fef2f2', color: '#dc2626', gap: 6 }}>
-                          <FileText size={32} />
-                          <div style={{ fontSize: 9, fontWeight: 600, letterSpacing: '0.08em' }}>PDF</div>
-                        </div>}
+                      : item.mime === 'application/pdf'
+                        ? <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#fef2f2', color: '#dc2626', gap: 6 }}>
+                            <FileText size={32} />
+                            <div style={{ fontSize: 9, fontWeight: 600, letterSpacing: '0.08em' }}>PDF</div>
+                          </div>
+                        : <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(135deg, #f5ecef 0%, #fff4e0 100%)', color: 'var(--maroon-700)', gap: 6 }}>
+                            <FileText size={32} />
+                            <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+                              {item.tags?.includes('ai-generated') ? 'AI Document' : 'Document'}
+                            </div>
+                          </div>}
                   </div>
                   <div style={{ padding: 10 }}>
                     <div style={{ fontSize: 11, color: 'var(--ink-700)', lineHeight: 1.4, height: 30, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', textOverflow: 'ellipsis' }}>
@@ -386,9 +436,54 @@ export default function BrainPage() {
               <button onClick={() => setEditing(null)} style={{ ...btnG, padding: '4px 8px' }}><X size={13}/></button>
             </div>
             <div style={{ padding: 20, overflowY: 'auto', flex: 1 }}>
-              {editing.mime?.startsWith('image/')
-                ? <img src={imageUrl(editing)} alt="" style={{ width: '100%', maxHeight: 280, objectFit: 'contain', background: 'var(--paper)', borderRadius: 'var(--r-md)', marginBottom: 14 }}/>
-                : <iframe src={imageUrl(editing)} style={{ width: '100%', height: 420, border: '1px solid var(--ink-100)', borderRadius: 'var(--r-md)', marginBottom: 14, background: 'var(--paper)' }} title="PDF preview"/>}
+              {editing.mime?.startsWith('image/') ? (
+                <img src={imageUrl(editing)} alt="" style={{ width: '100%', maxHeight: 280, objectFit: 'contain', background: 'var(--paper)', borderRadius: 'var(--r-md)', marginBottom: 14 }}/>
+              ) : (editing.mime === 'text/markdown' || editing.mime === 'text/plain' || editing.mime?.startsWith('text/')) ? (
+                <>
+                  <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+                    <button onClick={() => downloadAsMarkdown(editing)} style={{ ...btnG, fontSize: 12 }}>
+                      <Download size={12}/> Download .md
+                    </button>
+                    <a
+                      href={`/brain/print/${editing.id}`}
+                      target="_blank"
+                      rel="noopener"
+                      style={{ ...btnG, fontSize: 12, textDecoration: 'none' }}
+                      title="Opens a print view — use your browser's Save as PDF"
+                    >
+                      <Printer size={12}/> Download as PDF
+                    </a>
+                  </div>
+                  <div
+                    style={{
+                      background: 'var(--paper)', border: '1px solid var(--ink-100)', borderRadius: 'var(--r-md)',
+                      padding: '18px 22px', marginBottom: 14, maxHeight: 420, overflowY: 'auto',
+                      fontFamily: 'Georgia, serif', fontSize: 13.5, lineHeight: 1.7, color: 'var(--ink-800)',
+                      whiteSpace: 'pre-wrap',
+                    }}
+                  >
+                    {previewLoading
+                      ? <span style={{ color: 'var(--ink-400)', fontStyle: 'italic' }}>Loading content…</span>
+                      : previewContent === null
+                        ? <span style={{ color: 'var(--ink-400)', fontStyle: 'italic' }}>Could not load content.</span>
+                        : previewContent.trim() === ''
+                          ? <span style={{ color: 'var(--ink-400)', fontStyle: 'italic' }}>(empty document)</span>
+                          : previewContent}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+                    <a href={imageUrl(editing)} target="_blank" rel="noopener" style={{ ...btnG, fontSize: 12, textDecoration: 'none' }}>
+                      <ExternalLink size={12}/> Open original
+                    </a>
+                    <a href={imageUrl(editing)} download style={{ ...btnG, fontSize: 12, textDecoration: 'none' }}>
+                      <Download size={12}/> Download
+                    </a>
+                  </div>
+                  <iframe src={imageUrl(editing)} style={{ width: '100%', height: 420, border: '1px solid var(--ink-100)', borderRadius: 'var(--r-md)', marginBottom: 14, background: 'var(--paper)' }} title="Document preview"/>
+                </>
+              )}
 
               <div style={{ marginBottom: 14 }}>
                 <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--ink-600)', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Description</label>

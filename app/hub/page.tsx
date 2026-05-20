@@ -55,12 +55,30 @@ const SUGGESTIONS=[
 
 
 interface RoamDoc{id:string;name:string;size:number;content:string;uploadedAt:string;}
+// Knowledge base is now backed by the Brain. The hub lists Brain documents
+// (markdown + binary uploads) so anything saved or uploaded shows up in both
+// places. The AI uses the search_brain / read_brain_item tools to actually
+// read content on demand — we no longer ship doc bodies in the system prompt.
 async function fetchDocs():Promise<RoamDoc[]>{
-  const data=await loadWithMigration<RoamDoc[]>('hub_docs');
-  return Array.isArray(data)?data:[];
+  try {
+    const res = await fetch('/api/brain/search?type=document&limit=20', { cache: 'no-store' });
+    if (!res.ok) return [];
+    const d = await res.json();
+    const items: any[] = Array.isArray(d.items) ? d.items : [];
+    return items.map(i => ({
+      id: i.id,
+      name: i.description || 'Untitled document',
+      size: i.size || 0,
+      content: '', // populated lazily by the AI via search_brain/read_brain_item
+      uploadedAt: i.uploadedAt || new Date().toISOString(),
+    }));
+  } catch {
+    return [];
+  }
 }
-async function persistDocs(docs:RoamDoc[]):Promise<void>{
-  await saveRemote('hub_docs',docs);
+async function persistDocs(_docs:RoamDoc[]):Promise<void>{
+  // No-op: docs are persisted in the Brain by the underlying upload/delete
+  // calls. Kept here so existing call sites don't need to change.
 }
 function fmtSize(b:number):string{if(b<1024)return b+"B";if(b<1048576)return Math.round(b/1024)+"KB";return Math.round(b/1048576)+"MB";}
 
@@ -103,7 +121,11 @@ Today's date is ${today}. When the user says "today", "tomorrow", "Friday" etc.,
 
 You have access to TOOLS for managing the user's task list (create_task, list_tasks, complete_task, update_task, delete_task). Use them whenever the user asks to add a task, see what's on their list, mark something done, or change/remove a task. Don't ask the user to do these things manually — call the tool.
 
-You also have a save_to_brain tool. Use it proactively when the user shares something durable and worth remembering: partnership names, contact details, decisions made, agreed strategies, key numbers, or anything they say "remember this" / "save this" about. Do NOT save trivial filler or chit-chat — when in doubt, don't save. Always include 2-5 short tags. The user will see a confirm card before anything is saved.
+BRAIN TOOLS — the user's knowledge base lives in the Brain. You have four tools:
+- save_to_brain: save short text snippets the user shares (partnerships, contacts, decisions, key numbers). Use proactively but only for durable, non-trivial things. 2-5 short tags. Confirms before saving.
+- search_brain: search the Brain by query, tags, folder, or type. Use this BEFORE answering questions that reference past saves, uploaded documents, or anything the user may have stored. Returns metadata only.
+- read_brain_item: fetch the full body of a specific Brain item by id. Use after search_brain when you need to quote, summarise, or build on what's saved.
+- generate_document: write a new document into the Brain. Use when the user asks you to draft, write, produce, or compile something they want to keep — strategy notes, meeting recaps, partnership briefs, town research. Search the Brain first to ground the doc in what's already saved. Documents land in "Roam-io documents" and are downloadable as Markdown or PDF from the Brain page.
 
 You have SOCIAL MEDIA TOOLS for the user's content calendar (briefs Roam Local / Roam NI / Roam for Business, themes, connected accounts, drafts and scheduled posts):
 - Reads: list_briefs, list_themes, list_accounts, list_social_posts, get_post, analyse_calendar
@@ -125,11 +147,14 @@ RULES:
 6. When the user shares an image, respond naturally and conversationally about what you see — don't dump structured analysis unless asked. Tie it back to their work (high streets, partnerships, branding, social content) where it's relevant.
 7. If MEMORIES are attached, use them naturally — like a colleague who remembers context. Don't announce "I remember that...", just reference the fact ("Sarah at Dún Laoghaire BID — want me to draft a note to her?"). Trust the memory unless the current conversation contradicts it; if it does, follow the current conversation.`;
 
-  const docCtx=docs&&docs.length>0?docs.map(d=>`[DOC: ${d.name}]\n${d.content}`).join("\n\n"):"";
+  // Knowledge base is no longer injected into the system prompt — the AI
+  // searches the Brain on demand via search_brain / read_brain_item. This
+  // saves tokens and scales to a Brain of any size.
+  const brainHint=docs&&docs.length>0?`\n\nThe user has ${docs.length} document${docs.length===1?'':'s'} saved in their Brain. Use search_brain (then read_brain_item) to look things up before answering questions that reference past saves, uploaded docs, or topics they may have stored.`:"";
   const memCtx=memoryContext?`\n\nMEMORIES (things you've learned about Andy in previous conversations — use these naturally, do not announce them):\n${memoryContext}`:"";
   try{
     const body:any={
-      systemPrompt:system+(docCtx?"\n\nKNOWLEDGE BASE:\n"+docCtx:"")+memCtx,
+      systemPrompt:system+brainHint+memCtx,
       // Pass content through verbatim — may be string or content-block array.
       messages:messages.map(m=>({role:m.role,content:m.content})),
       tools:['tasks','brain','social'],
@@ -167,9 +192,16 @@ function describeToolCall(name:string,input:any):{label:string;detail:string}{
 }
 
 export default function HubPage(){
+  // Pre-fill the composer when the user lands here via /hub?prompt=… (used
+  // by the Brain page's "Generate with Roam-io" CTA). Done synchronously so
+  // the first paint shows the suggested prompt already typed.
+  const initialPrompt = typeof window !== 'undefined'
+    ? new URLSearchParams(window.location.search).get('prompt') || ''
+    : '';
+
   const [chats,setChats]=useState<Chat[]>([]);
   const [activeChat,setActiveChat]=useState<Chat|null>(null);
-  const [input,setInput]=useState('');
+  const [input,setInput]=useState(initialPrompt);
   const [loading,setLoading]=useState(false);
   const [showChannels,setShowChannels]=useState(false);
   const [isMobile,setIsMobile]=useState(false);
@@ -706,24 +738,42 @@ export default function HubPage(){
 
   async function handleUpload(e:React.ChangeEvent<HTMLInputElement>){
     const file=e.target.files?.[0];if(!file)return;
-    const reader=new FileReader();
-    reader.onload=(ev)=>{
-      const content=(ev.target?.result as string||"").slice(0,10000);
-      const doc:RoamDoc={id:Date.now().toString(),name:file.name,size:file.size,content,uploadedAt:new Date().toISOString()};
-      const updated=[doc,...docs].slice(0,20);
-      setDocs(updated);
-      persistDocs(updated).catch(err=>console.error('Failed to save docs:',err));
-      const aiMsg:Message={id:(Date.now()+1).toString(),role:"assistant",content:`I have added **${file.name}** (${fmtSize(file.size)}) to your knowledge base. I will use this in our conversations when relevant. You can view and manage documents from the home screen.`,timestamp:new Date()};
-      if(activeChat){updateChat(activeChat.id,[...activeChat.messages,aiMsg]);}
-    };
-    reader.readAsText(file);
     e.target.value="";
+    try {
+      // Upload to the Brain. Documents land in the "Roam-io documents"
+      // folder so they're easy to find and so the AI can search/filter to
+      // them later via the folder param on search_brain.
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('folderName', 'Roam-io documents');
+      fd.append('extraTag', 'hub-upload');
+      const res = await fetch('/api/brain/items', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (!data.ok || !data.item) throw new Error(data.error || 'Upload failed');
+      const doc:RoamDoc={
+        id: data.item.id,
+        name: data.item.description || file.name,
+        size: file.size,
+        content: '',
+        uploadedAt: data.item.uploadedAt || new Date().toISOString(),
+      };
+      setDocs(prev => [doc, ...prev].slice(0, 20));
+      const aiMsg:Message={id:(Date.now()+1).toString(),role:"assistant",content:`I have added **${file.name}** (${fmtSize(file.size)}) to your Brain. I will use search_brain to find it when relevant. You can view and download it from the Brain page.`,timestamp:new Date()};
+      if(activeChat){updateChat(activeChat.id,[...activeChat.messages,aiMsg]);}
+    } catch (err) {
+      console.error('Brain upload failed:', err);
+      const errMsg:Message={id:(Date.now()+1).toString(),role:"assistant",content:`Sorry — I couldn't upload **${file.name}**. ${err instanceof Error ? err.message : 'Please try again.'}`,timestamp:new Date()};
+      if(activeChat){updateChat(activeChat.id,[...activeChat.messages,errMsg]);}
+    }
   }
 
-  function handleDeleteDoc(id:string){
-    const updated=docs.filter(d=>d.id!==id);
-    setDocs(updated);
-    persistDocs(updated).catch(err=>console.error('Failed to save docs:',err));
+  async function handleDeleteDoc(id:string){
+    try {
+      await fetch(`/api/brain/items/${id}`, { method: 'DELETE' });
+    } catch (err) {
+      console.error('Brain delete failed:', err);
+    }
+    setDocs(prev => prev.filter(d => d.id !== id));
   }
 
   // Renders a single chat row in the sidebar. Used in both the Pinned
