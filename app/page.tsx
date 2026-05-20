@@ -22,7 +22,8 @@ interface PipelineEngagement {
 }
 
 interface TownActivity {
-  town: string;
+  listId: number;
+  name: string;
   total: number;
   contacted: number;
   opens: number;
@@ -354,8 +355,8 @@ function ActiveListsCard({ towns, loading }: { towns: TownActivity[] | null; loa
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
             {active.map(t => (
               <Link
-                key={t.town}
-                href={`/contacts?search=${encodeURIComponent(t.town)}`}
+                key={t.listId}
+                href={`/contacts?listId=${t.listId}`}
                 style={{
                   display: 'flex',
                   flexDirection: 'column',
@@ -372,8 +373,8 @@ function ActiveListsCard({ towns, loading }: { towns: TownActivity[] | null; loa
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
                     <MapPin size={11} color="var(--maroon-600)" />
-                    <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--ink-900)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textTransform: 'capitalize' }}>
-                      {t.town}
+                    <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--ink-900)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {t.name}
                     </span>
                   </div>
                   {t.lastActivityAt && (
