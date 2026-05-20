@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
-import { Flame, Clock, Snowflake, RefreshCw, ArrowRight, MapPin, Mail, MousePointerClick, CheckCircle, AlertCircle, MessageSquare } from 'lucide-react';
+import { Flame, Clock, Snowflake, RefreshCw, ArrowRight, MapPin, Mail, MousePointerClick, CheckCircle, AlertCircle, MessageSquare, Layers } from 'lucide-react';
 import type { AttentionContact } from '@/lib/types';
 
 interface PipelineStages {
@@ -19,6 +19,12 @@ interface PipelineEngagement {
   opened: number;
   clicked: number;
   bounced: number;
+}
+
+interface BrevoList {
+  id: number;
+  name: string;
+  uniqueSubscribers?: number;
 }
 
 interface PipelineResponse {
@@ -52,6 +58,8 @@ export default function Dashboard() {
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [lists, setLists] = useState<BrevoList[] | null>(null);
+  const [listsLoading, setListsLoading] = useState(true);
 
   const load = useCallback(async () => {
     try {
@@ -73,7 +81,20 @@ export default function Dashboard() {
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  const loadLists = useCallback(async () => {
+    try {
+      const res = await fetch('/api/brevo/lists', { cache: 'no-store' });
+      if (!res.ok) return;
+      const body = await res.json();
+      setLists(body.lists || []);
+    } catch (err) {
+      console.error('Lists load failed:', err);
+    } finally {
+      setListsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); loadLists(); }, [load, loadLists]);
 
   // Background refresh every 60s so the dashboard reflects fresh webhook
   // events without the user mashing F5. Webhooks fire within seconds of an
@@ -96,7 +117,7 @@ export default function Dashboard() {
 
   async function handleRefresh() {
     setRefreshing(true);
-    await load();
+    await Promise.all([load(), loadLists()]);
   }
 
   const today = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
@@ -285,6 +306,9 @@ export default function Dashboard() {
         />
       </div>
 
+      {/* Active lists — each Brevo list represents a town being worked. */}
+      <ActiveListsCard lists={lists} loading={listsLoading} />
+
       {/* Quick stats row */}
       {data && (
         <div className="stat-grid" style={{ marginBottom: 20 }}>
@@ -304,6 +328,73 @@ export default function Dashboard() {
           to   { transform: rotate(360deg); }
         }
       `}</style>
+    </div>
+  );
+}
+
+function ActiveListsCard({ lists, loading }: { lists: BrevoList[] | null; loading: boolean }) {
+  // "Active" = list has at least one subscriber. Lists with zero contacts
+  // are empty placeholders and would just be noise on the dashboard.
+  const active = (lists || [])
+    .filter(l => (l.uniqueSubscribers || 0) > 0)
+    .sort((a, b) => (b.uniqueSubscribers || 0) - (a.uniqueSubscribers || 0));
+  const totalSubs = active.reduce((s, l) => s + (l.uniqueSubscribers || 0), 0);
+
+  return (
+    <div className="card" style={{ marginBottom: 20 }}>
+      <div className="card-header">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Layers size={14} color="var(--ink-600)" />
+          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink-800)' }}>Active Lists</span>
+          {!loading && active.length > 0 && (
+            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-400)' }}>
+              ({active.length} town{active.length === 1 ? '' : 's'} · {totalSubs} contacts)
+            </span>
+          )}
+        </div>
+        <span style={{ fontSize: 11.5, color: 'var(--ink-400)' }}>Each list represents a town</span>
+      </div>
+      <div style={{ padding: '16px 18px' }}>
+        {loading ? (
+          <div style={{ color: 'var(--ink-400)', fontSize: 13 }}>Loading lists…</div>
+        ) : active.length === 0 ? (
+          <div style={{ color: 'var(--ink-400)', fontSize: 12.5, textAlign: 'center', padding: '12px 0' }}>
+            No active lists yet — create a list in Brevo and add contacts to start tracking a town.
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 10 }}>
+            {active.map(l => (
+              <Link
+                key={l.id}
+                href={`/contacts?listId=${l.id}`}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 8,
+                  padding: '10px 12px',
+                  background: 'var(--paper)',
+                  border: '1px solid var(--ink-100)',
+                  borderRadius: 'var(--r-md)',
+                  textDecoration: 'none',
+                  color: 'inherit',
+                  transition: 'all 0.15s',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                  <MapPin size={11} color="var(--maroon-600)" />
+                  <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ink-900)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {l.name}
+                  </span>
+                </div>
+                <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--ink-500)', whiteSpace: 'nowrap' }}>
+                  {l.uniqueSubscribers}
+                </span>
+              </Link>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
