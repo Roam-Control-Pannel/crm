@@ -105,11 +105,21 @@ function Sidebar({ onClose, isOpen }: { onClose?: () => void; isOpen?: boolean }
         ))}
       </div>
 
-      {/* User footer */}
-      <div className="sidebar-user" style={{
-        padding: '12px 14px', borderTop: '1px solid rgba(255,255,255,0.08)',
-        display: 'flex', alignItems: 'center', gap: 9, flexShrink: 0,
-      }}>
+      {/* User footer → Settings. Wrapping the whole row makes the avatar /
+          name / role all part of the same big tap target. */}
+      <Link
+        href="/settings"
+        onClick={onClose}
+        className="sidebar-user"
+        aria-label="Open settings"
+        style={{
+          padding: '12px 14px', borderTop: '1px solid rgba(255,255,255,0.08)',
+          display: 'flex', alignItems: 'center', gap: 9, flexShrink: 0,
+          textDecoration: 'none',
+          background: pathname === '/settings' ? 'rgba(255,255,255,0.06)' : 'transparent',
+          transition: 'background 0.15s',
+        }}
+      >
         <div style={{
           width: 30, height: 30, borderRadius: '50%', background: '#9b2752',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -119,7 +129,8 @@ function Sidebar({ onClose, isOpen }: { onClose?: () => void; isOpen?: boolean }
           <div style={{ color: '#fff', fontSize: 12, fontWeight: 600 }}>Roam Local</div>
           <div style={{ color: 'rgba(255,255,255,0.35)', fontSize: 10 }}>Admin · All towns</div>
         </div>
-      </div>
+        <Settings size={14} color="rgba(255,255,255,0.45)" />
+      </Link>
     </aside>
   );
 }
