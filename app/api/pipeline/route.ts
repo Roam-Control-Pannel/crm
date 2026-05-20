@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { mostRecentReplyForContact } from '@/lib/replies';
 import { fetchAllContacts } from '@/lib/brevo';
+import { getHiddenListIds } from '@/lib/hidden-lists';
 import type { AttentionContact } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
@@ -148,7 +149,9 @@ export async function GET(req: NextRequest) {
       clicks: number;
       replies: number;
       lastActivityAt: string | null;
+      hidden: boolean;
     }
+    const hiddenListIds = new Set(await getHiddenListIds());
 
     let contactErrors = 0;
     for (const c of contacts) {
@@ -257,6 +260,7 @@ export async function GET(req: NextRequest) {
         clicks: 0,
         replies: 0,
         lastActivityAt: null,
+        hidden: hiddenListIds.has(bl.id),
       };
       for (const c of listContacts) {
         const a = c.attributes || {};
