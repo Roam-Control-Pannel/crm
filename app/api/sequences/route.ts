@@ -158,6 +158,10 @@ export async function GET(req: NextRequest) {
 
     for (const contact of contacts) {
       if (!contact.email) continue;
+      // Honour per-contact pause: contacts the user has manually paused
+      // (e.g. after a reply, or because they don't want auto follow-ups)
+      // keep their current OUTREACH_STATUS but the cron leaves them alone.
+      if (contact.attributes?.PAUSED === 'true') continue;
       const status = contact.attributes?.OUTREACH_STATUS;
       const lastContact = contact.attributes?.LAST_CONTACT_DATE;
       if (!lastContact) continue;
