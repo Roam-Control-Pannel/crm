@@ -14,6 +14,11 @@ const inp = {
   borderRadius: 'var(--r-sm)', fontSize: 13, fontFamily: 'inherit', background: 'var(--white)',
 } as const;
 
+function hostnameOf(url: string): string {
+  try { return new URL(url).hostname.replace(/^www\./, ''); }
+  catch { return url; }
+}
+
 const btnG = {
   padding: '7px 14px', borderRadius: 'var(--r-sm)', border: '1.5px solid var(--ink-200)',
   background: 'var(--white)', fontSize: 12, fontWeight: 500, color: 'var(--ink-700)',
@@ -31,6 +36,9 @@ export default function BrainPage() {
   const [items, setItems] = useState<BrainItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null); // null = root
+  // Virtual view: "links" overrides currentFolderId/search and surfaces only
+  // items with a sourceUrl. Lets users manage saved URLs in one place.
+  const [linksMode, setLinksMode] = useState(false);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState('');
 
@@ -66,10 +74,23 @@ export default function BrainPage() {
   const tree = useMemo(() => buildFolderTree(folders, items), [folders, items]);
   const breadcrumb = useMemo(() => getFolderPath(folders, currentFolderId), [folders, currentFolderId]);
 
-  // Items shown = currentFolder's items, optionally search-filtered
+  // Items shown = currentFolder's items, optionally search-filtered.
+  // Links mode short-circuits everything else: it's a flat view of every
+  // saved URL regardless of folder.
+  const linkItems = useMemo(() => items.filter(i => !!i.sourceUrl), [items]);
   const visibleItems = useMemo(() => {
     let list = items;
-    if (search.trim()) {
+    if (linksMode) {
+      list = linkItems;
+      if (search.trim()) {
+        const q = search.toLowerCase();
+        list = list.filter(i =>
+          (i.description || '').toLowerCase().includes(q) ||
+          (i.sourceUrl || '').toLowerCase().includes(q) ||
+          i.tags.some(t => t.toLowerCase().includes(q))
+        );
+      }
+    } else if (search.trim()) {
       list = searchItems(items, search);
     } else if (currentFolderId) {
       list = items.filter(i => i.folderId === currentFolderId);
@@ -77,7 +98,7 @@ export default function BrainPage() {
       list = items.filter(i => !i.folderId);
     }
     return list.sort((a, b) => b.uploadedAt.localeCompare(a.uploadedAt));
-  }, [items, search, currentFolderId]);
+  }, [items, linkItems, search, currentFolderId, linksMode]);
 
   function toggleExpand(id: string) {
     setExpandedFolders(prev => {
@@ -242,7 +263,7 @@ export default function BrainPage() {
               color: isCurrent ? 'var(--white)' : 'var(--ink-700)',
               fontSize: 12, fontWeight: isCurrent ? 600 : 500,
             }}
-            onClick={() => setCurrentFolderId(node.folder.id)}
+            onClick={() => { setLinksMode(false); setCurrentFolderId(node.folder.id); }}
           >
             <button
               onClick={e => { e.stopPropagation(); if (hasChildren) toggleExpand(node.folder.id); }}
@@ -311,14 +332,30 @@ export default function BrainPage() {
               display: 'flex', alignItems: 'center', gap: 6,
               padding: '6px 8px', borderRadius: 'var(--r-sm)',
               cursor: 'pointer', marginBottom: 4,
-              background: currentFolderId === null ? 'var(--maroon-700)' : 'transparent',
-              color: currentFolderId === null ? 'var(--white)' : 'var(--ink-700)',
+              background: !linksMode && currentFolderId === null ? 'var(--maroon-700)' : 'transparent',
+              color: !linksMode && currentFolderId === null ? 'var(--white)' : 'var(--ink-700)',
               fontSize: 12, fontWeight: 600,
             }}
-            onClick={() => setCurrentFolderId(null)}
+            onClick={() => { setLinksMode(false); setCurrentFolderId(null); }}
           >
             <BrainIcon size={13}/> All items
             <span style={{ marginLeft: 'auto', fontSize: 10, opacity: 0.6 }}>{items.length}</span>
+          </div>
+
+          {/* Saved URLs — flat view across folders. */}
+          <div
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '6px 8px', borderRadius: 'var(--r-sm)',
+              cursor: 'pointer', marginBottom: 4,
+              background: linksMode ? 'var(--maroon-700)' : 'transparent',
+              color: linksMode ? 'var(--white)' : 'var(--ink-700)',
+              fontSize: 12, fontWeight: 600,
+            }}
+            onClick={() => { setLinksMode(true); setCurrentFolderId(null); }}
+          >
+            <LinkIcon size={13}/> Links
+            <span style={{ marginLeft: 'auto', fontSize: 10, opacity: 0.6 }}>{linkItems.length}</span>
           </div>
 
           {creatingFolder && (
@@ -367,9 +404,15 @@ export default function BrainPage() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14, flexWrap: 'wrap' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--ink-600)', flex: 1, minWidth: 200 }}>
               <BrainIcon size={13} color="var(--ink-400)"/>
-              <button onClick={() => setCurrentFolderId(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: currentFolderId ? 'var(--maroon-700)' : 'var(--ink-700)', fontFamily: 'inherit', fontSize: 13, fontWeight: 600, padding: 0 }}>
+              <button onClick={() => { setLinksMode(false); setCurrentFolderId(null); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: (currentFolderId || linksMode) ? 'var(--maroon-700)' : 'var(--ink-700)', fontFamily: 'inherit', fontSize: 13, fontWeight: 600, padding: 0 }}>
                 Brain
               </button>
+              {linksMode && (
+                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <ChevronRight size={11} color="var(--ink-300)"/>
+                  <span style={{ color: 'var(--ink-700)', fontSize: 13, fontWeight: 600 }}>Links</span>
+                </span>
+              )}
               {breadcrumb.map((f, i) => (
                 <span key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <ChevronRight size={11} color="var(--ink-300)"/>
@@ -387,7 +430,7 @@ export default function BrainPage() {
               <input
                 value={search}
                 onChange={e => setSearch(e.target.value)}
-                placeholder="Search by tag or description"
+                placeholder={linksMode ? 'Search links by tag, title, or URL' : 'Search by tag or description'}
                 style={{ ...inp, paddingLeft: 32, fontSize: 12 }}
               />
             </div>
@@ -398,18 +441,27 @@ export default function BrainPage() {
             <div style={{ padding: 60, textAlign: 'center', color: 'var(--ink-400)' }}>Loading…</div>
           ) : visibleItems.length === 0 ? (
             <div style={{ background: 'var(--white)', borderRadius: 'var(--r-lg)', padding: 60, textAlign: 'center', boxShadow: 'var(--shadow-sm)' }}>
-              <ImageIcon size={32} color="var(--ink-200)" style={{ margin: '0 auto 12px', display: 'block' }}/>
+              {linksMode
+                ? <LinkIcon size={32} color="var(--ink-200)" style={{ margin: '0 auto 12px', display: 'block' }}/>
+                : <ImageIcon size={32} color="var(--ink-200)" style={{ margin: '0 auto 12px', display: 'block' }}/>}
               <h3 style={{ fontFamily: 'var(--font-display)', fontSize: 18, color: 'var(--ink-700)', marginBottom: 8 }}>
-                {search ? 'No matches' : currentFolderId ? 'This folder is empty' : 'Your brain is empty'}
+                {search ? 'No matches' : linksMode ? 'No saved links yet' : currentFolderId ? 'This folder is empty' : 'Your brain is empty'}
               </h3>
               <p style={{ fontSize: 13, color: 'var(--ink-500)', marginBottom: 18, maxWidth: 380, margin: '0 auto 18px' }}>
                 {search
                   ? 'Try different search terms or check spelling.'
-                  : 'Upload images and Roam-io will tag them automatically. The more you add, the smarter your generated content becomes.'}
+                  : linksMode
+                    ? 'Click Add URL above to save a page. Roam-io scrapes it and keeps the text searchable alongside the original link.'
+                    : 'Upload images and Roam-io will tag them automatically. The more you add, the smarter your generated content becomes.'}
               </p>
-              {!search && (
+              {!search && !linksMode && (
                 <button onClick={() => fileInputRef.current?.click()} style={btnP}>
                   <Upload size={13}/> Upload images
+                </button>
+              )}
+              {!search && linksMode && (
+                <button onClick={() => { setUrlForm({ url: '', tags: '' }); setUrlError(null); setShowUrlModal(true); }} style={btnP}>
+                  <LinkIcon size={13}/> Add URL
                 </button>
               )}
             </div>
@@ -420,10 +472,52 @@ export default function BrainPage() {
                   key={item.id}
                   onClick={() => openEdit(item)}
                   className="brain-card"
-                  style={{ background: 'var(--white)', borderRadius: 'var(--r-md)', overflow: 'hidden', cursor: 'pointer', boxShadow: 'var(--shadow-sm)', transition: 'transform 0.15s' }}
-                  onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; }}
-                  onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; }}
+                  style={{ background: 'var(--white)', borderRadius: 'var(--r-md)', overflow: 'hidden', cursor: 'pointer', boxShadow: 'var(--shadow-sm)', transition: 'transform 0.15s', position: 'relative' }}
+                  onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; const a = e.currentTarget.querySelector<HTMLElement>('.brain-card-actions'); if (a) a.style.opacity = '1'; }}
+                  onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; const a = e.currentTarget.querySelector<HTMLElement>('.brain-card-actions'); if (a) a.style.opacity = '0'; }}
                 >
+                  {/* Hover actions — open source URL (if any) + quick delete.
+                      Both stopPropagation so they don't trigger the modal. */}
+                  <div
+                    className="brain-card-actions"
+                    style={{
+                      position: 'absolute', top: 6, right: 6, zIndex: 2,
+                      display: 'flex', gap: 4, opacity: 0, transition: 'opacity 0.15s',
+                    }}
+                  >
+                    {item.sourceUrl && (
+                      <a
+                        href={item.sourceUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={e => e.stopPropagation()}
+                        title="Open source URL"
+                        aria-label="Open source URL"
+                        style={{
+                          width: 26, height: 26, borderRadius: 'var(--r-sm)',
+                          background: 'rgba(255,255,255,0.95)', boxShadow: '0 1px 4px rgba(0,0,0,0.12)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          color: '#1a6b9a', textDecoration: 'none',
+                        }}
+                      >
+                        <ExternalLink size={13}/>
+                      </a>
+                    )}
+                    <button
+                      onClick={e => { e.stopPropagation(); handleDeleteItem(item); }}
+                      title="Delete from Brain"
+                      aria-label="Delete from Brain"
+                      style={{
+                        width: 26, height: 26, borderRadius: 'var(--r-sm)',
+                        background: 'rgba(255,255,255,0.95)', boxShadow: '0 1px 4px rgba(0,0,0,0.12)',
+                        border: 'none', cursor: 'pointer', padding: 0,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        color: '#b53939',
+                      }}
+                    >
+                      <Trash2 size={13}/>
+                    </button>
+                  </div>
                   <div className="brain-card-image" style={{ width: '100%', height: 130, background: 'var(--paper)', position: 'relative' }}>
                     {item.mime?.startsWith('image/')
                       ? <img src={imageUrl(item)} alt={item.description} style={{ width: '100%', height: '100%', objectFit: 'cover' }}/>
@@ -448,6 +542,14 @@ export default function BrainPage() {
                     <div style={{ fontSize: 11, color: 'var(--ink-700)', lineHeight: 1.4, height: 30, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', textOverflow: 'ellipsis' }}>
                       {item.description || <em style={{ color: 'var(--ink-400)' }}>No description</em>}
                     </div>
+                    {item.sourceUrl && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 4, fontSize: 10, color: '#1a6b9a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <Globe size={9}/>
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {hostnameOf(item.sourceUrl)}
+                        </span>
+                      </div>
+                    )}
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, marginTop: 6, minHeight: 18 }}>
                       {item.tags.slice(0, 3).map(t => (
                         <span key={t} style={{ fontSize: 9, background: 'var(--paper)', padding: '1px 6px', borderRadius: 'var(--r-pill)', color: 'var(--ink-500)' }}>
