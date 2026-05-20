@@ -21,10 +21,14 @@ interface PipelineEngagement {
   bounced: number;
 }
 
-interface BrevoList {
-  id: number;
-  name: string;
-  uniqueSubscribers?: number;
+interface TownActivity {
+  town: string;
+  total: number;
+  contacted: number;
+  opens: number;
+  clicks: number;
+  replies: number;
+  lastActivityAt: string | null;
 }
 
 interface PipelineResponse {
@@ -40,6 +44,7 @@ interface PipelineResponse {
     goingColdTotal: number;
     repliedTotal: number;
   };
+  towns: TownActivity[];
   totals: { contactsInResults: number; contactsTotal: number };
 }
 
@@ -58,8 +63,6 @@ export default function Dashboard() {
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [lists, setLists] = useState<BrevoList[] | null>(null);
-  const [listsLoading, setListsLoading] = useState(true);
 
   const load = useCallback(async () => {
     try {
@@ -81,20 +84,7 @@ export default function Dashboard() {
     }
   }, []);
 
-  const loadLists = useCallback(async () => {
-    try {
-      const res = await fetch('/api/brevo/lists', { cache: 'no-store' });
-      if (!res.ok) return;
-      const body = await res.json();
-      setLists(body.lists || []);
-    } catch (err) {
-      console.error('Lists load failed:', err);
-    } finally {
-      setListsLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { load(); loadLists(); }, [load, loadLists]);
+  useEffect(() => { load(); }, [load]);
 
   // Background refresh every 60s so the dashboard reflects fresh webhook
   // events without the user mashing F5. Webhooks fire within seconds of an
@@ -117,7 +107,7 @@ export default function Dashboard() {
 
   async function handleRefresh() {
     setRefreshing(true);
-    await Promise.all([load(), loadLists()]);
+    await load();
   }
 
   const today = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
@@ -306,8 +296,9 @@ export default function Dashboard() {
         />
       </div>
 
-      {/* Active lists — each Brevo list represents a town being worked. */}
-      <ActiveListsCard lists={lists} loading={listsLoading} />
+      {/* Active towns — lists/towns with outbound in flight (≥1 contact past
+          not_contacted). Lets you see which areas are actually being worked. */}
+      <ActiveListsCard towns={data?.towns || null} loading={loading} />
 
       {/* Quick stats row */}
       {data && (
@@ -332,47 +323,44 @@ export default function Dashboard() {
   );
 }
 
-function ActiveListsCard({ lists, loading }: { lists: BrevoList[] | null; loading: boolean }) {
-  // "Active" = list has at least one subscriber. Lists with zero contacts
-  // are empty placeholders and would just be noise on the dashboard.
-  const active = (lists || [])
-    .filter(l => (l.uniqueSubscribers || 0) > 0)
-    .sort((a, b) => (b.uniqueSubscribers || 0) - (a.uniqueSubscribers || 0));
-  const totalSubs = active.reduce((s, l) => s + (l.uniqueSubscribers || 0), 0);
+function ActiveListsCard({ towns, loading }: { towns: TownActivity[] | null; loading: boolean }) {
+  // The pipeline endpoint already filters to towns with ≥1 contact past
+  // not_contacted, so anything that lands here is "active outbound".
+  const active = towns || [];
+  const totalContacted = active.reduce((s, t) => s + t.contacted, 0);
 
   return (
     <div className="card" style={{ marginBottom: 20 }}>
       <div className="card-header">
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <Layers size={14} color="var(--ink-600)" />
-          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink-800)' }}>Active Lists</span>
+          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink-800)' }}>Active Towns</span>
           {!loading && active.length > 0 && (
             <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-400)' }}>
-              ({active.length} town{active.length === 1 ? '' : 's'} · {totalSubs} contacts)
+              ({active.length} town{active.length === 1 ? '' : 's'} · {totalContacted} contacted)
             </span>
           )}
         </div>
-        <span style={{ fontSize: 11.5, color: 'var(--ink-400)' }}>Each list represents a town</span>
+        <span style={{ fontSize: 11.5, color: 'var(--ink-400)' }}>Towns with outbound in flight</span>
       </div>
       <div style={{ padding: '16px 18px' }}>
         {loading ? (
-          <div style={{ color: 'var(--ink-400)', fontSize: 13 }}>Loading lists…</div>
+          <div style={{ color: 'var(--ink-400)', fontSize: 13 }}>Loading towns…</div>
         ) : active.length === 0 ? (
           <div style={{ color: 'var(--ink-400)', fontSize: 12.5, textAlign: 'center', padding: '12px 0' }}>
-            No active lists yet — create a list in Brevo and add contacts to start tracking a town.
+            No outbound activity yet — send emails to a list to start tracking a town here.
           </div>
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 10 }}>
-            {active.map(l => (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
+            {active.map(t => (
               <Link
-                key={l.id}
-                href={`/contacts?listId=${l.id}`}
+                key={t.town}
+                href={`/contacts?search=${encodeURIComponent(t.town)}`}
                 style={{
                   display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: 8,
-                  padding: '10px 12px',
+                  flexDirection: 'column',
+                  gap: 6,
+                  padding: '12px 14px',
                   background: 'var(--paper)',
                   border: '1px solid var(--ink-100)',
                   borderRadius: 'var(--r-md)',
@@ -381,15 +369,25 @@ function ActiveListsCard({ lists, loading }: { lists: BrevoList[] | null; loadin
                   transition: 'all 0.15s',
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                  <MapPin size={11} color="var(--maroon-600)" />
-                  <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ink-900)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {l.name}
-                  </span>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                    <MapPin size={11} color="var(--maroon-600)" />
+                    <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--ink-900)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textTransform: 'capitalize' }}>
+                      {t.town}
+                    </span>
+                  </div>
+                  {t.lastActivityAt && (
+                    <span style={{ fontSize: 10.5, fontWeight: 500, color: 'var(--ink-400)', whiteSpace: 'nowrap' }}>
+                      {timeAgo(t.lastActivityAt)}
+                    </span>
+                  )}
                 </div>
-                <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--ink-500)', whiteSpace: 'nowrap' }}>
-                  {l.uniqueSubscribers}
-                </span>
+                <div style={{ fontSize: 11, color: 'var(--ink-500)', display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  <span><strong style={{ color: 'var(--ink-800)' }}>{t.contacted}</strong>/{t.total} contacted</span>
+                  {t.opens > 0 && <span style={{ color: '#1a6b9a' }}>{t.opens} opens</span>}
+                  {t.clicks > 0 && <span style={{ color: '#6a3d8c' }}>{t.clicks} clicks</span>}
+                  {t.replies > 0 && <span style={{ color: '#3a7a4d' }}>{t.replies} replies</span>}
+                </div>
               </Link>
             ))}
           </div>
