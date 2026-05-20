@@ -25,6 +25,63 @@ interface BrevoContact {
   id: number;
   email: string;
   attributes?: Record<string, string>;
+  listIds?: number[];
+}
+
+/**
+ * Fetch every contact in a Brevo list, paginated, with retry on 429.
+ *
+ * Brevo's free tier rate-limits at ~10 req/s. The pipeline fires the global
+ * /contacts fetch plus one call per list in parallel, so we hit that ceiling
+ * easily — when we do, lists silently come back empty and disappear from the
+ * Active Towns card. Backoff + retry keeps that from happening.
+ */
+async function fetchListContacts(listId: number, listName: string): Promise<BrevoContact[]> {
+  const all: BrevoContact[] = [];
+  const PAGE = 1000;
+  let offset = 0;
+  while (offset < 5_000) {
+    let res: Response | null = null;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      res = await fetch(
+        `${BREVO_BASE}/contacts/lists/${listId}/contacts?limit=${PAGE}&offset=${offset}`,
+        { headers: { 'api-key': process.env.BREVO_API_KEY!, 'Content-Type': 'application/json' } }
+      );
+      if (res.ok) break;
+      if (res.status !== 429 && res.status !== 503) break;
+      const wait = Math.min(500 * 2 ** attempt, 4000);
+      console.warn(`[pipeline] list ${listId} (${listName}) ${res.status}, retry ${attempt + 1} in ${wait}ms`);
+      await new Promise(r => setTimeout(r, wait));
+    }
+    if (!res || !res.ok) {
+      console.warn(`[pipeline] list ${listId} (${listName}) fetch gave up at ${res?.status}`);
+      break;
+    }
+    const data = await res.json();
+    const page: BrevoContact[] = data.contacts || [];
+    all.push(...page);
+    if (page.length < PAGE) break;
+    offset += PAGE;
+  }
+  return all;
+}
+
+/**
+ * Run a list of async tasks with a max concurrency cap. Used to keep the
+ * per-list contact fetches under Brevo's rate limit.
+ */
+async function runWithConcurrency<T, R>(items: T[], limit: number, worker: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let cursor = 0;
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (true) {
+      const i = cursor++;
+      if (i >= items.length) return;
+      results[i] = await worker(items[i]);
+    }
+  });
+  await Promise.all(runners);
+  return results;
 }
 
 function asNumber(v: any): number {
@@ -66,11 +123,12 @@ export async function GET(req: NextRequest) {
 
     const brevoLists: { id: number; name: string; uniqueSubscribers?: number }[] = listsResp?.lists || [];
 
-    // Step 2: fetch contacts per list in parallel. Brevo's global /contacts
-    // endpoint doesn't always populate listIds on every record, so we can't
-    // rely on it for accurate list membership — the per-list endpoint is the
-    // authoritative source. We only need the attributes (status, open/click
-    // timestamps) to compute activity, which the list endpoint returns.
+    // Step 2: fetch contacts per list with limited concurrency. Brevo's
+    // global /contacts endpoint doesn't always populate listIds on every
+    // record, so the per-list endpoint is the authoritative source. Cap
+    // at 3 concurrent to stay well under Brevo's 10 req/s rate limit —
+    // before this throttle, parallel per-list calls + the global feed
+    // would hit 429s and lists would silently come back empty.
     //
     // If the global fetch was already scoped to a single listId, skip the
     // per-list explosion and just attribute everything to that one list.
@@ -81,36 +139,40 @@ export async function GET(req: NextRequest) {
         listContactsByListId.set(onlyId, contacts as BrevoContact[]);
       }
     } else {
-      await Promise.all(
-        brevoLists.map(async (bl) => {
-          try {
-            const all: BrevoContact[] = [];
-            let offset = 0;
-            const PAGE = 1000;
-            // Mirror fetchAllContacts' pagination so a 500-contact list isn't truncated.
-            // Cap per-list at 5k pages to keep one runaway list from blowing the timeout.
-            while (offset < 5_000) {
-              const r = await fetch(
-                `${BREVO_BASE}/contacts/lists/${bl.id}/contacts?limit=${PAGE}&offset=${offset}`,
-                { headers: { 'api-key': process.env.BREVO_API_KEY!, 'Content-Type': 'application/json' } }
-              );
-              if (!r.ok) {
-                console.warn(`[pipeline] list ${bl.id} (${bl.name}) fetch returned ${r.status}`);
-                break;
-              }
-              const data = await r.json();
-              const page: BrevoContact[] = data.contacts || [];
-              all.push(...page);
-              if (page.length < PAGE) break;
-              offset += PAGE;
-            }
-            listContactsByListId.set(bl.id, all);
-          } catch (err: any) {
-            console.warn(`[pipeline] list ${bl.id} (${bl.name}) fetch failed:`, err?.message);
-            listContactsByListId.set(bl.id, []);
+      await runWithConcurrency(brevoLists, 3, async (bl) => {
+        try {
+          const all = await fetchListContacts(bl.id, bl.name);
+          listContactsByListId.set(bl.id, all);
+        } catch (err: any) {
+          console.warn(`[pipeline] list ${bl.id} (${bl.name}) fetch failed:`, err?.message);
+          listContactsByListId.set(bl.id, []);
+        }
+      });
+
+      // Fallback: any list whose per-list fetch came back empty gets
+      // populated from the global feed via c.listIds. This catches the
+      // tail-end of rate-limited failures and any other case where the
+      // per-list endpoint returned nothing for a list that genuinely has
+      // members. Contacts that appear in both sources are deduped.
+      const emptyLists = brevoLists.filter(bl => (listContactsByListId.get(bl.id) || []).length === 0);
+      if (emptyLists.length > 0) {
+        const emptyIds = new Set(emptyLists.map(bl => bl.id));
+        const fallbackByListId = new Map<number, BrevoContact[]>();
+        for (const c of contacts as BrevoContact[]) {
+          for (const lid of c.listIds || []) {
+            if (!emptyIds.has(lid)) continue;
+            let arr = fallbackByListId.get(lid);
+            if (!arr) { arr = []; fallbackByListId.set(lid, arr); }
+            arr.push(c);
           }
-        })
-      );
+        }
+        for (const [lid, arr] of fallbackByListId.entries()) {
+          if (arr.length > 0) {
+            listContactsByListId.set(lid, arr);
+            console.log(`[pipeline] list ${lid} populated via fallback (${arr.length} contacts)`);
+          }
+        }
+      }
     }
 
     const now = new Date();
