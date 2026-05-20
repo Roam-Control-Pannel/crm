@@ -193,6 +193,27 @@ const BRAIN_TOOLS = [
     },
   },
   {
+    name: 'scrape_url',
+    description:
+      'Fetch a public web page and return its text content. Use when the user shares a URL ' +
+      'they want you to read, summarise, or learn from. Optionally save the scraped page into ' +
+      'the Brain so you (and the user) can find it later via search_brain. Only http(s) URLs; ' +
+      'binary content (PDFs, images) cannot be scraped — tell the user to upload the file instead.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        url: { type: 'string', description: 'The full URL to fetch. Must be http or https.' },
+        save: { type: 'boolean', description: 'If true, also save the scraped page into the Brain. Default false (just read and reply).' },
+        tags: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Tags to apply if save is true. 2-5 lowercase kebab-case tags.',
+        },
+      },
+      required: ['url'],
+    },
+  },
+  {
     name: 'generate_document',
     description:
       'Write a new document into the Brain. Use when the user asks you to draft, write, produce, ' +
@@ -233,6 +254,7 @@ export const REQUIRES_CONFIRM: Record<string, boolean> = {
   save_to_brain: true,   // user should see what's being saved before it lands
   search_brain: false,   // read, no side effects
   read_brain_item: false,// read, no side effects
+  scrape_url: false,     // read, but writes if save=true (the model passes that opt-in explicitly)
   generate_document: true, // creating a new doc — let the user see the title before it lands
   // Social — reads silent, edits silent, destructive/expensive confirm.
   list_briefs: false,
@@ -624,6 +646,59 @@ export async function executeTool(name: string, input: any): Promise<any> {
         tags: data.item?.tags,
         truncated: content.length > MAX,
         content: content.length > MAX ? content.slice(0, MAX) + '\n\n…[truncated]' : content,
+      };
+    }
+
+    case 'scrape_url': {
+      const baseUrl = process.env.URL || process.env.DEPLOY_PRIME_URL || 'http://localhost:3000';
+      const url = String(input.url || '').trim();
+      const save = Boolean(input.save);
+      const tags: string[] = Array.isArray(input.tags) ? input.tags.slice(0, 6) : [];
+      if (!url) return { ok: false, error: 'url required' };
+
+      const scrapeRes = await fetch(`${baseUrl}/api/brain/scrape`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      });
+      const scrape = await scrapeRes.json();
+      if (!scrape.ok) return { ok: false, error: scrape.error || 'Scrape failed' };
+
+      // Trim the text the AI sees — full page may be huge. The Brain save
+      // path stores the full text (capped server-side at MAX_TEXT).
+      const MAX_INLINE = 12_000;
+      const text: string = scrape.text || '';
+      const inline = text.length > MAX_INLINE ? text.slice(0, MAX_INLINE) + '\n\n…[truncated]' : text;
+
+      if (save) {
+        const saveRes = await fetch(`${baseUrl}/api/brain/items`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            url,
+            tags: Array.from(new Set([...tags, 'web-source'])),
+            source: 'roam-io-url',
+            folderName: 'Roam-io documents',
+          }),
+        });
+        const saved = await saveRes.json();
+        return {
+          ok: true,
+          saved: !!saved.ok,
+          itemId: saved.item?.id,
+          title: scrape.title || saved.item?.description,
+          finalUrl: scrape.finalUrl,
+          truncated: text.length > MAX_INLINE,
+          text: inline,
+        };
+      }
+      return {
+        ok: true,
+        saved: false,
+        title: scrape.title,
+        finalUrl: scrape.finalUrl,
+        truncated: text.length > MAX_INLINE,
+        text: inline,
       };
     }
 

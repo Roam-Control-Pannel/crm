@@ -3,6 +3,7 @@ import {useState,useEffect,useRef} from 'react';
 import {Plus,Send,Sparkles,X,Check,AlertTriangle,MessageSquare,Brain,Paperclip,Trash2,FileText,Bookmark,BookmarkCheck,Image as ImageIcon,Camera,Pencil,Pin,PinOff} from 'lucide-react';
 import {saveTextToBrain,uploadChatImage,fetchMemories,fetchMemoryContent,saveMemory,deleteItem,type BrainItem} from '@/lib/brain';
 import {loadWithMigration, saveRemote} from '@/lib/client-store';
+import {fetchBriefs,type Brief} from '@/lib/briefs';
 
 interface Message {
   id:string;
@@ -111,7 +112,7 @@ interface RoamioResult{
 // images — Claude vision requires the structured form).
 type ApiMessage={role:string;content:string|any[]};
 
-async function callRoamio(messages:ApiMessage[],docs?:RoamDoc[],pendingConfirm?:any,memoryContext?:string):Promise<RoamioResult>{
+async function callRoamio(messages:ApiMessage[],docs?:RoamDoc[],pendingConfirm?:any,memoryContext?:string,briefs?:Brief[]):Promise<RoamioResult>{
   const today=new Date().toISOString().split('T')[0];
   const system=`You are Roam-io, the AI growth assistant for Roam Local — a free local business discovery app. You help the Roam team run their business outreach CRM.
 
@@ -125,7 +126,8 @@ BRAIN TOOLS — the user's knowledge base lives in the Brain. You have four tool
 - save_to_brain: save short text snippets the user shares (partnerships, contacts, decisions, key numbers). Use proactively but only for durable, non-trivial things. 2-5 short tags. Confirms before saving.
 - search_brain: search the Brain by query, tags, folder, or type. Use this BEFORE answering questions that reference past saves, uploaded documents, or anything the user may have stored. Returns metadata only.
 - read_brain_item: fetch the full body of a specific Brain item by id. Use after search_brain when you need to quote, summarise, or build on what's saved.
-- generate_document: write a new document into the Brain. Use when the user asks you to draft, write, produce, or compile something they want to keep — strategy notes, meeting recaps, partnership briefs, town research. Search the Brain first to ground the doc in what's already saved. Documents land in "Roam-io documents" and are downloadable as Markdown or PDF from the Brain page.
+- generate_document: write a new document into the Brain. Use when the user asks you to draft, write, produce, or compile something they want to keep — strategy notes, meeting recaps, partnership briefs, town research. Search the Brain first to ground the doc in what's already saved. Apply the relevant brand voice (see BRAND VOICES below). Documents land in "Roam-io documents" and are downloadable as Markdown or PDF from the Brain page.
+- scrape_url: fetch a web page and return its text. Use when the user shares or mentions a URL they want you to read, summarise, or learn from. Pass save=true to also persist the page into the Brain (do this when the user says "save this link" or the content is durable/reference material). Only http(s); binary content can't be scraped.
 
 You have SOCIAL MEDIA TOOLS for the user's content calendar (briefs Roam Local / Roam NI / Roam for Business, themes, connected accounts, drafts and scheduled posts):
 - Reads: list_briefs, list_themes, list_accounts, list_social_posts, get_post, analyse_calendar
@@ -152,9 +154,26 @@ RULES:
   // saves tokens and scales to a Brain of any size.
   const brainHint=docs&&docs.length>0?`\n\nThe user has ${docs.length} document${docs.length===1?'':'s'} saved in their Brain. Use search_brain (then read_brain_item) to look things up before answering questions that reference past saves, uploaded docs, or topics they may have stored.`:"";
   const memCtx=memoryContext?`\n\nMEMORIES (things you've learned about Andy in previous conversations — use these naturally, do not announce them):\n${memoryContext}`:"";
+  // Brand voices per brief — apply when writing or rewriting content for
+  // a specific brand. If multiple voices could apply, pick the one that
+  // matches the topic the user is asking about; if unclear, ask which
+  // brand they want before drafting.
+  const voicesCtx = briefs && briefs.length > 0
+    ? '\n\nBRAND VOICES — apply these whenever you draft, rewrite, or generate content. If the user names a brand, use that voice exactly. If they don\'t, infer from context (e.g. NI-specific topics → Roam NI; business owner outreach → Roam for Business; everything else → Roam Local) or ask.\n\n' +
+      briefs.filter(b => b.active !== false).map(b => {
+        const lines = [
+          `### ${b.name} (${b.id})`,
+          b.audience ? `Audience: ${b.audience}` : '',
+          b.tone ? `Tone: ${b.tone}` : '',
+          b.hashtags ? `Hashtags: ${b.hashtags}` : '',
+          b.brandVoice ? `Voice guide:\n${b.brandVoice}` : '',
+        ].filter(Boolean);
+        return lines.join('\n');
+      }).join('\n\n')
+    : '';
   try{
     const body:any={
-      systemPrompt:system+brainHint+memCtx,
+      systemPrompt:system+brainHint+voicesCtx+memCtx,
       // Pass content through verbatim — may be string or content-block array.
       messages:messages.map(m=>({role:m.role,content:m.content})),
       tools:['tasks','brain','social'],
@@ -208,6 +227,7 @@ export default function HubPage(){
   const [showSuggestions,setShowSuggestions]=useState(false);
   const [showDocs,setShowDocs]=useState(false);
   const [docs,setDocs]=useState<RoamDoc[]>([]);
+  const [briefs,setBriefs]=useState<Brief[]>([]);
   const [chatsLoaded,setChatsLoaded]=useState(false);
   const [savingMsgId,setSavingMsgId]=useState<string|null>(null);
   const [savingChat,setSavingChat]=useState(false);
@@ -474,16 +494,18 @@ export default function HubPage(){
   useEffect(()=>{
     let cancelled=false;
     (async()=>{
-      const [docsData,chatsData,memoryData]=await Promise.all([
+      const [docsData,chatsData,memoryData,briefsData]=await Promise.all([
         fetchDocs(),
         loadWithMigration<Chat[]>('hub_chats'),
         fetchMemories().catch(()=>[] as BrainItem[]),
+        fetchBriefs().catch(()=>[] as Brief[]),
       ]);
       if(cancelled)return;
       setDocs(docsData);
       const hydrated=Array.isArray(chatsData)?chatsData.map((c:any)=>({...c,createdAt:new Date(c.createdAt),updatedAt:new Date(c.updatedAt),messages:(c.messages||[]).map((m:any)=>({...m,timestamp:new Date(m.timestamp)}))})):[];
       setChats(hydrated);
       setMemories(memoryData);
+      setBriefs(briefsData);
       setChatsLoaded(true);
     })();
     const check=()=>setIsMobile(window.innerWidth<640);
@@ -642,7 +664,7 @@ export default function HubPage(){
       return `- ${m.description}\n  ${body.split('\n')[0]}`;
     }));
     const memoryContext=memBlocks.length>0?memBlocks.join('\n'):undefined;
-    const result=await callRoamio(apiMessages,docs,undefined,memoryContext);
+    const result=await callRoamio(apiMessages,docs,undefined,memoryContext,briefs);
     const aiMsg:Message={
       id:(Date.now()+1).toString(),
       role:'assistant',
@@ -669,7 +691,7 @@ export default function HubPage(){
     updateChat(chatId,updated);
     setLoading(true);
     const history=[...updated.map(m=>({role:m.role,content:m.content})),{role:'user' as const,content:`Confirmed — please proceed with: ${action.label}`}];
-    const{text}=await callRoamio(history,docs);
+    const{text}=await callRoamio(history,docs,undefined,undefined,briefs);
     const confirmMsg:Message={id:Date.now().toString(),role:'user',content:`Confirmed: ${action.label}`,timestamp:new Date()};
     const responseMsg:Message={id:(Date.now()+1).toString(),role:'assistant',content:text,timestamp:new Date()};
     updateChat(chatId,[...updated,confirmMsg,responseMsg]);
@@ -709,7 +731,7 @@ export default function HubPage(){
       input:pending.input,
       tool_use_id:pending.tool_use_id,
       assistant_content:pending.assistantContent,
-    },memoryContext);
+    },memoryContext,briefs);
     const responseMsg:Message={
       id:Date.now().toString(),
       role:'assistant',

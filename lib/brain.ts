@@ -19,6 +19,8 @@ export interface BrainItem {
   mime: string;
   size: number;
   uploadedAt: string;
+  /** Set for items added by scraping a URL. Original link the body came from. */
+  sourceUrl?: string;
 }
 
 // Folder tree node — for rendering nested UI
