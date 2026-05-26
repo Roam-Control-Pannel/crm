@@ -25,6 +25,7 @@ const PUBLIC_API_ROUTES = [
   '/api/setup/brevo-attributes',    // bearer-gated, idempotent setup
   '/api/debug/contact',             // bearer-gated diagnostic
   '/api/inbound/poll',              // bearer-gated IMAP reply poller (cron + manual)
+  '/api/social/publish-due',        // CRON-PUBLISH-V1: secret-gated scheduled-post publisher
   '/api/social/auto-generate',      // CRON-AUTOGEN-V1: bearer-gated cron endpoint
   '/api/social/auto-generate/run-now', // CRON-AUTOGEN-V1: bearer-gated manual trigger (UI proxy)
 ];
