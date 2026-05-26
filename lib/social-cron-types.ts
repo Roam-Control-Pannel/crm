@@ -19,6 +19,12 @@ export interface AutoGenerateRunResult {
   // if too large to fit in a notification body.
   details?: AutoGenerateAccountResult[];
   error?: string;
+  // Set when the run hit its wall-clock budget before generating every
+  // pending slot (each caption is a real, slow AI call). pendingCount is how
+  // many slots were left; the calendar dedups filled slots, so running again
+  // continues where this left off.
+  stoppedEarly?: boolean;
+  pendingCount?: number;
 }
 
 export interface AutoGenerateAccountResult {
