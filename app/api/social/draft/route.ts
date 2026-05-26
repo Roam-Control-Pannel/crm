@@ -145,7 +145,9 @@ export async function POST(req: NextRequest) {
         const items = ((await brainStore.get('items', { type: 'json' })) as any[]) || [];
         const liteItems = items
           .filter(i => i.mime?.startsWith('image/'))
-          .map(i => ({ id: i.id, url: `/api/images/${i.blobId}`, credit: i.description, tags: i.tags }));
+          // Absolute URL — this is stored on the post and handed to Meta's
+          // Graph API at publish time, which can't fetch a relative path.
+          .map(i => ({ id: i.id, url: `${origin}/api/images/${i.blobId}`, credit: i.description, tags: i.tags }));
         const picked = pickBrainImage(liteItems, theme);
         if (picked) {
           imageUrl = picked.url;

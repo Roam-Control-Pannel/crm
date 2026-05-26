@@ -407,11 +407,26 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
     const postsRes = await fetchJsonInternal(input.origin, '/api/store/social_posts', input.internalSecret);
     const existingPosts: SocialPostDraft[] = postsRes?.data || [];
 
-    // 5. Brain items (optional)
+    // 5. Brain items (optional). The /api/brain/items payload is raw stored
+    // items (blobId + mime + tags, with NO url field), so the old
+    // `.filter(b => b.url)` dropped every item and Brain images were never
+    // used here. Build the absolute image URL ourselves — same shape the
+    // social composer and /api/social/draft use. Absolute because the URL
+    // is stored on the post and fetched by Meta at publish time, which
+    // can't resolve a relative path. Image MIME only: text/markdown Brain
+    // items aren't postable.
     let brainItems: BrainItemLite[] = [];
     try {
       const brainRes = await fetchJsonInternal(input.origin, '/api/brain/items', input.internalSecret);
-      brainItems = (brainRes?.items || brainRes?.data || []).filter((b: any) => b.url);
+      const rawItems: any[] = brainRes?.items || brainRes?.data || [];
+      brainItems = rawItems
+        .filter(i => typeof i?.mime === 'string' && i.mime.startsWith('image/') && i.blobId)
+        .map(i => ({
+          id: i.id,
+          url: `${input.origin}/api/images/${i.blobId}`,
+          credit: i.description,
+          tags: i.tags,
+        }));
     } catch {
       // Brain endpoint may not exist or be auth-restricted — degrade gracefully
       brainItems = [];
