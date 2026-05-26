@@ -1273,15 +1273,25 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
               setFillingCalendar(true);
               try {
                 const res = await fetch('/api/social/auto-generate/run-now', { method: 'POST' });
-                const data = await res.json();
-                if (data.ok) {
-                  alert(`Created ${data.createdCount} draft${data.createdCount === 1 ? '' : 's'} (skipped ${data.skippedCount}).`);
-                  // Refresh posts list
-                  const fresh = await loadWithMigration<SocialPost[]>('social_posts');
-                  if (fresh) setPosts(fresh);
+                // Read as text first: a gateway timeout returns an HTML page,
+                // and res.json() would throw "Unexpected token '<'".
+                const raw = await res.text();
+                let data: any = null;
+                try { data = JSON.parse(raw); } catch { /* non-JSON (e.g. timeout HTML) */ }
+                if (data?.ok) {
+                  const more = data.stoppedEarly && data.pendingCount
+                    ? ` ${data.pendingCount} slot${data.pendingCount === 1 ? '' : 's'} left — click Fill calendar again to continue.`
+                    : '';
+                  alert(`Created ${data.createdCount} draft${data.createdCount === 1 ? '' : 's'} (skipped ${data.skippedCount}).${more}`);
                 } else {
-                  alert('Fill calendar failed: ' + (data.error || 'unknown error'));
+                  alert('Fill calendar: ' + (data?.error
+                    || (res.status === 502 || res.status === 504
+                      ? 'the generator ran out of time — please click Fill calendar again to continue.'
+                      : `unexpected response (HTTP ${res.status}).`)));
                 }
+                // Refresh either way — a partial/stopped-early run still saved drafts.
+                const fresh = await loadWithMigration<SocialPost[]>('social_posts');
+                if (fresh) setPosts(fresh);
               } catch (err: any) {
                 alert('Fill calendar failed: ' + (err?.message || err));
               } finally {

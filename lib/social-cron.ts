@@ -460,11 +460,23 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
       brainItems = [];
     }
 
-    // 6. Per account, walk slots and generate
+    // 6. Collect every slot that needs a post. This phase is fast and
+    // synchronous — dedup + brief/theme picking only, NO AI calls — so we
+    // know the full workload before spending any of the time budget.
+    interface SlotSpec {
+      account: RealAccountLite;
+      iso: string;
+      slotBrief: Brief;
+      theme: Theme;
+      slotBriefId: string;
+      metaForCaption: AccountMetaLite;
+      acctResult: AutoGenerateAccountResult;
+    }
     const newPosts: SocialPostDraft[] = [];
     // Track every image used in this run so the pickers can avoid handing
     // the same photo to multiple posts (the "same image all month" bug).
     const usedImageUrls = new Set<string>();
+    const specs: SlotSpec[] = [];
 
     for (const account of realAccounts) {
       if (!account.capabilities?.canPost) continue;
@@ -496,12 +508,11 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
         skipped: 0,
         themeIdsUsed: [],
       };
+      if (result.details) result.details.push(acctResult);
 
       for (const iso of datetimes) {
-        // Skip if a post already exists for this account at this time
+        // Skip if a post already exists for this account at this time.
         const dup = existingPosts.find(p =>
-          p.accountIds.includes(account.id) && p.scheduledAt === iso
-        ) || newPosts.find(p =>
           p.accountIds.includes(account.id) && p.scheduledAt === iso
         );
         if (dup) {
@@ -537,10 +548,9 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
           result.skippedNoThemes += 1;
           break;
         }
-        acctResult.themeIdsUsed.push(theme.id);
 
-        // MULTI-BRIEF-V1: caption gen now uses the slot's picked brief and
-        // a synthesised meta where the override fields reflect that brief's
+        // MULTI-BRIEF-V1: caption gen uses the slot's picked brief and a
+        // synthesised meta where the override fields reflect that brief's
         // per-brief override (falling back to the legacy flat fields).
         const overrides = (meta!.perBriefOverrides && meta!.perBriefOverrides[slotBriefId]) || {};
         const metaForCaption: AccountMetaLite = {
@@ -551,55 +561,103 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
           contentBriefOverride: overrides.contentBrief || meta!.contentBriefOverride,
           active: meta!.active,
         };
-        const caption = await generateCaption(input.origin, slotBrief, theme, metaForCaption, account, input.internalSecret, iso);
 
-        // Image — Brain first, then Unsplash. usedImageUrls steers both
-        // pickers away from photos already placed in this run.
-        let imageUrl: string | undefined;
-        let imageCredit: string | undefined;
-        let imageCreditUrl: string | undefined;
-        let imagePhotoUrl: string | undefined;
-        let imageUnsplashUrl: string | undefined;
-        let imageSocialHandles: SocialPostDraft['imageSocialHandles'] | undefined;
-        const brain = pickBrainImage(brainItems, theme, usedImageUrls);
-        if (brain) {
-          imageUrl = brain.url;
-          imageCredit = brain.credit;
-        } else {
-          const queryWords = theme.title.split(' ').slice(0, 4).join(' ');
-          const unsplash = await pickUnsplashImage(input.origin, queryWords, input.internalSecret, usedImageUrls);
-          if (unsplash) {
-            imageUrl = unsplash.url;
-            imageCredit = unsplash.credit;
-            imageCreditUrl = unsplash.creditUrl;
-            imagePhotoUrl = unsplash.photoUrl;
-            imageUnsplashUrl = unsplash.unsplashUrl;
-            imageSocialHandles = unsplash.socialHandles;
+        specs.push({ account, iso, slotBrief, theme, slotBriefId, metaForCaption, acctResult });
+      }
+    }
+
+    // Process oldest slots first and interleave across accounts so a
+    // time-bounded run spreads new posts over the whole calendar rather
+    // than filling one account before starting the next.
+    specs.sort((a, b) => (a.iso < b.iso ? -1 : a.iso > b.iso ? 1 : 0));
+
+    // 7. Generate captions + pick images. Each caption is a real ~10-20s AI
+    // call, so doing a fortnight of slots sequentially blew past the 60s
+    // function limit — the route timed out and returned an HTML error page
+    // (the "Unexpected token '<'" Fill-calendar failure). Run a bounded
+    // number concurrently to maximise output, and stop once we approach the
+    // budget so we always return cleanly with partial progress. The calendar
+    // dedups already-filled slots, so clicking Fill calendar again continues.
+    const TIME_BUDGET_MS = 30000;
+    const CONCURRENCY = 5;
+    let postSeq = 0;
+
+    for (let i = 0; i < specs.length; i += CONCURRENCY) {
+      if (Date.now() - startedAt > TIME_BUDGET_MS) {
+        result.stoppedEarly = true;
+        result.pendingCount = specs.length - i;
+        break;
+      }
+      const batch = specs.slice(i, i + CONCURRENCY);
+      const built = await Promise.all(batch.map(async (spec) => {
+        try {
+          const caption = await generateCaption(
+            input.origin, spec.slotBrief, spec.theme, spec.metaForCaption,
+            spec.account, input.internalSecret, spec.iso,
+          );
+          // generateCaption returns '' on failure (e.g. an AI rate-limit
+          // under concurrency). Don't persist a body-less draft — leave the
+          // slot empty so the next Fill calendar run retries it.
+          if (!caption || !caption.trim()) {
+            console.warn('[social-cron] empty caption — skipping slot', spec.iso);
+            return null;
           }
-        }
-        if (imageUrl) usedImageUrls.add(imageUrl);
 
-        const post: SocialPostDraft = {
-          id: 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-          briefId: slotBriefId,  // MULTI-BRIEF-V1: the brief picked for THIS post
-          accountIds: [account.id],
-          caption,
-          imageUrl,
-          imageCredit,
-          imageCreditUrl,
-          imagePhotoUrl,
-          imageUnsplashUrl,
-          imageSocialHandles,
-          scheduledAt: iso,
-          status: 'draft',
-          createdAt: new Date().toISOString(),
-        };
-        newPosts.push(post);
-        acctResult.created += 1;
+          // Image — Brain first, then Unsplash. usedImageUrls steers both
+          // pickers away from photos already placed in this run.
+          let imageUrl: string | undefined;
+          let imageCredit: string | undefined;
+          let imageCreditUrl: string | undefined;
+          let imagePhotoUrl: string | undefined;
+          let imageUnsplashUrl: string | undefined;
+          let imageSocialHandles: SocialPostDraft['imageSocialHandles'] | undefined;
+          const brain = pickBrainImage(brainItems, spec.theme, usedImageUrls);
+          if (brain) {
+            imageUrl = brain.url;
+            imageCredit = brain.credit;
+          } else {
+            const queryWords = spec.theme.title.split(' ').slice(0, 4).join(' ');
+            const unsplash = await pickUnsplashImage(input.origin, queryWords, input.internalSecret, usedImageUrls);
+            if (unsplash) {
+              imageUrl = unsplash.url;
+              imageCredit = unsplash.credit;
+              imageCreditUrl = unsplash.creditUrl;
+              imagePhotoUrl = unsplash.photoUrl;
+              imageUnsplashUrl = unsplash.unsplashUrl;
+              imageSocialHandles = unsplash.socialHandles;
+            }
+          }
+
+          const post: SocialPostDraft = {
+            id: 'p' + Date.now().toString(36) + (postSeq++).toString(36) + Math.random().toString(36).slice(2, 6),
+            briefId: spec.slotBriefId,  // MULTI-BRIEF-V1: the brief picked for THIS post
+            accountIds: [spec.account.id],
+            caption,
+            imageUrl,
+            imageCredit,
+            imageCreditUrl,
+            imagePhotoUrl,
+            imageUnsplashUrl,
+            imageSocialHandles,
+            scheduledAt: spec.iso,
+            status: 'draft',
+            createdAt: new Date().toISOString(),
+          };
+          return { post, spec, imageUrl };
+        } catch (err) {
+          console.error('[social-cron] slot generation failed:', err);
+          return null;
+        }
+      }));
+
+      for (const b of built) {
+        if (!b) { result.errorCount += 1; continue; }
+        if (b.imageUrl) usedImageUrls.add(b.imageUrl);
+        newPosts.push(b.post);
+        b.spec.acctResult.created += 1;
+        b.spec.acctResult.themeIdsUsed.push(b.spec.theme.id);
         result.createdCount += 1;
       }
-
-      if (result.details) result.details.push(acctResult);
     }
 
     // 7. Persist
