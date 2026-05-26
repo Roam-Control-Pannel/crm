@@ -280,6 +280,11 @@ export async function pickUnsplashImage(
 // Caption generation
 // ----------------------------------------------------------------------------
 
+// Per-caption timeout. A single AI generation is ~10-15s; capping it keeps
+// one slow call from pushing a batch past the platform's ~26s synchronous
+// function limit (see runAutoGenerate's budget note).
+const CAPTION_TIMEOUT_MS = 13000;
+
 /**
  * Build a system prompt that fuses the brief, the theme, and per-account
  * overrides. Then call /api/ai/chat and return the generated caption.
@@ -335,6 +340,11 @@ export async function generateCaption(
   const userMessage = scheduledFor
     ? `Write the post. It is scheduled for ${new Date(scheduledFor).toDateString()}. Make it distinct from the other posts in this series — vary the hook, angle, structure, and any examples.`
     : 'Write the post.';
+  // Bound each call so one slow generation can't push a batch past the
+  // platform's ~26s synchronous-function limit. On timeout the fetch
+  // aborts, we return '' and the caller leaves the slot for the next run.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), CAPTION_TIMEOUT_MS);
   try {
     const res = await fetch(`${origin}/api/ai/chat`, {
       method: 'POST',
@@ -346,6 +356,7 @@ export async function generateCaption(
         ],
         maxTokens: 800,
       }),
+      signal: controller.signal,
     });
     if (!res.ok) {
       console.error('[social-cron] AI chat failed:', res.status);
@@ -356,6 +367,8 @@ export async function generateCaption(
   } catch (err) {
     console.error('[social-cron] AI chat threw:', err);
     return '';
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -571,15 +584,18 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
     // than filling one account before starting the next.
     specs.sort((a, b) => (a.iso < b.iso ? -1 : a.iso > b.iso ? 1 : 0));
 
-    // 7. Generate captions + pick images. Each caption is a real ~10-20s AI
-    // call, so doing a fortnight of slots sequentially blew past the 60s
-    // function limit — the route timed out and returned an HTML error page
-    // (the "Unexpected token '<'" Fill-calendar failure). Run a bounded
-    // number concurrently to maximise output, and stop once we approach the
-    // budget so we always return cleanly with partial progress. The calendar
-    // dedups already-filled slots, so clicking Fill calendar again continues.
-    const TIME_BUDGET_MS = 30000;
-    const CONCURRENCY = 5;
+    // 7. Generate captions + pick images. Each caption is a real ~10-15s AI
+    // call. Netlify kills a synchronous function at ~26s regardless of the
+    // maxDuration we set, so we can only fit a handful per request: an
+    // earlier larger budget ran past that ceiling and the route returned an
+    // HTML timeout page (the "Unexpected token '<'" Fill-calendar failure).
+    // Budget conservatively below the ceiling — accounting for setup time
+    // already elapsed and one in-flight batch (each call capped at
+    // CAPTION_TIMEOUT_MS) plus the final save — and return cleanly with
+    // partial progress. The calendar dedups filled slots, so clicking Fill
+    // calendar again continues where this left off.
+    const TIME_BUDGET_MS = 9000;
+    const CONCURRENCY = 4;
     let postSeq = 0;
 
     for (let i = 0; i < specs.length; i += CONCURRENCY) {
