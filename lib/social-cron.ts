@@ -168,7 +168,8 @@ export function pickTheme(themes: Theme[], briefId: string): Theme | null {
  */
 export function pickBrainImage(
   brainItems: BrainItemLite[],
-  theme: Theme
+  theme: Theme,
+  excludeUrls?: Set<string>
 ): BrainItemLite | null {
   if (brainItems.length === 0) return null;
 
@@ -194,8 +195,16 @@ export function pickBrainImage(
     return { item, score };
   });
 
-  const best = scored.filter(s => s.score > 0).sort((a, b) => b.score - a.score)[0];
-  return best ? best.item : null;
+  const matches = scored.filter(s => s.score > 0).sort((a, b) => b.score - a.score);
+  if (matches.length === 0) return null;
+  // Prefer images not already used in this run so a month of posts doesn't
+  // reuse the single top-scoring image. Pick randomly within the strongest
+  // eligible tier — keeps relevance high while adding variety.
+  const unused = matches.filter(s => !excludeUrls?.has(s.item.url));
+  const eligible = unused.length > 0 ? unused : matches;
+  const topScore = eligible[0].score;
+  const topTier = eligible.filter(s => s.score === topScore);
+  return topTier[Math.floor(Math.random() * topTier.length)].item;
 }
 
 /**
@@ -212,7 +221,8 @@ export function pickBrainImage(
 export async function pickUnsplashImage(
   origin: string,
   query: string,
-  internalSecret: string
+  internalSecret: string,
+  excludeUrls?: Set<string>
 ): Promise<{
   url: string;
   credit: string;
@@ -222,34 +232,43 @@ export async function pickUnsplashImage(
   socialHandles?: { instagram?: string|null; twitter?: string|null; unsplash?: string|null };
 } | null> {
   try {
-    const url = `${origin}/api/images/search?q=${encodeURIComponent(query)}&perPage=1`;
+    // The proxy route expects `query` + `count` (NOT `q`/`perPage`). The
+    // earlier param mismatch meant the theme query was silently dropped,
+    // Unsplash fell back to its default search, and every post in the run
+    // got the SAME first image. Fetch a pool and pick a not-yet-used photo
+    // so a month of posts gets visual variety even on a shared theme.
+    const url = `${origin}/api/images/search?query=${encodeURIComponent(query)}&count=24`;
     const res = await fetch(url, {
       headers: { 'x-internal-call': internalSecret },
     });
     if (!res.ok) return null;
     const data: any = await res.json();
-    const first = data?.results?.[0] || data?.images?.[0];
-    if (!first || !first.url) return null;
+    const list: any[] = data?.images || data?.results || [];
+    const usable = list.filter(img => img?.url);
+    if (usable.length === 0) return null;
+    const unused = usable.filter(img => !excludeUrls?.has(img.url));
+    const pool = unused.length > 0 ? unused : usable;
+    const choice = pool[Math.floor(Math.random() * pool.length)];
 
-    // Fire the Unsplash download-tracking ping for this photo. Required
-    // by their guidelines whenever a photo is "used" — which includes
-    // automated selection for a draft. Fire-and-forget; ping failures
-    // shouldn't block draft creation.
-    if (first.downloadLocation) {
+    // Fire the Unsplash download-tracking ping for the chosen photo.
+    // Required by their guidelines whenever a photo is "used" — which
+    // includes automated selection for a draft. Fire-and-forget; ping
+    // failures shouldn't block draft creation.
+    if (choice.downloadLocation) {
       fetch(`${origin}/api/images/track-download`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-internal-call': internalSecret },
-        body: JSON.stringify({ downloadLocation: first.downloadLocation }),
+        body: JSON.stringify({ downloadLocation: choice.downloadLocation }),
       }).catch(err => console.warn('[social-cron] Unsplash download ping failed:', err));
     }
 
     return {
-      url: first.url,
-      credit: first.credit || first.attribution || '',
-      creditUrl: first.creditUrl,
-      photoUrl: first.photoUrl,
-      unsplashUrl: first.unsplashUrl,
-      socialHandles: first.socialHandles,
+      url: choice.url,
+      credit: choice.credit || choice.attribution || '',
+      creditUrl: choice.creditUrl,
+      photoUrl: choice.photoUrl,
+      unsplashUrl: choice.unsplashUrl,
+      socialHandles: choice.socialHandles,
     };
   } catch (err) {
     console.error('[social-cron] Unsplash fetch failed:', err);
@@ -274,7 +293,9 @@ export async function generateCaption(
   brief: Brief,
   theme: Theme,
   meta: AccountMetaLite,
-  account: RealAccountLite
+  account: RealAccountLite,
+  internalSecret: string,
+  scheduledFor?: string
 ): Promise<string> {
   const tone = meta.toneOverride || brief.tone;
   const contentBrief = meta.contentBriefOverride || brief.contentBrief;
@@ -307,14 +328,21 @@ export async function generateCaption(
     'Output ONLY the post text. No preamble, no explanations, no "Here is your post:". The output is published verbatim.',
   ].join('\n');
 
+  // This runs server-side with no user session, so the call to our own
+  // /api/ai/chat MUST carry the internal-call secret. Without it the auth
+  // middleware 307-redirects to /login and we silently get an empty string
+  // back — the "auto-generated posts have no body copy" bug.
+  const userMessage = scheduledFor
+    ? `Write the post. It is scheduled for ${new Date(scheduledFor).toDateString()}. Make it distinct from the other posts in this series — vary the hook, angle, structure, and any examples.`
+    : 'Write the post.';
   try {
     const res = await fetch(`${origin}/api/ai/chat`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'x-internal-call': internalSecret },
       body: JSON.stringify({
         systemPrompt,
         messages: [
-          { role: 'user', content: 'Write the post.' },
+          { role: 'user', content: userMessage },
         ],
         maxTokens: 800,
       }),
@@ -419,6 +447,9 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
 
     // 6. Per account, walk slots and generate
     const newPosts: SocialPostDraft[] = [];
+    // Track every image used in this run so the pickers can avoid handing
+    // the same photo to multiple posts (the "same image all month" bug).
+    const usedImageUrls = new Set<string>();
 
     for (const account of realAccounts) {
       if (!account.capabilities?.canPost) continue;
@@ -505,22 +536,23 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
           contentBriefOverride: overrides.contentBrief || meta!.contentBriefOverride,
           active: meta!.active,
         };
-        const caption = await generateCaption(input.origin, slotBrief, theme, metaForCaption, account);
+        const caption = await generateCaption(input.origin, slotBrief, theme, metaForCaption, account, input.internalSecret, iso);
 
-        // Image — Brain first, then Unsplash
+        // Image — Brain first, then Unsplash. usedImageUrls steers both
+        // pickers away from photos already placed in this run.
         let imageUrl: string | undefined;
         let imageCredit: string | undefined;
         let imageCreditUrl: string | undefined;
         let imagePhotoUrl: string | undefined;
         let imageUnsplashUrl: string | undefined;
         let imageSocialHandles: SocialPostDraft['imageSocialHandles'] | undefined;
-        const brain = pickBrainImage(brainItems, theme);
+        const brain = pickBrainImage(brainItems, theme, usedImageUrls);
         if (brain) {
           imageUrl = brain.url;
           imageCredit = brain.credit;
         } else {
           const queryWords = theme.title.split(' ').slice(0, 4).join(' ');
-          const unsplash = await pickUnsplashImage(input.origin, queryWords, input.internalSecret);
+          const unsplash = await pickUnsplashImage(input.origin, queryWords, input.internalSecret, usedImageUrls);
           if (unsplash) {
             imageUrl = unsplash.url;
             imageCredit = unsplash.credit;
@@ -530,6 +562,7 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
             imageSocialHandles = unsplash.socialHandles;
           }
         }
+        if (imageUrl) usedImageUrls.add(imageUrl);
 
         const post: SocialPostDraft = {
           id: 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
