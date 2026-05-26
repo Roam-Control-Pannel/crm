@@ -36,6 +36,35 @@ function isPublicApiRoute(pathname: string): boolean {
   return PUBLIC_API_ROUTES.includes(pathname);
 }
 
+/**
+ * Public read of a stored image by id: /api/images/<id>.
+ *
+ * These must be fetchable by unauthenticated external parties:
+ *   - Meta's Graph API crawler fetches image_url / url when publishing to
+ *     Facebook and Instagram (IG can ONLY ingest via a public URL — it has
+ *     no binary-upload path), and
+ *   - our own server-side fetch for the LinkedIn image upload runs without
+ *     a session cookie.
+ * Without this, the auth middleware 307-redirects the crawler to /login and
+ * Meta receives an HTML page instead of the image, surfacing as
+ * "Only photo or video can be accepted as media type" / "image format is
+ * not supported" / "Missing or invalid image file". IDs are unguessable
+ * (img_<timestamp>_<random>) and the images are destined for public social
+ * posts, so public read is appropriate.
+ *
+ * Scope is deliberately narrow: a single path segment only (no nested
+ * paths), and the write/proxy sub-routes stay gated. Combined with the
+ * GET-only guard at the call site, this exposes nothing but image bytes.
+ */
+const IMAGE_WRITE_SUBROUTES = new Set(['upload', 'search', 'track-download']);
+
+function isPublicImageRead(pathname: string): boolean {
+  if (!pathname.startsWith('/api/images/')) return false;
+  const rest = pathname.slice('/api/images/'.length);
+  if (!rest || rest.includes('/')) return false;
+  return !IMAGE_WRITE_SUBROUTES.has(rest);
+}
+
 export default withAuth(
   function middleware(req) {
     return NextResponse.next();
@@ -48,6 +77,9 @@ export default withAuth(
         if (pathname.startsWith('/api/auth/')) return true;
         // Public, server-gated API routes (webhooks, cron, setup).
         if (isPublicApiRoute(pathname)) return true;
+        // Public image reads (GET /api/images/<id>) — Meta's FB/IG crawler
+        // and our own LinkedIn upload fetch pull these without a session.
+        if (req.method === 'GET' && isPublicImageRead(pathname)) return true;
         // CRON-AUTOGEN-V1: server-to-server internal calls.
         // Background jobs and the run-now UI proxy attach
         // x-internal-call with CRON_SECRET_V2 to authenticate
