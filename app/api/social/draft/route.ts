@@ -122,7 +122,7 @@ export async function POST(req: NextRequest) {
     // 4. Generate caption (unless override provided)
     let caption = captionOverride;
     if (!caption) {
-      caption = await generateCaption(origin, brief, theme, meta, account);
+      caption = await generateCaption(origin, brief, theme, meta, account, secret, scheduledAt);
       if (!caption) {
         return NextResponse.json({ ok: false, error: 'Caption generation failed' }, { status: 502 });
       }
