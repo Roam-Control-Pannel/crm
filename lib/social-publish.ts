@@ -94,6 +94,59 @@ function resolveRoutingFromAccountId(input: PublishInput): PublishInput {
  * have to migrate existing scheduled posts whose stored imageUrl
  * predates this fix.
  */
+/**
+ * INSTAGRAM-CONTAINER-READY-V1
+ *
+ * A media container created from a remote `image_url` is processed
+ * asynchronously: the POST /{ig-id}/media call returns a creation id
+ * immediately, but Meta only fetches and validates the image afterwards.
+ * Calling /media_publish before the container reaches
+ * `status_code === 'FINISHED'` fails with code 9007 / subcode 2207027
+ * ("Media ID is not available — the media must be successfully created
+ * before it can be published").
+ *
+ * Facebook's /photos endpoint is synchronous, which is why a combined
+ * "publish to Facebook + Instagram" run would report Facebook as the only
+ * success: the IG container simply wasn't ready when we asked to publish.
+ *
+ * Poll the container until it's FINISHED (or errors out). status_code
+ * values are: EXPIRED | ERROR | FINISHED | IN_PROGRESS | PUBLISHED.
+ * The cap keeps us comfortably inside the route's function budget while
+ * giving Meta enough time for the typical few-second image ingest.
+ */
+async function waitForInstagramContainer(
+  containerId: string,
+  accessToken: string,
+): Promise<{ error: string; details?: unknown } | null> {
+  const maxAttempts = 12;
+  const intervalMs = 1500;
+  let last: unknown;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const res = await fetch(
+      `https://graph.facebook.com/v21.0/${containerId}?fields=status_code&access_token=${encodeURIComponent(accessToken)}`,
+    );
+    const data = await res.json();
+    last = data;
+    if (data?.error) {
+      return { error: `Instagram: ${data.error.message}`, details: data };
+    }
+    const status = data?.status_code;
+    if (status === 'FINISHED') return null;
+    if (status === 'ERROR' || status === 'EXPIRED') {
+      return {
+        error: `Instagram media processing ${String(status).toLowerCase()}`,
+        details: data,
+      };
+    }
+    // IN_PROGRESS (or an unexpected/missing status) — wait and re-poll.
+    await new Promise(resolve => setTimeout(resolve, intervalMs));
+  }
+  return {
+    error: 'Instagram media not ready (timed out waiting for container processing)',
+    details: last,
+  };
+}
+
 function forceJpegForMeta(url: string | undefined): string | undefined {
   if (!url) return url;
   if (!url.startsWith('https://images.unsplash.com/')) return url;
@@ -336,6 +389,17 @@ export async function publishToAccount(rawInput: PublishInput): Promise<PublishR
           ? `Instagram: ${metaMsg}` + (metaCode ? ` (code ${metaCode}${metaSub ? '/' + metaSub : ''})` : '')
           : 'Container creation failed';
         return fail(input, detail, 502, container);
+      }
+
+      // INSTAGRAM-CONTAINER-READY-V1: the container is processed
+      // asynchronously, so publishing immediately races Meta's image
+      // ingest and fails with "Media ID is not available". Wait for the
+      // container to reach FINISHED before publishing. See
+      // waitForInstagramContainer() above.
+      const notReady = await waitForInstagramContainer(container.id, page.pageToken);
+      if (notReady) {
+        console.error('[social-publish] IG container not ready:', JSON.stringify(notReady.details));
+        return fail(input, notReady.error, 502, notReady.details);
       }
 
       const publishRes = await fetch(
