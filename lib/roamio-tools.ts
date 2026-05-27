@@ -487,6 +487,25 @@ function isDueToday(dueDate: string): boolean {
   );
 }
 
+/**
+ * Headers for server-to-server fetches into our own API from inside a tool.
+ *
+ * These tool calls run inside the /api/ai/chat serverless function, which
+ * has no user session cookie to forward. Without authenticating, the auth
+ * middleware 307-redirects the request to the HTML login page; the tool
+ * then calls res.json() on "<!DOCTYPE html>…" and throws
+ * "Unexpected token '<' … is not valid JSON", which bubbles up and breaks
+ * the whole chat turn. Attaching x-internal-call with CRON_SECRET_V2 is the
+ * same server-to-server auth the social tools already use (see middleware.ts).
+ */
+function internalCallHeaders(extra?: Record<string, string>): Record<string, string> {
+  const secret = process.env.CRON_SECRET_V2;
+  return {
+    ...(extra || {}),
+    ...(secret ? { 'x-internal-call': secret } : {}),
+  };
+}
+
 export async function executeTool(name: string, input: any): Promise<any> {
   switch (name) {
     case 'create_task': {
@@ -573,7 +592,7 @@ export async function executeTool(name: string, input: any): Promise<any> {
       const baseUrl = process.env.URL || process.env.DEPLOY_PRIME_URL || 'http://localhost:3000';
       const res = await fetch(`${baseUrl}/api/brain/items`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: internalCallHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           content: input.content,
           tags: input.tags,
@@ -600,7 +619,9 @@ export async function executeTool(name: string, input: any): Promise<any> {
       if (input.folder) params.set('folder', String(input.folder));
       if (input.type) params.set('type', String(input.type));
       params.set('limit', String(Math.min(50, Math.max(1, Number(input.limit) || 10))));
-      const res = await fetch(`${baseUrl}/api/brain/search?${params.toString()}`);
+      const res = await fetch(`${baseUrl}/api/brain/search?${params.toString()}`, {
+        headers: internalCallHeaders(),
+      });
       const data = await res.json();
       if (!data.ok) return { ok: false, error: data.error || 'Search failed' };
       // Trim per-item payload — the AI just needs id, description, tags,
@@ -623,7 +644,9 @@ export async function executeTool(name: string, input: any): Promise<any> {
       const baseUrl = process.env.URL || process.env.DEPLOY_PRIME_URL || 'http://localhost:3000';
       const id = String(input.id || '');
       if (!id) return { ok: false, error: 'id required' };
-      const res = await fetch(`${baseUrl}/api/brain/items/${encodeURIComponent(id)}/content`);
+      const res = await fetch(`${baseUrl}/api/brain/items/${encodeURIComponent(id)}/content`, {
+        headers: internalCallHeaders(),
+      });
       const data = await res.json();
       if (!data.ok) return { ok: false, error: data.error || 'Read failed' };
       if (data.binary) {
@@ -658,7 +681,7 @@ export async function executeTool(name: string, input: any): Promise<any> {
 
       const scrapeRes = await fetch(`${baseUrl}/api/brain/scrape`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: internalCallHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ url }),
       });
       const scrape = await scrapeRes.json();
@@ -673,7 +696,7 @@ export async function executeTool(name: string, input: any): Promise<any> {
       if (save) {
         const saveRes = await fetch(`${baseUrl}/api/brain/items`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: internalCallHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({
             url,
             tags: Array.from(new Set([...tags, 'web-source'])),
@@ -712,7 +735,7 @@ export async function executeTool(name: string, input: any): Promise<any> {
       const body = /^\s*#\s+/.test(content) ? content : `# ${title}\n\n${content}`;
       const res = await fetch(`${baseUrl}/api/brain/items`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: internalCallHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           content: body,
           tags: Array.from(new Set([...tags, 'ai-generated'])),
