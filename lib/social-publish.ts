@@ -166,6 +166,38 @@ function forceJpegForMeta(url: string | undefined): string | undefined {
   }
 }
 
+/**
+ * INSTAGRAM-ASPECT-RATIO-V1
+ *
+ * Instagram feed images must have an aspect ratio between 4:5 (0.8,
+ * portrait) and 1.91:1 (landscape). Unsplash serves each photo at its
+ * native ratio, which for scenic/panoramic shots is frequently wider than
+ * 1.91:1 (and portraits can be taller than 4:5). Meta rejects those
+ * containers with code 36003 / subcode 2207009 ("The aspect ratio is not
+ * supported"), so a combined FB+IG publish ends up Facebook-only.
+ *
+ * Build on top of forceJpegForMeta() and, for Unsplash URLs, center-crop
+ * to a 1:1 square (1080x1080) via Unsplash's imgix-backed params. A square
+ * is safely inside the supported range for any source orientation, so it
+ * works whether the original is landscape or portrait. Non-Unsplash URLs
+ * (Brain uploads, own-hosted images) can't be cropped via query params and
+ * pass through unchanged — those must already sit within range.
+ */
+function instagramImageUrl(url: string | undefined): string | undefined {
+  const jpg = forceJpegForMeta(url);
+  if (!jpg) return jpg;
+  if (!jpg.startsWith('https://images.unsplash.com/')) return jpg;
+  try {
+    const parsed = new URL(jpg);
+    parsed.searchParams.set('fit', 'crop');
+    parsed.searchParams.set('w', '1080');
+    parsed.searchParams.set('h', '1080');
+    return parsed.toString();
+  } catch {
+    return jpg;
+  }
+}
+
 export async function publishToAccount(rawInput: PublishInput): Promise<PublishResult> {
   if (!rawInput.platform || !rawInput.caption) {
     return fail(rawInput, 'Missing platform or caption', 400);
@@ -360,10 +392,11 @@ export async function publishToAccount(rawInput: PublishInput): Promise<PublishR
         return fail(input, 'Instagram requires an image', 400);
       }
 
-      // META-IMAGE-FORMAT-V1: see forceJpegForMeta() above. This is the
-      // path that was failing with error 36001/2207083 — Instagram only
-      // accepts JPEG/PNG containers, and Unsplash defaults to WebP.
-      const igImageUrl = forceJpegForMeta(imageUrl);
+      // META-IMAGE-FORMAT-V1 + INSTAGRAM-ASPECT-RATIO-V1: force JPEG (IG
+      // rejects WebP with 36001/2207083) and crop to a supported aspect
+      // ratio (IG rejects out-of-range ratios with 36003/2207009). See
+      // instagramImageUrl() above.
+      const igImageUrl = instagramImageUrl(imageUrl);
       const containerRes = await fetch(
         `https://graph.facebook.com/v21.0/${page.instagramId}/media`,
         {
