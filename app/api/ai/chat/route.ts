@@ -7,28 +7,68 @@ export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
 
 // Hard cap on the tool-use loop so a misbehaving model can't burn the
-// 60-second function budget. 5 round-trips is plenty for any reasonable
+// function budget. 5 round-trips is plenty for any reasonable
 // task (list -> create, or list -> update -> confirm). Bump if you add
 // genuinely multi-step workflows later.
 const MAX_TOOL_ITERATIONS = 5;
 
-async function callAnthropic(body: any): Promise<{ ok: boolean; status: number; data: any; raw: string }> {
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': process.env.ANTHROPIC_API_KEY!,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify(body),
-  });
-  const raw = await res.text();
-  let data: any = null;
-  try { data = JSON.parse(raw); } catch { /* handled below */ }
-  return { ok: res.ok, status: res.status, data, raw };
+// Although maxDuration is set to 60s, Netlify's plan caps synchronous
+// functions at ~26s and hard-kills anything past it — which returns an
+// unparseable HTML error page to the client instead of JSON. We stay
+// comfortably under that ceiling and always return clean JSON ourselves.
+const OVERALL_BUDGET_MS = 24_000;
+
+// Output generation time scales with token count: a 4096-token answer can
+// take 20-40s on its own, which alone blows the budget. Chat answers don't
+// need that much, so cap the tool/chat path lower. Long-form content
+// generation (the non-tool path) can still pass a larger maxTokens.
+const CHAT_MAX_TOKENS = 2048;
+
+// Friendly message returned (as normal assistant content, HTTP 200) when we
+// run out of time — far better UX than the function being hard-killed.
+const TIMEOUT_MESSAGE =
+  "Sorry — that took longer than I'm able to spend on a single reply. " +
+  'Try asking something more specific, or break it into smaller steps and I can pick up from there.';
+
+async function callAnthropic(
+  body: any,
+  deadline: number
+): Promise<{ ok: boolean; status: number; data: any; raw: string; timedOut?: boolean }> {
+  const remaining = deadline - Date.now();
+  // Not enough time left to make a meaningful call.
+  if (remaining <= 1_000) {
+    return { ok: false, status: 0, data: null, raw: '', timedOut: true };
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), remaining);
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': process.env.ANTHROPIC_API_KEY!,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    const raw = await res.text();
+    let data: any = null;
+    try { data = JSON.parse(raw); } catch { /* handled below */ }
+    return { ok: res.ok, status: res.status, data, raw };
+  } catch (err: any) {
+    if (err?.name === 'AbortError') {
+      return { ok: false, status: 0, data: null, raw: '', timedOut: true };
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export async function POST(req: NextRequest) {
+  const deadline = Date.now() + OVERALL_BUDGET_MS;
   try {
     const { messages, systemPrompt, maxTokens, model, tools, pendingConfirm } = await req.json();
 
@@ -57,19 +97,23 @@ export async function POST(req: NextRequest) {
         maxTokens,
         model,
         toolSchemas,
+        deadline,
       });
     }
 
     // ----- First model call ----------------------------------------------
     const baseBody: any = {
       model: model || 'claude-sonnet-4-6',
-      max_tokens: maxTokens || 4096,
+      max_tokens: maxTokens || (toolMode ? CHAT_MAX_TOKENS : 4096),
       system: systemPrompt,
       messages,
     };
     if (toolMode) baseBody.tools = toolSchemas;
 
-    let { ok, status, data, raw } = await callAnthropic(baseBody);
+    let { ok, status, data, raw, timedOut } = await callAnthropic(baseBody, deadline);
+    if (timedOut) {
+      return NextResponse.json({ content: TIMEOUT_MESSAGE });
+    }
     if (!ok || !data) {
       console.error('Anthropic error:', data || raw.slice(0, 500));
       return NextResponse.json(
@@ -133,10 +177,15 @@ export async function POST(req: NextRequest) {
         { role: 'user', content: toolResults },
       ];
 
-      ({ ok, status, data, raw } = await callAnthropic({
+      ({ ok, status, data, raw, timedOut } = await callAnthropic({
         ...baseBody,
         messages: convo,
-      }));
+      }, deadline));
+      if (timedOut) {
+        // Tools ran but we couldn't get the final summary in time. Return any
+        // text from the previous turn so the reply isn't empty.
+        return NextResponse.json({ content: extractText(blocks) || TIMEOUT_MESSAGE });
+      }
       if (!ok || !data) {
         console.error('Anthropic tool-loop error:', data || raw.slice(0, 500));
         return NextResponse.json(
@@ -191,8 +240,9 @@ async function runConfirmedTool(opts: {
   maxTokens?: number;
   model?: string;
   toolSchemas: any[];
+  deadline: number;
 }) {
-  const { pendingConfirm, messages, systemPrompt, maxTokens, model, toolSchemas } = opts;
+  const { pendingConfirm, messages, systemPrompt, maxTokens, model, toolSchemas, deadline } = opts;
 
   // Execute the previously-deferred tool now that the user has confirmed.
   const result = await executeTool(pendingConfirm.name, pendingConfirm.input);
@@ -215,13 +265,21 @@ async function runConfirmedTool(opts: {
     },
   ];
 
-  const { ok, status, data, raw } = await callAnthropic({
+  const { ok, status, data, raw, timedOut } = await callAnthropic({
     model: model || 'claude-sonnet-4-6',
-    max_tokens: maxTokens || 4096,
+    max_tokens: maxTokens || CHAT_MAX_TOKENS,
     system: systemPrompt,
     messages: convo,
     tools: toolSchemas,
-  });
+  }, deadline);
+  // The tool already executed; if the closing summary times out, still tell
+  // the client the action succeeded so the UI reflects it.
+  if (timedOut) {
+    return NextResponse.json({
+      content: 'Done.',
+      executedTools: [{ name: pendingConfirm.name, input: pendingConfirm.input }],
+    });
+  }
   if (!ok || !data) {
     console.error('Anthropic confirm error:', data || raw.slice(0, 500));
     return NextResponse.json(
