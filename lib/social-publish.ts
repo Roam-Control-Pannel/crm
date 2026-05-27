@@ -94,6 +94,59 @@ function resolveRoutingFromAccountId(input: PublishInput): PublishInput {
  * have to migrate existing scheduled posts whose stored imageUrl
  * predates this fix.
  */
+/**
+ * INSTAGRAM-CONTAINER-READY-V1
+ *
+ * A media container created from a remote `image_url` is processed
+ * asynchronously: the POST /{ig-id}/media call returns a creation id
+ * immediately, but Meta only fetches and validates the image afterwards.
+ * Calling /media_publish before the container reaches
+ * `status_code === 'FINISHED'` fails with code 9007 / subcode 2207027
+ * ("Media ID is not available — the media must be successfully created
+ * before it can be published").
+ *
+ * Facebook's /photos endpoint is synchronous, which is why a combined
+ * "publish to Facebook + Instagram" run would report Facebook as the only
+ * success: the IG container simply wasn't ready when we asked to publish.
+ *
+ * Poll the container until it's FINISHED (or errors out). status_code
+ * values are: EXPIRED | ERROR | FINISHED | IN_PROGRESS | PUBLISHED.
+ * The cap keeps us comfortably inside the route's function budget while
+ * giving Meta enough time for the typical few-second image ingest.
+ */
+async function waitForInstagramContainer(
+  containerId: string,
+  accessToken: string,
+): Promise<{ error: string; details?: unknown } | null> {
+  const maxAttempts = 12;
+  const intervalMs = 1500;
+  let last: unknown;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const res = await fetch(
+      `https://graph.facebook.com/v21.0/${containerId}?fields=status_code&access_token=${encodeURIComponent(accessToken)}`,
+    );
+    const data = await res.json();
+    last = data;
+    if (data?.error) {
+      return { error: `Instagram: ${data.error.message}`, details: data };
+    }
+    const status = data?.status_code;
+    if (status === 'FINISHED') return null;
+    if (status === 'ERROR' || status === 'EXPIRED') {
+      return {
+        error: `Instagram media processing ${String(status).toLowerCase()}`,
+        details: data,
+      };
+    }
+    // IN_PROGRESS (or an unexpected/missing status) — wait and re-poll.
+    await new Promise(resolve => setTimeout(resolve, intervalMs));
+  }
+  return {
+    error: 'Instagram media not ready (timed out waiting for container processing)',
+    details: last,
+  };
+}
+
 function forceJpegForMeta(url: string | undefined): string | undefined {
   if (!url) return url;
   if (!url.startsWith('https://images.unsplash.com/')) return url;
@@ -110,6 +163,38 @@ function forceJpegForMeta(url: string | undefined): string | undefined {
   } catch {
     // Malformed URL — return as-is and let Meta report the error.
     return url;
+  }
+}
+
+/**
+ * INSTAGRAM-ASPECT-RATIO-V1
+ *
+ * Instagram feed images must have an aspect ratio between 4:5 (0.8,
+ * portrait) and 1.91:1 (landscape). Unsplash serves each photo at its
+ * native ratio, which for scenic/panoramic shots is frequently wider than
+ * 1.91:1 (and portraits can be taller than 4:5). Meta rejects those
+ * containers with code 36003 / subcode 2207009 ("The aspect ratio is not
+ * supported"), so a combined FB+IG publish ends up Facebook-only.
+ *
+ * Build on top of forceJpegForMeta() and, for Unsplash URLs, center-crop
+ * to a 1:1 square (1080x1080) via Unsplash's imgix-backed params. A square
+ * is safely inside the supported range for any source orientation, so it
+ * works whether the original is landscape or portrait. Non-Unsplash URLs
+ * (Brain uploads, own-hosted images) can't be cropped via query params and
+ * pass through unchanged — those must already sit within range.
+ */
+function instagramImageUrl(url: string | undefined): string | undefined {
+  const jpg = forceJpegForMeta(url);
+  if (!jpg) return jpg;
+  if (!jpg.startsWith('https://images.unsplash.com/')) return jpg;
+  try {
+    const parsed = new URL(jpg);
+    parsed.searchParams.set('fit', 'crop');
+    parsed.searchParams.set('w', '1080');
+    parsed.searchParams.set('h', '1080');
+    return parsed.toString();
+  } catch {
+    return jpg;
   }
 }
 
@@ -307,10 +392,11 @@ export async function publishToAccount(rawInput: PublishInput): Promise<PublishR
         return fail(input, 'Instagram requires an image', 400);
       }
 
-      // META-IMAGE-FORMAT-V1: see forceJpegForMeta() above. This is the
-      // path that was failing with error 36001/2207083 — Instagram only
-      // accepts JPEG/PNG containers, and Unsplash defaults to WebP.
-      const igImageUrl = forceJpegForMeta(imageUrl);
+      // META-IMAGE-FORMAT-V1 + INSTAGRAM-ASPECT-RATIO-V1: force JPEG (IG
+      // rejects WebP with 36001/2207083) and crop to a supported aspect
+      // ratio (IG rejects out-of-range ratios with 36003/2207009). See
+      // instagramImageUrl() above.
+      const igImageUrl = instagramImageUrl(imageUrl);
       const containerRes = await fetch(
         `https://graph.facebook.com/v21.0/${page.instagramId}/media`,
         {
@@ -336,6 +422,17 @@ export async function publishToAccount(rawInput: PublishInput): Promise<PublishR
           ? `Instagram: ${metaMsg}` + (metaCode ? ` (code ${metaCode}${metaSub ? '/' + metaSub : ''})` : '')
           : 'Container creation failed';
         return fail(input, detail, 502, container);
+      }
+
+      // INSTAGRAM-CONTAINER-READY-V1: the container is processed
+      // asynchronously, so publishing immediately races Meta's image
+      // ingest and fails with "Media ID is not available". Wait for the
+      // container to reach FINISHED before publishing. See
+      // waitForInstagramContainer() above.
+      const notReady = await waitForInstagramContainer(container.id, page.pageToken);
+      if (notReady) {
+        console.error('[social-publish] IG container not ready:', JSON.stringify(notReady.details));
+        return fail(input, notReady.error, 502, notReady.details);
       }
 
       const publishRes = await fetch(
