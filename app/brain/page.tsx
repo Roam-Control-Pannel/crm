@@ -623,6 +623,7 @@ export default function BrainPage() {
                       <Trash2 size={13}/>
                     </button>
                   </div>
+                  )}
                   <div className="brain-card-image" style={{ width: '100%', height: 130, background: 'var(--paper)', position: 'relative' }}>
                     {item.mime?.startsWith('image/')
                       ? <img src={imageUrl(item)} alt={item.description} style={{ width: '100%', height: '100%', objectFit: 'cover' }}/>
