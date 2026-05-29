@@ -1084,9 +1084,9 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
   // hitting LinkedIn's API right now".
   function PostStatusBadge({ status }: { status: SocialPost['status'] }) {
     const map: Record<SocialPost['status'], { label: string; bg: string; fg: string; icon: JSX.Element }> = {
-      draft:      { label: 'Draft',      bg: 'var(--paper)',    fg: 'var(--warn)',  icon: <Edit3 size={10} /> },
-      scheduled:  { label: 'Scheduled',  bg: '#e8f5ee',         fg: 'var(--ok)',    icon: <Clock size={10} /> },
-      publishing: { label: 'Publishing', bg: '#e8f5ee',         fg: 'var(--ok)',    icon: <RefreshCw size={10} /> },
+      draft:      { label: 'Draft',      bg: 'var(--paper)',    fg: 'var(--ink-500)', icon: <Edit3 size={10} /> },
+      scheduled:  { label: 'Scheduled',  bg: '#fcecd3',         fg: 'var(--warn)',  icon: <Clock size={10} /> },
+      publishing: { label: 'Publishing', bg: '#fcecd3',         fg: 'var(--warn)',  icon: <RefreshCw size={10} /> },
       published:  { label: 'Published',  bg: '#dcfce7',         fg: '#15803d',      icon: <Check size={10} /> },
       partial:    { label: 'Partial',    bg: '#fef3c7',         fg: '#b45309',      icon: <AlertTriangle size={10} /> },
       failed:     { label: 'Failed',     bg: '#fee2e2',         fg: 'var(--alert)', icon: <AlertTriangle size={10} /> },
@@ -1109,15 +1109,16 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
     const primary = accs[0];
     if (!primary) return null;
     const canDrag = post.status === 'draft' || post.status === 'scheduled';
-    // PUBLISH-UI-V1: published / partial / failed posts get their own border
-    // colour so the calendar reads at a glance — green = done, red = needs
-    // attention, original platform colour = still pending. The status glyph
-    // sits on the right; the platform icon stays on the left so the at-a-
-    // glance reading "which account, what state" still works.
+    // PUBLISH-UI-V1 / CAL-STATUS-COLOURS-V1: each state gets its own colour so
+    // the calendar reads at a glance — grey = draft, amber = scheduled (queued
+    // for the cron), green = published, red = failed. The status glyph sits on
+    // the right; the platform icon + handle stay on the left so "which account,
+    // what state" reads instantly.
     const isPublished = post.status === 'published' || post.status === 'partial';
     const isFailed = post.status === 'failed';
-    const borderColor = isPublished ? '#15803d' : isFailed ? 'var(--alert)' : primary.color;
-    const bgColor = isPublished ? '#dcfce7' : isFailed ? '#fee2e2' : primary.color + '22';
+    const isScheduled = post.status === 'scheduled' || post.status === 'publishing';
+    const borderColor = isPublished ? '#15803d' : isFailed ? 'var(--alert)' : isScheduled ? 'var(--warn)' : 'var(--ink-300)';
+    const bgColor = isPublished ? '#dcfce7' : isFailed ? '#fee2e2' : isScheduled ? '#fcecd3' : 'var(--paper)';
     return (
       <div
         draggable={canDrag}
@@ -1127,7 +1128,7 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
           e.dataTransfer.effectAllowed = 'move';
         } : undefined}
         onClick={e => { e.stopPropagation(); openComposer(post); }}
-        title={canDrag ? 'Drag to a different day to reschedule' : isPublished ? 'Published — click to view' : isFailed ? 'Publish failed — click to retry' : undefined}
+        title={isScheduled ? 'Scheduled — drag to a different day to reschedule' : canDrag ? 'Draft — drag to a different day to reschedule' : isPublished ? 'Published — click to view' : isFailed ? 'Publish failed — click to retry' : undefined}
         style={{
         background: bgColor, borderLeft: `3px solid ${borderColor}`,
         padding: '3px 6px', marginBottom: 2, borderRadius: 'var(--r-sm)',
@@ -1138,6 +1139,7 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', flex: 1 }}>{primary.handle}{accs.length > 1 ? ` +${accs.length - 1}` : ''}</span>
         {isPublished && <Check size={9} color="#15803d" />}
         {isFailed && <AlertTriangle size={9} color="var(--alert)" />}
+        {isScheduled && <Clock size={9} color="var(--warn)" />}
       </div>
     );
   }
@@ -1418,8 +1420,25 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
       {/* Calendar view */}
       {tab === 'calendar' && (
         <div style={{ background: 'var(--white)', borderRadius: 'var(--r-lg)', boxShadow: 'var(--shadow-sm)', overflow: 'hidden' }}>
-          <div style={{ padding: '12px 18px', borderBottom: '1px solid var(--ink-100)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div style={{ fontFamily: 'var(--font-display)', fontSize: 18, color: 'var(--ink-900)' }}>{MONTHS[calM]} {calY}</div>
+          <div style={{ padding: '12px 18px', borderBottom: '1px solid var(--ink-100)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
+              <div style={{ fontFamily: 'var(--font-display)', fontSize: 18, color: 'var(--ink-900)' }}>{MONTHS[calM]} {calY}</div>
+              {/* CAL-STATUS-COLOURS-V1: legend so the chip colours read clearly. */}
+              {!isMobile && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 10.5, color: 'var(--ink-500)', fontWeight: 600 }}>
+                  {[
+                    { label: 'Draft', color: 'var(--ink-300)' },
+                    { label: 'Scheduled', color: 'var(--warn)' },
+                    { label: 'Published', color: '#15803d' },
+                  ].map(item => (
+                    <span key={item.label} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                      <span style={{ width: 9, height: 9, borderRadius: 2, background: item.color, flexShrink: 0 }} />
+                      {item.label}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
             <div style={{ display: 'flex', gap: 6 }}>
               <button onClick={() => { if (calM === 0) { setCalM(11); setCalY(y => y - 1); } else setCalM(m => m - 1); }} style={{ ...btnG, padding: '5px 10px' }}><ChevronLeft size={14} /></button>
               <button onClick={() => { setCalM(today.getMonth()); setCalY(today.getFullYear()); }} style={{ ...btnG, padding: '5px 10px', fontSize: 11 }}>Today</button>
@@ -1541,12 +1560,12 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
                 >Cancel</button>
               </div>
             )}
-            {scheduled.length > 0 && <><div style={{ padding: '9px 18px', background: '#e8f5ee', borderBottom: '1px solid var(--ink-100)', fontSize: 11, fontWeight: 600, color: 'var(--ok)', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'flex', alignItems: 'center', gap: 6 }}><Clock size={12} />Scheduled ({scheduled.length})</div>{scheduled.sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime()).map(p => <PostRow key={p.id} post={p} />)}</>}
+            {scheduled.length > 0 && <><div style={{ padding: '9px 18px', background: '#fcecd3', borderBottom: '1px solid var(--ink-100)', fontSize: 11, fontWeight: 600, color: 'var(--warn)', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'flex', alignItems: 'center', gap: 6 }}><Clock size={12} />Scheduled ({scheduled.length})</div>{scheduled.sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime()).map(p => <PostRow key={p.id} post={p} />)}</>}
             {/* PUBLISH-UI-V1: failures bubble above drafts so they're visible
                 and one click from Retry. Sorted most-recent first since fresh
                 failures are usually the ones the user wants to deal with. */}
             {failed.length > 0 && <><div style={{ padding: '9px 18px', background: '#fee2e2', borderBottom: '1px solid var(--ink-100)', fontSize: 11, fontWeight: 600, color: 'var(--alert)', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'flex', alignItems: 'center', gap: 6 }}><AlertTriangle size={12} />Failed ({failed.length})</div>{failed.sort((a, b) => new Date(b.scheduledAt).getTime() - new Date(a.scheduledAt).getTime()).map(p => <PostRow key={p.id} post={p} />)}</>}
-            {drafts.length > 0 && <><div style={{ padding: '9px 18px', background: 'var(--paper)', borderBottom: '1px solid var(--ink-100)', fontSize: 11, fontWeight: 600, color: 'var(--warn)', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'flex', alignItems: 'center', gap: 6 }}><Edit3 size={12} />Drafts ({drafts.length})</div>{drafts.map(p => <PostRow key={p.id} post={p} />)}</>}
+            {drafts.length > 0 && <><div style={{ padding: '9px 18px', background: 'var(--paper)', borderBottom: '1px solid var(--ink-100)', fontSize: 11, fontWeight: 600, color: 'var(--ink-500)', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'flex', alignItems: 'center', gap: 6 }}><Edit3 size={12} />Drafts ({drafts.length})</div>{drafts.map(p => <PostRow key={p.id} post={p} />)}</>}
             {/* PUBLISH-UI-V1: Published header gets the celebratory green
                 treatment to match the badge styling on individual rows. */}
             {published.length > 0 && <><div style={{ padding: '9px 18px', background: '#dcfce7', borderBottom: '1px solid var(--ink-100)', fontSize: 11, fontWeight: 600, color: '#15803d', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'flex', alignItems: 'center', gap: 6 }}><Check size={12} />Published ({published.length})</div>{published.sort((a, b) => new Date(b.scheduledAt).getTime() - new Date(a.scheduledAt).getTime()).map(p => <PostRow key={p.id} post={p} />)}</>}
@@ -1587,7 +1606,7 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
                   const accs = p.accountIds.map(id => accounts.find(a => a.id === id)).filter(Boolean) as SocialAccount[];
                   const primary = accs[0];
                   const time = new Date(p.scheduledAt).toTimeString().slice(0, 5);
-                  const statusColor = p.status === 'scheduled' ? 'var(--ok)' : (p.status === 'published' || p.status === 'partial') ? 'var(--info)' : p.status === 'failed' ? 'var(--alert)' : 'var(--warn)';
+                  const statusColor = (p.status === 'scheduled' || p.status === 'publishing') ? 'var(--warn)' : (p.status === 'published' || p.status === 'partial') ? '#15803d' : p.status === 'failed' ? 'var(--alert)' : 'var(--ink-500)';
                   return (
                     <button
                       key={p.id}
