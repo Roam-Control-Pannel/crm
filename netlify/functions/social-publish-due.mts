@@ -3,9 +3,9 @@ import type { Config } from '@netlify/functions';
 /**
  * CRON-PUBLISH-V1
  *
- * Scheduled function: every minute, hit /api/social/publish-due so any
+ * Scheduled function: every 2 minutes, hit /api/social/publish-due so any
  * social post whose scheduledAt has arrived gets published with no more
- * than ~60s of jitter.
+ * than ~2 minutes of jitter.
  *
  * Pattern mirrors inbound-poll.mts and sequences-daily.mts — the secret
  * lives only on the server, never in this function or the browser. The
@@ -13,17 +13,17 @@ import type { Config } from '@netlify/functions';
  * Bearer-equivalent header (`x-internal-call`) and the Next.js route
  * does all the real work.
  *
- * Cadence: 2 minutes. An earlier version used `* * * * *` (every minute),
+ * Cadence: 2 minutes. An earlier version used an every-minute schedule,
  * but that sits at Netlify's practical minimum and the scheduler silently
  * declined to register/fire it — the function showed as "Scheduled" in the
  * UI but never ran, so scheduled posts stayed stuck at status 'scheduled'
  * and never published. The two sibling crons that DO fire reliably
- * (inbound-poll `*/15`, sequences-daily `0 8`) both use multi-minute
- * intervals, which is the only thing that differed. `*/2` keeps the
- * worst-case delay from scheduledAt to publish at ~2 minutes while staying
- * safely clear of the every-minute edge case. Tighter timing would require
- * platform-native scheduling (mixed support across LinkedIn/FB/IG) or a
- * separate job queue.
+ * (inbound-poll every 15 minutes, sequences-daily at 08:00) both use
+ * multi-minute intervals, which is the only thing that differed. A
+ * 2-minute cadence keeps the worst-case delay from scheduledAt to publish
+ * at ~2 minutes while staying safely clear of the every-minute edge case.
+ * Tighter timing would require platform-native scheduling (mixed support
+ * across LinkedIn/FB/IG) or a separate job queue.
  */
 
 export default async () => {
