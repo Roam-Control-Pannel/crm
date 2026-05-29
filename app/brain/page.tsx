@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, useMemo, useRef } from 'react';
 import Link from 'next/link';
-import { Plus, FolderPlus, Folder as FolderIcon, ChevronRight, Upload, X, Edit3, Trash2, Search, Brain as BrainIcon, ChevronDown, Image as ImageIcon, Loader, FileText, Download, Printer, Sparkles, ExternalLink, Link as LinkIcon, Globe } from 'lucide-react';
+import { Plus, FolderPlus, Folder as FolderIcon, ChevronRight, Upload, X, Edit3, Trash2, Search, Brain as BrainIcon, ChevronDown, Image as ImageIcon, Loader, FileText, Download, Printer, Sparkles, ExternalLink, Link as LinkIcon, Globe, CheckSquare, Check } from 'lucide-react';
 import {
   Folder, BrainItem, FolderNode,
   fetchFolders, createFolder, renameFolder, deleteFolder,
@@ -60,6 +60,13 @@ export default function BrainPage() {
   const [urlForm, setUrlForm] = useState({ url: '', tags: '' });
   const [urlSaving, setUrlSaving] = useState(false);
   const [urlError, setUrlError] = useState<string | null>(null);
+
+  // Multi-select: pick several items and move them into a folder at once.
+  // selectMode flips card clicks from "open edit" to "toggle selection".
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [moveTargetId, setMoveTargetId] = useState<string>(''); // '' = Brain root
+  const [moving, setMoving] = useState(false);
 
   // Initial load
   async function load() {
@@ -246,6 +253,49 @@ export default function BrainPage() {
     }
   }
 
+  // ----- Multi-select helpers -----
+  function toggleSelectMode() {
+    setSelectMode(m => {
+      if (m) setSelectedIds(new Set()); // leaving select mode clears selection
+      return !m;
+    });
+  }
+
+  function toggleSelected(id: string) {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function selectAllVisible() {
+    setSelectedIds(new Set(visibleItems.map(i => i.id)));
+  }
+  function clearSelection() { setSelectedIds(new Set()); }
+
+  // Move every selected item into the chosen folder ('' = Brain root).
+  // Reuses updateItem (PATCH folderId) per item; optimistically updates
+  // local state for those that succeed.
+  async function moveSelectedToFolder() {
+    if (selectedIds.size === 0) return;
+    const targetFolderId = moveTargetId || null;
+    setMoving(true);
+    try {
+      const ids = Array.from(selectedIds);
+      const results = await Promise.all(ids.map(id => updateItem(id, { folderId: targetFolderId })));
+      const movedIds = new Set(ids.filter((_, idx) => results[idx]));
+      setItems(prev => prev.map(i => movedIds.has(i.id) ? { ...i, folderId: targetFolderId } : i));
+      const failed = ids.length - movedIds.size;
+      if (failed > 0) alert(`${failed} item${failed === 1 ? '' : 's'} could not be moved. Please try again.`);
+      setSelectedIds(new Set());
+      setSelectMode(false);
+    } finally {
+      setMoving(false);
+    }
+  }
+
   // Recursive folder tree renderer
   function renderTree(nodes: FolderNode[], depth = 0) {
     return nodes.map(node => {
@@ -303,6 +353,13 @@ export default function BrainPage() {
             <Sparkles size={13}/> Generate with Roam-io
           </Link>
           <button onClick={() => { setUrlForm({ url: '', tags: '' }); setUrlError(null); setShowUrlModal(true); }} style={btnG}><LinkIcon size={13}/> Add URL</button>
+          <button
+            onClick={toggleSelectMode}
+            style={selectMode ? { ...btnG, color: 'var(--maroon-700)', borderColor: 'var(--maroon-200, #d4c0c6)' } : btnG}
+            title={selectMode ? 'Exit selection mode' : 'Select multiple items to move into a folder'}
+          >
+            {selectMode ? <><X size={13}/> Cancel</> : <><CheckSquare size={13}/> Select</>}
+          </button>
           <button onClick={() => setCreatingFolder(true)} style={btnG}><FolderPlus size={13}/> New folder</button>
           <button onClick={() => fileInputRef.current?.click()} style={btnP} disabled={uploading > 0}>
             {uploading > 0 ? <><Loader size={13} className="spin"/> Uploading {uploading}…</> : <><Upload size={13}/> Upload</>}
@@ -436,6 +493,36 @@ export default function BrainPage() {
             </div>
           </div>
 
+          {/* Bulk-select action bar — appears while in selection mode. */}
+          {selectMode && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+              marginBottom: 14, padding: '10px 14px',
+              background: 'var(--white)', borderRadius: 'var(--r-md)',
+              boxShadow: 'var(--shadow-sm)', border: '1px solid var(--maroon-200, #d4c0c6)',
+            }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink-700)' }}>
+                {selectedIds.size} selected
+              </span>
+              <button onClick={selectAllVisible} style={{ ...btnG, fontSize: 11, padding: '5px 10px' }}>Select all</button>
+              <button onClick={clearSelection} disabled={selectedIds.size === 0} style={{ ...btnG, fontSize: 11, padding: '5px 10px', opacity: selectedIds.size === 0 ? 0.5 : 1 }}>Clear</button>
+              <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-600)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Move to</label>
+                <select value={moveTargetId} onChange={e => setMoveTargetId(e.target.value)} style={{ ...inp, width: 'auto', minWidth: 180, cursor: 'pointer', fontSize: 12 }}>
+                  <option value="">— Brain root (no folder) —</option>
+                  {folders.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+                </select>
+                <button
+                  onClick={moveSelectedToFolder}
+                  disabled={selectedIds.size === 0 || moving}
+                  style={{ ...btnP, opacity: selectedIds.size === 0 || moving ? 0.5 : 1 }}
+                >
+                  {moving ? <><Loader size={13} className="spin"/> Moving…</> : <><Check size={13}/> Move{selectedIds.size ? ` ${selectedIds.size}` : ''}</>}
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Grid */}
           {loading ? (
             <div style={{ padding: 60, textAlign: 'center', color: 'var(--ink-400)' }}>Loading…</div>
@@ -467,17 +554,35 @@ export default function BrainPage() {
             </div>
           ) : (
             <div className="brain-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12 }}>
-              {visibleItems.map(item => (
+              {visibleItems.map(item => {
+                const isSelected = selectedIds.has(item.id);
+                return (
                 <div
                   key={item.id}
-                  onClick={() => openEdit(item)}
+                  onClick={() => selectMode ? toggleSelected(item.id) : openEdit(item)}
                   className="brain-card"
-                  style={{ background: 'var(--white)', borderRadius: 'var(--r-md)', overflow: 'hidden', cursor: 'pointer', boxShadow: 'var(--shadow-sm)', transition: 'transform 0.15s', position: 'relative' }}
+                  style={{ background: 'var(--white)', borderRadius: 'var(--r-md)', overflow: 'hidden', cursor: 'pointer', boxShadow: isSelected ? '0 0 0 2px var(--maroon-700)' : 'var(--shadow-sm)', transition: 'transform 0.15s', position: 'relative' }}
                   onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; const a = e.currentTarget.querySelector<HTMLElement>('.brain-card-actions'); if (a) a.style.opacity = '1'; }}
                   onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; const a = e.currentTarget.querySelector<HTMLElement>('.brain-card-actions'); if (a) a.style.opacity = '0'; }}
                 >
+                  {/* Selection checkbox — shown only in select mode. */}
+                  {selectMode && (
+                    <div style={{
+                      position: 'absolute', top: 6, left: 6, zIndex: 3,
+                      width: 22, height: 22, borderRadius: '50%',
+                      background: isSelected ? 'var(--maroon-700)' : 'rgba(255,255,255,0.95)',
+                      border: isSelected ? '2px solid var(--maroon-700)' : '2px solid var(--ink-300)',
+                      boxShadow: '0 1px 4px rgba(0,0,0,0.12)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      color: 'var(--white)',
+                    }}>
+                      {isSelected && <Check size={13} strokeWidth={3}/>}
+                    </div>
+                  )}
                   {/* Hover actions — open source URL (if any) + quick delete.
-                      Both stopPropagation so they don't trigger the modal. */}
+                      Both stopPropagation so they don't trigger the modal.
+                      Hidden in select mode so clicks only toggle selection. */}
+                  {!selectMode && (
                   <div
                     className="brain-card-actions"
                     style={{
@@ -560,7 +665,8 @@ export default function BrainPage() {
                     </div>
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
