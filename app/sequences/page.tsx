@@ -1,7 +1,13 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
-import { Mail, Settings, TrendingUp, CheckCircle, AlertCircle, Clock, Play } from 'lucide-react';
+import { Mail, Settings, TrendingUp, CheckCircle, AlertCircle, Clock, Play, Pencil, Check, X } from 'lucide-react';
 import { BrevoListSelector } from '@/components/BrevoListSelector';
+import {
+  DEFAULT_SEQUENCE_TEMPLATES,
+  TEMPLATE_TOKENS,
+  type SequenceTemplates,
+  type StepTemplate,
+} from '@/lib/email-template';
 
 interface Stats {
   total: number;
@@ -34,38 +40,47 @@ interface CronStatusResponse {
   capRemaining: number;
 }
 
-const SEQUENCE = [
+type TemplateKey = keyof SequenceTemplates;
+
+// Static per-step metadata. The editable email copy (subject/body/cta) lives in
+// app settings and is keyed by `templateKey`; step 4 sends no email so it has
+// none and shows a fixed description instead.
+const STEP_META: Array<{
+  step: number;
+  active: boolean;
+  title: string;
+  timing: string;
+  templateKey: TemplateKey | null;
+  staticBody?: string;
+}> = [
   {
     step: 1,
     active: true,
     title: 'First Contact — Introduction',
     timing: 'Sent on approval · Personalised per town',
-    subject: 'Free listing for [Business] on Roam',
-    body: 'Hi there,\n\nWe\u2019ve built a dedicated page for [Town] on Roam — a free local discovery app helping people find the best independent businesses in their area.\n\n[Town] is known for [known_for], and we\u2019d love [Business] to be one of the first businesses featured.\n\nListing takes 90 seconds and is completely free — no subscription, no catch.\n\n[List Business for free →]\n\nAny questions, just reply to this email.\n\nBest wishes,\n— Roam Local Team\nroam-local.co.uk',
+    templateKey: 'step1',
   },
   {
     step: 2,
     active: true,
     title: 'Follow-up — Social proof',
     timing: 'Day 2 if no response · Sent automatically by daily cron',
-    subject: 'Just checking in — [Town] on Roam',
-    body: 'Hi there,\n\nJust a quick follow-up — we\u2019d love to have [Business] on Roam\u2019s [Town] page.\n\nIt\u2019s completely free and takes 90 seconds. Businesses across [Town] are already signing up.\n\n[Get listed now →]\n\nBest wishes,\n— Roam Local Team\nroam-local.co.uk',
+    templateKey: 'step2',
   },
   {
     step: 3,
     active: true,
     title: 'Final Nudge — Last chance',
     timing: 'Day 7 if no response · Sent automatically by daily cron',
-    subject: 'Last one from us — [Business]',
-    body: 'Hi there,\n\nWe won\u2019t chase again after this — promise!\n\nIf you\u2019d like [Business] featured on Roam\u2019s [Town] page for free, it only takes 90 seconds.\n\n[List for free →]\n\nBest wishes,\n— Roam Local Team\nroam-local.co.uk',
+    templateKey: 'step3',
   },
   {
     step: 4,
     active: true,
     title: 'Mark as Cold',
     timing: 'Day 14 · Archived automatically',
-    subject: null as string | null,
-    body: 'Business is marked cold in the pipeline. Can be re-activated after 90 days.',
+    templateKey: null,
+    staticBody: 'Business is marked cold in the pipeline. Can be re-activated after 90 days.',
   },
 ];
 
@@ -100,6 +115,11 @@ export default function SequencesPage() {
   const [expanded, setExpanded] = useState<number | null>(1);
   const [loadingStats, setLoadingStats] = useState(true);
   const [activeListId, setActiveListId] = useState<number | null>(null);
+
+  // Editable email templates, loaded from /api/settings. `editingKey` tracks
+  // which step is currently in edit mode.
+  const [templates, setTemplates] = useState<SequenceTemplates>(DEFAULT_SEQUENCE_TEMPLATES);
+  const [editingKey, setEditingKey] = useState<TemplateKey | null>(null);
 
   const loadStats = useCallback(async () => {
     setLoadingStats(true);
@@ -141,10 +161,20 @@ export default function SequencesPage() {
     }
   }, []);
 
+  const loadTemplates = useCallback(async () => {
+    try {
+      const s = await fetch('/api/settings', { cache: 'no-store' }).then(r => r.ok ? r.json() : null);
+      if (s?.templates) setTemplates(s.templates);
+    } catch (err) {
+      console.error('Failed to load templates:', err);
+    }
+  }, []);
+
   useEffect(() => {
     loadStats();
     loadCronStatus();
-  }, [loadStats, loadCronStatus]);
+    loadTemplates();
+  }, [loadStats, loadCronStatus, loadTemplates]);
 
   async function runSequences() {
     setRunning(true);
@@ -171,6 +201,20 @@ export default function SequencesPage() {
     } finally {
       setRunning(false);
     }
+  }
+
+  // Persist a single step's edited template via the shared settings API. Only
+  // the edited step is sent; the API deep-merges it into the stored blob.
+  async function saveTemplate(key: TemplateKey, next: StepTemplate): Promise<boolean> {
+    const res = await fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ templates: { [key]: next } }),
+    });
+    if (!res.ok) return false;
+    const updated = await res.json();
+    if (updated?.templates) setTemplates(updated.templates);
+    return true;
   }
 
   return (
@@ -259,35 +303,67 @@ export default function SequencesPage() {
             </div>
           </div>
           <div style={{ padding: '16px 20px' }}>
-            {SEQUENCE.map((s, i) => (
-              <div key={s.step} style={{ display: 'flex', gap: 14, marginBottom: i < SEQUENCE.length - 1 ? 20 : 0 }}>
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
-                  <div style={{ width: 30, height: 30, borderRadius: '50%', background: s.active ? 'var(--maroon-700)' : 'var(--ink-100)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                    {s.active ? <CheckCircle size={15} color="white" /> : <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--ink-400)' }}>{s.step}</span>}
+            {STEP_META.map((meta, i) => {
+              const tpl = meta.templateKey ? templates[meta.templateKey] : null;
+              const isEditing = meta.templateKey !== null && editingKey === meta.templateKey;
+              const isOpen = expanded === meta.step;
+              return (
+                <div key={meta.step} style={{ display: 'flex', gap: 14, marginBottom: i < STEP_META.length - 1 ? 20 : 0 }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
+                    <div style={{ width: 30, height: 30, borderRadius: '50%', background: meta.active ? 'var(--maroon-700)' : 'var(--ink-100)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                      {meta.active ? <CheckCircle size={15} color="white" /> : <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--ink-400)' }}>{meta.step}</span>}
+                    </div>
+                    {i < STEP_META.length - 1 && <div style={{ width: 2, flex: 1, background: 'var(--ink-100)', margin: '4px 0', minHeight: 16 }} />}
                   </div>
-                  {i < SEQUENCE.length - 1 && <div style={{ width: 2, flex: 1, background: 'var(--ink-100)', margin: '4px 0', minHeight: 16 }} />}
+                  <div style={{ flex: 1, minWidth: 0, paddingBottom: 4 }}>
+                    <button onClick={() => setExpanded(isOpen ? null : meta.step)} style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', padding: 0, marginBottom: 4 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink-900)' }}>{meta.title}</div>
+                        <div style={{ fontSize: 16, color: 'var(--ink-300)', flexShrink: 0 }}>{isOpen ? '−' : '+'}</div>
+                      </div>
+                    </button>
+                    <div style={{ fontSize: 11, color: 'var(--ink-400)', fontWeight: 500, marginBottom: isOpen ? 10 : 0 }}>{meta.timing}</div>
+
+                    {isOpen && tpl && !isEditing && (
+                      <div style={{ background: 'var(--paper)', border: '1px solid var(--ink-100)', borderRadius: 'var(--r-md)', padding: '12px 14px', fontSize: 12 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 4 }}>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--ink-400)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>Subject</div>
+                          <button
+                            onClick={() => { setExpanded(meta.step); setEditingKey(meta.templateKey); }}
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--maroon-600)', fontSize: 11, fontWeight: 600, fontFamily: 'inherit', padding: 0 }}
+                          >
+                            <Pencil size={11} /> Edit
+                          </button>
+                        </div>
+                        <div style={{ fontWeight: 600, color: 'var(--ink-800)', marginBottom: 10, fontSize: 13 }}>{tpl.subject}</div>
+                        <div style={{ color: 'var(--ink-700)', lineHeight: 1.7, whiteSpace: 'pre-line', borderTop: '1px solid var(--ink-100)', paddingTop: 10 }}>{tpl.body}</div>
+                        {tpl.cta && (
+                          <div style={{ marginTop: 12 }}>
+                            <span style={{ display: 'inline-block', background: 'var(--maroon-700)', color: 'white', padding: '7px 14px', borderRadius: 6, fontSize: 12, fontWeight: 700 }}>{tpl.cta} →</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {isOpen && tpl && isEditing && meta.templateKey && (
+                      <StepEditor
+                        initial={tpl}
+                        onCancel={() => setEditingKey(null)}
+                        onSave={async (next) => {
+                          const ok = await saveTemplate(meta.templateKey as TemplateKey, next);
+                          if (ok) setEditingKey(null);
+                          return ok;
+                        }}
+                      />
+                    )}
+
+                    {isOpen && !tpl && (
+                      <div style={{ fontSize: 12, color: 'var(--ink-400)', fontStyle: 'italic' }}>{meta.staticBody}</div>
+                    )}
+                  </div>
                 </div>
-                <div style={{ flex: 1, minWidth: 0, paddingBottom: 4 }}>
-                  <button onClick={() => setExpanded(expanded === s.step ? null : s.step)} style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', padding: 0, marginBottom: 4 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink-900)' }}>{s.title}</div>
-                      <div style={{ fontSize: 16, color: 'var(--ink-300)', flexShrink: 0 }}>{expanded === s.step ? '−' : '+'}</div>
-                    </div>
-                  </button>
-                  <div style={{ fontSize: 11, color: 'var(--ink-400)', fontWeight: 500, marginBottom: expanded === s.step ? 10 : 0 }}>{s.timing}</div>
-                  {expanded === s.step && s.subject && (
-                    <div style={{ background: 'var(--paper)', border: '1px solid var(--ink-100)', borderRadius: 'var(--r-md)', padding: '12px 14px', fontSize: 12 }}>
-                      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--ink-400)', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 4 }}>Subject</div>
-                      <div style={{ fontWeight: 600, color: 'var(--ink-800)', marginBottom: 10, fontSize: 13 }}>{s.subject}</div>
-                      <div style={{ color: 'var(--ink-700)', lineHeight: 1.7, whiteSpace: 'pre-line', borderTop: '1px solid var(--ink-100)', paddingTop: 10 }}>{s.body}</div>
-                    </div>
-                  )}
-                  {expanded === s.step && !s.subject && (
-                    <div style={{ fontSize: 12, color: 'var(--ink-400)', fontStyle: 'italic' }}>{s.body}</div>
-                  )}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
 
@@ -342,6 +418,100 @@ export default function SequencesPage() {
             </div>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Inline editor for a single sequence step. Local draft state so edits can be
+// cancelled; Save persists via the parent and only resolves the edit on success.
+function StepEditor({ initial, onSave, onCancel }: {
+  initial: StepTemplate;
+  onSave: (next: StepTemplate) => Promise<boolean>;
+  onCancel: () => void;
+}) {
+  const [draft, setDraft] = useState<StepTemplate>(initial);
+  const [state, setState] = useState<'idle' | 'saving' | 'error'>('idle');
+
+  const dirty =
+    draft.subject !== initial.subject ||
+    draft.body !== initial.body ||
+    draft.cta !== initial.cta;
+
+  async function save() {
+    setState('saving');
+    const ok = await onSave({
+      subject: draft.subject.trim(),
+      body: draft.body,
+      cta: draft.cta.trim(),
+    });
+    if (!ok) setState('error');
+  }
+
+  const labelStyle: React.CSSProperties = { display: 'block', fontSize: 10, fontWeight: 700, color: 'var(--ink-400)', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 4 };
+  const inputStyle: React.CSSProperties = {
+    width: '100%', padding: '8px 10px', fontSize: 13, border: '1px solid var(--ink-200)',
+    borderRadius: 'var(--r-sm)', fontFamily: 'inherit', color: 'var(--ink-900)', background: 'var(--white)',
+    boxSizing: 'border-box',
+  };
+
+  return (
+    <div style={{ background: 'var(--paper)', border: '1px solid var(--ink-100)', borderRadius: 'var(--r-md)', padding: '12px 14px' }}>
+      <div style={{ marginBottom: 12 }}>
+        <label style={labelStyle}>Subject</label>
+        <input
+          value={draft.subject}
+          onChange={e => setDraft(d => ({ ...d, subject: e.target.value }))}
+          style={inputStyle}
+        />
+      </div>
+      <div style={{ marginBottom: 12 }}>
+        <label style={labelStyle}>Body</label>
+        <textarea
+          value={draft.body}
+          onChange={e => setDraft(d => ({ ...d, body: e.target.value }))}
+          rows={10}
+          style={{ ...inputStyle, lineHeight: 1.6, resize: 'vertical' }}
+        />
+      </div>
+      <div style={{ marginBottom: 12 }}>
+        <label style={labelStyle}>Button label</label>
+        <input
+          value={draft.cta}
+          onChange={e => setDraft(d => ({ ...d, cta: e.target.value }))}
+          placeholder="Leave blank to hide the button"
+          style={inputStyle}
+        />
+      </div>
+      <div style={{ fontSize: 10.5, color: 'var(--ink-400)', marginBottom: 12, lineHeight: 1.5 }}>
+        Tokens: {TEMPLATE_TOKENS.map((t, i) => (
+          <span key={t}>
+            {i > 0 && ', '}
+            <code style={{ background: 'var(--white)', border: '1px solid var(--ink-100)', borderRadius: 3, padding: '1px 4px', fontSize: 10.5 }}>{t}</code>
+          </span>
+        ))} — replaced per contact. The Roam button link &amp; signature are added automatically.
+      </div>
+      {state === 'error' && (
+        <div style={{ fontSize: 11.5, color: 'var(--alert)', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 5 }}>
+          <AlertCircle size={12} /> Couldn’t save — try again.
+        </div>
+      )}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <button
+          onClick={save}
+          disabled={!dirty || state === 'saving'}
+          className="btn-primary"
+          style={{ fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 5, opacity: dirty && state !== 'saving' ? 1 : 0.5 }}
+        >
+          <Check size={12} /> {state === 'saving' ? 'Saving…' : 'Save'}
+        </button>
+        <button
+          onClick={onCancel}
+          className="btn-ghost"
+          style={{ fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 5 }}
+        >
+          <X size={12} /> Cancel
+        </button>
       </div>
     </div>
   );
