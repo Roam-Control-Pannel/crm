@@ -118,7 +118,13 @@ async function waitForInstagramContainer(
   containerId: string,
   accessToken: string,
 ): Promise<{ error: string; details?: unknown } | null> {
-  const maxAttempts = 12;
+  // 8 × 1.5s = up to 12s of polling. Kept deliberately bounded: the
+  // publish-due cron budgets ~15s of worst-case work per post against
+  // Netlify's ~26s function limit (see PUBLISH-DUE-BUDGET-V1), and a longer
+  // wait here would let a single Instagram post blow that budget and get the
+  // whole run killed mid-publish. Typical container ingest finishes in a few
+  // seconds, so 12s stays comfortably generous.
+  const maxAttempts = 8;
   const intervalMs = 1500;
   let last: unknown;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {

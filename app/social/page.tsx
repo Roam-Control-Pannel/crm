@@ -1256,11 +1256,13 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
                 setHeaderMenuOpen(false);
                 try {
                   const res = await fetch('/api/social/publish-due/run-now', { method: 'POST' });
-                  const data = await res.json();
-                  // Crude on purpose — surfaces the full upstream response
-                  // so we can read dueCount / processed / per-account
-                  // results in one shot.
-                  alert('publish-due response (HTTP ' + res.status + '):\n\n' + JSON.stringify(data, null, 2));
+                  // Read as text first: a gateway timeout returns an HTML page,
+                  // and res.json() would throw "The string did not match the
+                  // expected pattern" instead of surfacing the real status.
+                  const raw = await res.text();
+                  let data: any = null;
+                  try { data = JSON.parse(raw); } catch { /* non-JSON (e.g. timeout HTML) */ }
+                  alert('publish-due response (HTTP ' + res.status + '):\n\n' + (data ? JSON.stringify(data, null, 2) : raw.slice(0, 500)));
                 } catch (e: any) {
                   alert('publish-due call threw: ' + (e?.message || String(e)));
                 }

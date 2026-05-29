@@ -18,10 +18,16 @@
 # the UI without firing — declaring here as well closes that gap.
 
 # CRON-PUBLISH-V1
-# Every minute, fire any social post whose scheduledAt has arrived. Worst-case
-# delay from scheduledAt to publish is ~60s (Netlify's minimum granularity).
+# Every 2 minutes, fire any social post whose scheduledAt has arrived.
+# NOTE: this was previously "* * * * *" (every minute). That sits at Netlify's
+# practical minimum and the scheduler silently declined to register/fire it —
+# the function showed as "Scheduled" but never ran, so scheduled posts stayed
+# stuck at status 'scheduled' and never auto-published. The sibling crons that
+# DO fire reliably (inbound-poll, sequences-daily) use multi-minute intervals,
+# which was the only thing that differed. "*/2" keeps worst-case publish lag at
+# ~2 min while staying clear of the every-minute edge case.
 [functions."social-publish-due"]
-  schedule = "* * * * *"
+  schedule = "*/2 * * * *"
 
 # CRON-INBOUND-V1
 # Poll the inbound IMAP mailbox for replies every 15 minutes.

@@ -115,21 +115,33 @@ async function handle(req: NextRequest) {
   // Process oldest first so the most overdue posts go out before fresher ones.
   duePosts.sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime());
 
-  const toProcess = duePosts.slice(0, MAX_POSTS_PER_RUN);
-
-  if (toProcess.length === 0) {
+  if (duePosts.length === 0) {
     return NextResponse.json({ ok: true, dueCount: 0, processed: 0, skipped: 0 });
   }
 
-  // Mark all targeted posts as 'publishing' upfront and persist. This narrows
-  // (but does not eliminate) the race window with overlapping cron runs.
-  const startedAtIso = new Date(now).toISOString();
-  let collection = posts.map(p =>
-    toProcess.find(d => d.id === p.id)
-      ? { ...p, status: 'publishing' as const, publishingStartedAt: startedAtIso }
-      : p
-  );
-  await saveCollection(DEFAULT_USER_ID, 'social_posts', collection);
+  // PUBLISH-DUE-BUDGET-V1
+  // Netlify kills a standard function at ~26s (the same limit the Fill-calendar
+  // route budgets against). Publishing is slow — an Instagram post polls its
+  // media container for several seconds before it can publish — so the old
+  // "mark every due post 'publishing' upfront, then loop" strategy blew the
+  // budget on a busy day: the function was killed mid-run, EVERY targeted post
+  // was stranded in 'publishing', and nothing recovered for STALE_PUBLISHING_MS
+  // (15 min) — at which point it timed out again. The symptom was scheduled
+  // posts that never published and a 🐛 run that returned a gateway timeout.
+  //
+  // Instead we now:
+  //   - mark each post 'publishing' individually, right before processing it,
+  //     so a timeout strands only the single in-flight post (recoverable via
+  //     the stale-publishing path); posts we haven't started stay 'scheduled'
+  //     and the next cron run picks them up;
+  //   - stop starting NEW posts once we're close enough to the limit that the
+  //     next one might not finish in time.
+  const FUNCTION_BUDGET_MS = 26000; // Netlify standard-function hard limit
+  const SAFETY_MS = 3000;           // headroom for persistence + teardown
+  const MAX_POST_MS = 15000;        // worst-case single post (IG container wait + API calls)
+  const startTime = Date.now();
+
+  let collection: SocialPostStored[] = posts.slice();
 
   // PUBLISH-DUE-DETAILS-V1: summary type widened to carry imageUrl and
   // per-account details for diagnostics.
@@ -140,7 +152,30 @@ async function handle(req: NextRequest) {
     accountResults: Array<{ accountId: string; ok: boolean; error?: string; details?: unknown }>;
   }> = [];
 
-  for (const post of toProcess) {
+  let processed = 0;
+  let stoppedEarly = false;
+
+  for (const post of duePosts) {
+    // Hard cap regardless of timing.
+    if (processed >= MAX_POSTS_PER_RUN) { stoppedEarly = true; break; }
+    // Time budget: always process the first post (it fits comfortably), but
+    // only start a subsequent one if it can plausibly finish before the kill.
+    // Whatever we don't start stays 'scheduled' for the next run.
+    if (processed > 0 && Date.now() - startTime > FUNCTION_BUDGET_MS - SAFETY_MS - MAX_POST_MS) {
+      stoppedEarly = true;
+      break;
+    }
+
+    // Mark THIS post 'publishing' and persist before any network work, so a
+    // mid-run timeout leaves only this one post recoverable and never strands
+    // posts we haven't reached yet.
+    const startedAtIso = new Date().toISOString();
+    collection = collection.map(p =>
+      p.id === post.id
+        ? { ...p, status: 'publishing' as const, publishingStartedAt: startedAtIso }
+        : p
+    );
+    await saveCollection(DEFAULT_USER_ID, 'social_posts', collection);
     const results: SocialPostStored['results'] = {};
     for (const accountId of post.accountIds) {
       results[accountId] = { status: 'pending' };
@@ -213,13 +248,15 @@ async function handle(req: NextRequest) {
         details: (r as any).details,
       })),
     });
+    processed++;
   }
 
   return NextResponse.json({
     ok: true,
     dueCount: duePosts.length,
-    processed: toProcess.length,
-    skipped: Math.max(0, duePosts.length - toProcess.length),
+    processed,
+    skipped: Math.max(0, duePosts.length - processed),
+    stoppedEarly,
     results: summary,
   });
 }

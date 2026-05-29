@@ -13,12 +13,17 @@ import type { Config } from '@netlify/functions';
  * Bearer-equivalent header (`x-internal-call`) and the Next.js route
  * does all the real work.
  *
- * Cadence: 1 minute. This is Netlify's minimum cron granularity, so it's
- * the tightest "fire on scheduledAt" we can achieve with the existing
- * infra. Sub-minute precision would require either platform-native
- * scheduling (mixed support across LinkedIn/FB/IG) or a separate job
- * queue. Worst-case delay for a post scheduled at HH:MM:00 is the cron
- * landing at HH:MM:59 → ~60s.
+ * Cadence: 2 minutes. An earlier version used `* * * * *` (every minute),
+ * but that sits at Netlify's practical minimum and the scheduler silently
+ * declined to register/fire it — the function showed as "Scheduled" in the
+ * UI but never ran, so scheduled posts stayed stuck at status 'scheduled'
+ * and never published. The two sibling crons that DO fire reliably
+ * (inbound-poll `*/15`, sequences-daily `0 8`) both use multi-minute
+ * intervals, which is the only thing that differed. `*/2` keeps the
+ * worst-case delay from scheduledAt to publish at ~2 minutes while staying
+ * safely clear of the every-minute edge case. Tighter timing would require
+ * platform-native scheduling (mixed support across LinkedIn/FB/IG) or a
+ * separate job queue.
  */
 
 export default async () => {
