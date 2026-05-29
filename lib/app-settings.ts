@@ -1,4 +1,10 @@
 import { getStore } from '@netlify/blobs';
+import {
+  DEFAULT_SEQUENCE_TEMPLATES,
+  sanitizeStepTemplate,
+  type SequenceTemplates,
+  type StepTemplate,
+} from './email-template';
 
 /**
  * Workspace-level settings persisted in Netlify Blobs.
@@ -38,6 +44,8 @@ export interface CadenceSettings {
 export interface AppSettings {
   sender: SenderSettings;
   cadence: CadenceSettings;
+  /** Editable copy for each outreach step, rendered to HTML at send time. */
+  templates: SequenceTemplates;
 }
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
@@ -52,6 +60,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
     coldDays: 14,
     dailySendCap: 50,
   },
+  templates: DEFAULT_SEQUENCE_TEMPLATES,
 };
 
 const STORE_NAME = 'roam-system';
@@ -71,11 +80,23 @@ export async function getAppSettings(): Promise<AppSettings> {
   }
 }
 
-export async function updateAppSettings(patch: Partial<AppSettings>): Promise<AppSettings> {
+/** A settings patch — sections are optional, and templates may be partial. */
+export interface AppSettingsPatch {
+  sender?: Partial<SenderSettings>;
+  cadence?: Partial<CadenceSettings>;
+  templates?: Partial<{
+    step1: Partial<StepTemplate>;
+    step2: Partial<StepTemplate>;
+    step3: Partial<StepTemplate>;
+  }>;
+}
+
+export async function updateAppSettings(patch: AppSettingsPatch): Promise<AppSettings> {
   const current = await getAppSettings();
   const merged: AppSettings = {
     sender: { ...current.sender, ...(patch.sender || {}) },
     cadence: { ...current.cadence, ...(patch.cadence || {}) },
+    templates: mergeTemplates(current.templates, patch.templates),
   };
   // Validate numbers stay positive integers — bad values would brick the cron.
   for (const k of ['followUpDays', 'finalNudgeDays', 'coldDays', 'dailySendCap'] as const) {
@@ -97,5 +118,22 @@ function mergeWithDefaults(partial: Partial<AppSettings> | null): AppSettings {
   return {
     sender: { ...DEFAULT_APP_SETTINGS.sender, ...(partial.sender || {}) },
     cadence: { ...DEFAULT_APP_SETTINGS.cadence, ...(partial.cadence || {}) },
+    templates: mergeTemplates(DEFAULT_SEQUENCE_TEMPLATES, partial.templates),
+  };
+}
+
+/**
+ * Deep-merge sequence templates a step at a time. Each step is sanitised
+ * field-by-field so a partial patch (or a malformed blob) can never produce
+ * a non-string subject/body/cta that would break rendering.
+ */
+function mergeTemplates(
+  base: SequenceTemplates,
+  patch: AppSettingsPatch['templates']
+): SequenceTemplates {
+  return {
+    step1: sanitizeStepTemplate({ ...base.step1, ...(patch?.step1 || {}) }, DEFAULT_SEQUENCE_TEMPLATES.step1),
+    step2: sanitizeStepTemplate({ ...base.step2, ...(patch?.step2 || {}) }, DEFAULT_SEQUENCE_TEMPLATES.step2),
+    step3: sanitizeStepTemplate({ ...base.step3, ...(patch?.step3 || {}) }, DEFAULT_SEQUENCE_TEMPLATES.step3),
   };
 }

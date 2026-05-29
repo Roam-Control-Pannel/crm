@@ -6,6 +6,7 @@ import {
 } from '@/lib/cron-status';
 import { fetchAllContacts } from '@/lib/brevo';
 import { getAppSettings } from '@/lib/app-settings';
+import { renderSequenceEmail, type SequenceTemplates } from '@/lib/email-template';
 import { safeEqual } from '@/lib/safe-equal';
 
 export const dynamic = 'force-dynamic';
@@ -66,32 +67,19 @@ function authorize(req: NextRequest): { ok: boolean; reason?: string } {
 async function sendFollowUp(
   contact: BrevoContact,
   step: 2 | 3,
-  sender: SenderOpts
+  sender: SenderOpts,
+  templates: SequenceTemplates
 ): Promise<boolean> {
   const name = contact.attributes?.BUSINESS_NAME || contact.attributes?.FIRSTNAME || contact.email;
   const town = contact.attributes?.TOWN || 'your area';
+  const knownFor = contact.attributes?.KNOWN_FOR || 'its independent spirit';
 
-  const subjects: Record<number, string> = {
-    2: `Just checking in — ${town} on Roam`,
-    3: `Last one from us — ${name}`,
-  };
-
-  const bodies: Record<number, string> = {
-    2: `<div style="font-family:Arial,sans-serif;max-width:560px;color:#1a0d12">
-  <p>Hi there,</p>
-  <p>Just a quick follow-up — we'd love to have <strong>${name}</strong> on Roam's <strong>${town}</strong> page.</p>
-  <p>It's completely free and takes 90 seconds. Businesses across ${town} are already signing up.</p>
-  <p style="margin-top:20px"><a href="https://roam-local.co.uk" style="background:#8B1A3A;color:white;padding:12px 24px;border-radius:6px;text-decoration:none;display:inline-block;font-weight:700">Get listed now →</a></p>
-  <p>Best wishes,<br/>— Roam Local Team</p>
-</div>`,
-    3: `<div style="font-family:Arial,sans-serif;max-width:560px;color:#1a0d12">
-  <p>Hi there,</p>
-  <p>We won't chase again after this — promise!</p>
-  <p>If you'd like <strong>${name}</strong> featured on Roam's <strong>${town}</strong> page for free, it only takes 90 seconds.</p>
-  <p style="margin-top:20px"><a href="https://roam-local.co.uk" style="background:#8B1A3A;color:white;padding:12px 24px;border-radius:6px;text-decoration:none;display:inline-block;font-weight:700">List for free →</a></p>
-  <p>Best wishes,<br/>— Roam Local Team</p>
-</div>`,
-  };
+  // Subject + body come from the editable templates the user manages on the
+  // /sequences page, rendered to branded HTML with this contact's variables.
+  const { subject, htmlContent } = renderSequenceEmail(
+    templates[`step${step}` as const],
+    { businessName: name, town, knownFor }
+  );
 
   try {
     const res = await fetch(`${BREVO_BASE}/smtp/email`, {
@@ -103,8 +91,8 @@ async function sendFollowUp(
       body: JSON.stringify({
         sender: { name: sender.name, email: sender.email },
         to: [{ email: contact.email, name }],
-        subject: subjects[step],
-        htmlContent: bodies[step],
+        subject,
+        htmlContent,
         replyTo: { email: sender.replyTo, name: sender.name },
       }),
     });
@@ -168,6 +156,7 @@ export async function GET(req: NextRequest) {
     const finalNudgeDays = settings.cadence.finalNudgeDays;
     const coldDays = settings.cadence.coldDays;
     const dailyCap = settings.cadence.dailySendCap;
+    const templates = settings.templates;
 
     // Pull every contact across all pages — sequences must reach the full
     // 11k+ list, not just the most recent 500 (see lib/brevo.ts > fetchAllContacts).
@@ -196,7 +185,7 @@ export async function GET(req: NextRequest) {
           capped = true;
           continue;
         }
-        const sent = await sendFollowUp(contact, 2, senderOpts);
+        const sent = await sendFollowUp(contact, 2, senderOpts, templates);
         if (sent) {
           // Send already happened; if the status update fails we MUST count
           // this as an error — otherwise the next cron run sees the contact
@@ -218,7 +207,7 @@ export async function GET(req: NextRequest) {
           capped = true;
           continue;
         }
-        const sent = await sendFollowUp(contact, 3, senderOpts);
+        const sent = await sendFollowUp(contact, 3, senderOpts, templates);
         if (sent) {
           const statusOk = await updateStatus(contact.email, {
             OUTREACH_STATUS: 'final_nudge',
