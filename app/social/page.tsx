@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { AlertTriangle, Calendar, Check, ChevronLeft, ChevronRight, Clock, Copy, Edit3, Image, List, Plus, RefreshCw, Settings, Sparkles, Trash2, X } from 'lucide-react';
+import { AlertTriangle, Calendar, Check, ChevronLeft, ChevronRight, Clock, Copy, Edit3, Image, List, Plus, RefreshCw, Settings, Sparkles, Trash2, WrapText, X } from 'lucide-react';
 import { Brief, fetchBriefs } from '@/lib/briefs';
 import { GOAL_OPTIONS, getGoalLabel } from '@/lib/goals';
 import { SocialAccount, fetchRealAccounts, combineAccounts, fetchAccountMeta } from '@/lib/social-accounts';
@@ -185,6 +185,7 @@ export default function SocialPage() {
   });
   const [generating, setGenerating] = useState(false);
   const [generatingCaption, setGeneratingCaption] = useState(false);
+  const [expandingCaption, setExpandingCaption] = useState(false);
   const [showBrainPicker, setShowBrainPicker] = useState(false);
   const [swappingPostId, setSwappingPostId] = useState<string | null>(null);
 
@@ -644,6 +645,68 @@ Return ONLY the caption text. No JSON, no markdown, no preamble. Just the captio
       addNotification({ type: 'email_failed', title: 'Generation failed', body: 'Network error' });
     } finally {
       setGeneratingCaption(false);
+    }
+  }
+
+  // Expand on the existing caption: keep the same message and voice but add
+  // depth and length. Unlike generate/regenerate this builds ON the current
+  // text rather than starting from the theme, so the strict length ceiling
+  // from buildVoiceRules is deliberately relaxed here.
+  async function expandCaptionForComposer() {
+    const current = form.caption.trim();
+    if (!current || form.accountIds.length === 0) return;
+    const acc = accounts.find(a => a.id === form.accountIds[0]);
+    if (!acc) return;
+    const brief = briefs.find(b => b.id === form.briefId);
+
+    const audience = acc.toneOverride || brief?.audience || '';
+    const tone = acc.toneOverride || brief?.tone || '';
+    const contentBrief = acc.contentBriefOverride || brief?.contentBrief || '';
+    const hashtags = acc.hashtagsOverride || brief?.hashtags || '';
+
+    const prompt = `You are expanding an existing social media post for ${acc.handle} (${acc.platform}${acc.region ? ' · ' + acc.region : ''}).
+
+Here is the current caption:
+"""
+${current}
+"""
+
+Expand and enrich it: add more depth, detail and texture while keeping the same core message, angle and voice. Make it noticeably longer (roughly 1.5–2x the current length), but every added sentence must earn its place — no filler or padding.
+
+Brand context:
+- Audience: ${audience}
+- Tone: ${tone}
+- Content focus: ${contentBrief}
+- Hashtags to use: ${hashtags}
+
+STYLE RULES (follow strictly):
+- Short, punchy sentences. Short paragraphs separated by ONE BLANK LINE.
+- Fact-driven, but DO NOT invent statistics, percentages or studies.
+- Personal and charming, never corporate or hype-y. No buzzwords, no "in today's fast-paced world", no "game-changing".
+- Emojis: zero or one, only if it adds something.
+- Preserve any existing hashtags and keep them at the end.
+
+Return ONLY the expanded caption text. No JSON, no markdown, no preamble. Just the caption ready to publish.`;
+
+    setExpandingCaption(true);
+    try {
+      const res = await fetch('/api/ai/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: [{ role: 'user', content: prompt }], model: 'claude-sonnet-4-5' }),
+      });
+      const data = await res.json();
+      const txt = (typeof data.content === 'string' ? data.content : (data.content?.[0]?.text || data.text || '')).trim();
+      if (txt) {
+        setForm(f => ({ ...f, caption: txt }));
+        addNotification({ type: 'info', title: 'Caption expanded', body: 'Edit it as you like' });
+      } else {
+        addNotification({ type: 'email_failed', title: 'Expand failed', body: 'Empty response' });
+      }
+    } catch (e) {
+      addNotification({ type: 'email_failed', title: 'Expand failed', body: 'Network error' });
+    } finally {
+      setExpandingCaption(false);
     }
   }
 
@@ -1739,11 +1802,19 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
 
               {/* Caption */}
               <div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 5 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 5, gap: 12 }}>
                   <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-600)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Caption</label>
-                  <button type="button" onClick={generateCaptionForComposer} disabled={generatingCaption || !form.briefId || form.accountIds.length === 0} style={{ background: 'none', border: 'none', fontSize: 11, color: !form.briefId || form.accountIds.length === 0 ? 'var(--ink-300)' : 'var(--maroon-700)', cursor: !form.briefId || form.accountIds.length === 0 ? 'not-allowed' : 'pointer', fontWeight: 600, padding: 0, display: 'flex', alignItems: 'center', gap: 4, fontFamily: 'inherit' }}>
-                    {/* REGENERATE-LABEL-V1 */}{generatingCaption ? <><Sparkles size={11} />Generating…</> : form.caption.trim() ? <><RefreshCw size={11} />Regenerate</> : <><Sparkles size={11} />Generate with AI</>}
-                  </button>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                    {/* EXPAND-CAPTION-V1: elaborate on the existing copy */}
+                    {form.caption.trim() && (
+                      <button type="button" onClick={expandCaptionForComposer} disabled={expandingCaption || generatingCaption || form.accountIds.length === 0} title="Make the caption longer and more detailed, keeping the same voice" style={{ background: 'none', border: 'none', fontSize: 11, color: form.accountIds.length === 0 ? 'var(--ink-300)' : 'var(--maroon-700)', cursor: (expandingCaption || generatingCaption || form.accountIds.length === 0) ? 'not-allowed' : 'pointer', fontWeight: 600, padding: 0, display: 'flex', alignItems: 'center', gap: 4, fontFamily: 'inherit' }}>
+                        {expandingCaption ? <><Sparkles size={11} />Expanding…</> : <><WrapText size={11} />Expand</>}
+                      </button>
+                    )}
+                    <button type="button" onClick={generateCaptionForComposer} disabled={generatingCaption || expandingCaption || !form.briefId || form.accountIds.length === 0} style={{ background: 'none', border: 'none', fontSize: 11, color: !form.briefId || form.accountIds.length === 0 ? 'var(--ink-300)' : 'var(--maroon-700)', cursor: (generatingCaption || expandingCaption || !form.briefId || form.accountIds.length === 0) ? 'not-allowed' : 'pointer', fontWeight: 600, padding: 0, display: 'flex', alignItems: 'center', gap: 4, fontFamily: 'inherit' }}>
+                      {/* REGENERATE-LABEL-V1 */}{generatingCaption ? <><Sparkles size={11} />Generating…</> : form.caption.trim() ? <><RefreshCw size={11} />Regenerate</> : <><Sparkles size={11} />Generate with AI</>}
+                    </button>
+                  </div>
                 </div>
                 <textarea value={form.caption} onChange={e => setForm({ ...form, caption: e.target.value })} placeholder="Write your post caption... or click Generate above" rows={4} style={{ ...inp, resize: 'vertical' }} />
                 <div style={{ fontSize: 10, color: 'var(--ink-400)', marginTop: 3, textAlign: 'right' }}>{form.caption.length} chars</div>
