@@ -57,7 +57,7 @@ export default function BrainPrintPage() {
           <div className="print-eyebrow">Roam-io Brain</div>
           <h1>{doc.description}</h1>
           <div className="print-meta">
-            {doc.uploadedAt && <span>{new Date(doc.uploadedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</span>}
+            {doc.uploadedAt && <span>{new Date(doc.uploadedAt).toLocaleDateString('en-GB', { timeZone: 'Europe/London', day: 'numeric', month: 'long', year: 'numeric' })}</span>}
             {doc.tags.length > 0 && <span> · {doc.tags.join(' · ')}</span>}
           </div>
         </header>

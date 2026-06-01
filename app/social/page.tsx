@@ -529,7 +529,7 @@ export default function SocialPage() {
         addPersistentNotification({
           type: 'social_scheduled',
           title: 'Post scheduled',
-          body: `${captionPreview} · ${new Date(scheduledAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`,
+          body: `${captionPreview} · ${new Date(scheduledAt).toLocaleString('en-GB', { timeZone: 'Europe/London', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`,
           href: '/social',
           dedupeKey: 'social_scheduled:' + np.id,
         });
@@ -1177,7 +1177,7 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
             <PostStatusBadge status={post.status} />
             {brief && <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '2px 8px', borderRadius: 'var(--r-pill)', background: brief.color + '15', fontSize: 10, fontWeight: 600, color: brief.color }}><div style={{ width: 6, height: 6, borderRadius: '50%', background: brief.color }} />{brief.name}</div>}
             {accs.map(a => <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: 'var(--ink-600)' }}><PlatformIcon platform={a.platform} size={10} color={a.color} />{a.handle}</div>)}
-            <div style={{ fontSize: 10, color: 'var(--ink-400)' }}>· {new Date(post.scheduledAt).toLocaleDateString()} {new Date(post.scheduledAt).toTimeString().slice(0, 5)}</div>
+            <div style={{ fontSize: 10, color: 'var(--ink-400)' }}>· {new Date(post.scheduledAt).toLocaleDateString('en-GB', { timeZone: 'Europe/London' })} {new Date(post.scheduledAt).toLocaleTimeString('en-GB', { timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit' })}</div>
           </div>
           <div style={{ fontSize: 13, color: 'var(--ink-800)', lineHeight: 1.5, marginBottom: 6, whiteSpace: 'pre-wrap' }}>{post.caption.length > 240 ? post.caption.slice(0, 240) + '…' : post.caption}</div>
           {post.imageUrl && <img src={post.imageUrl} alt="" style={{ width: 100, height: 60, objectFit: 'cover', borderRadius: 'var(--r-sm)' }} />}
@@ -1583,7 +1583,7 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
             return pd.getDate() === d && pd.getMonth() === m && pd.getFullYear() === y;
           })
           .sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime());
-        const dateLabel = date.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+        const dateLabel = date.toLocaleDateString('en-GB', { timeZone: 'Europe/London', weekday: 'long', day: 'numeric', month: 'long' });
         const dateStr = y + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
         return (
           <div className="soc-daysheet-overlay" onClick={e => { if (e.target === e.currentTarget) setDaySheet(null); }}>

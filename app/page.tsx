@@ -112,14 +112,14 @@ export default function Dashboard() {
     await load();
   }
 
-  const today = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const today = new Date().toLocaleDateString('en-GB', { timeZone: 'Europe/London', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   const lastUpdatedLabel = lastUpdated
     ? (() => {
         const s = Math.floor((Date.now() - lastUpdated.getTime()) / 1000);
         if (s < 10) return 'just now';
         if (s < 60) return `${s}s ago`;
         if (s < 3600) return `${Math.floor(s / 60)}m ago`;
-        return lastUpdated.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+        return lastUpdated.toLocaleTimeString('en-GB', { timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit' });
       })()
     : null;
 

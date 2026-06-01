@@ -260,7 +260,7 @@ export default function ChannelsPage() {
           accent="var(--info)"
           icon={<Clock size={14} />}
           caption={summary.lastPublishedIso
-            ? new Date(summary.lastPublishedIso).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+            ? new Date(summary.lastPublishedIso).toLocaleString('en-GB', { timeZone: 'Europe/London', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
             : 'No posts have gone out yet'}
         />
       </section>
@@ -468,7 +468,7 @@ function MetaCard({ meta, posts, loading }: { meta: MetaStatus; posts: SocialPos
             );
           })}
           <div style={S.cardFootMeta}>
-            Connected {meta.connectedAt ? new Date(meta.connectedAt).toLocaleDateString('en-GB') : ''}
+            Connected {meta.connectedAt ? new Date(meta.connectedAt).toLocaleDateString('en-GB', { timeZone: 'Europe/London' }) : ''}
           </div>
         </div>
       )}
@@ -589,7 +589,7 @@ function LinkedInCard({ linkedin, posts, loading }: { linkedin: LinkedInStatus; 
             )
           }
           <div style={S.cardFootMeta}>
-            Connected {linkedin.connectedAt ? new Date(linkedin.connectedAt).toLocaleDateString('en-GB') : ''}
+            Connected {linkedin.connectedAt ? new Date(linkedin.connectedAt).toLocaleDateString('en-GB', { timeZone: 'Europe/London' }) : ''}
           </div>
         </div>
       )}
