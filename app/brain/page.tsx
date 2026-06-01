@@ -777,7 +777,7 @@ export default function BrainPage() {
               </div>
 
               <div style={{ fontSize: 11, color: 'var(--ink-400)' }}>
-                Uploaded {new Date(editing.uploadedAt).toLocaleString()} · {(editing.size / 1024).toFixed(0)} KB
+                Uploaded {new Date(editing.uploadedAt).toLocaleString('en-GB', { timeZone: 'Europe/London' })} · {(editing.size / 1024).toFixed(0)} KB
               </div>
             </div>
             <div style={{ padding: '12px 20px', borderTop: '1px solid var(--ink-100)', display: 'flex', gap: 8, justifyContent: 'space-between' }}>

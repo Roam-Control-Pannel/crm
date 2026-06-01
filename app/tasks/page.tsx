@@ -42,7 +42,7 @@ function fmtDate(s:string):string{
   if(diff<0)return 'Overdue';
   if(diff===0)return 'Due today';
   if(diff===1)return 'Due tomorrow';
-  return 'Due '+d.toLocaleDateString('en-GB',{day:'numeric',month:'short'});
+  return 'Due '+d.toLocaleDateString('en-GB',{timeZone:'Europe/London',day:'numeric',month:'short'});
 }
 function isOverdue(s:string):boolean{return new Date(s)<new Date(new Date().setHours(0,0,0,0));}
 function isDueToday(s:string):boolean{

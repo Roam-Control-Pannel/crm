@@ -5,6 +5,10 @@
 
 [build.environment]
   NODE_VERSION = "20"
+  # Run the whole CRM on UK time. "Europe/London" tracks GMT in winter and BST
+  # in summer automatically, so server-side Date logic (SSR, posting-slot
+  # interpretation in lib/social-cron.ts) matches the UK-based team's clock.
+  TZ = "Europe/London"
 
 [[plugins]]
   package = "@netlify/plugin-nextjs"

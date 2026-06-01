@@ -1008,7 +1008,7 @@ export default function HubPage(){
                           <div style={{width:32,height:32,borderRadius:'var(--r-sm)',background:'#e8f0fb',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}><FileText size={14} color="var(--info)"/></div>
                           <div style={{flex:1,minWidth:0}}>
                             <div style={{fontSize:12,fontWeight:500,color:'var(--ink-900)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{doc.name}</div>
-                            <div style={{fontSize:10,color:'var(--ink-400)',marginTop:1}}>{fmtSize(doc.size)} · {new Date(doc.uploadedAt).toLocaleDateString('en-GB',{day:'numeric',month:'short'})}</div>
+                            <div style={{fontSize:10,color:'var(--ink-400)',marginTop:1}}>{fmtSize(doc.size)} · {new Date(doc.uploadedAt).toLocaleDateString('en-GB',{timeZone:'Europe/London',day:'numeric',month:'short'})}</div>
                           </div>
                           <button onClick={()=>handleDeleteDoc(doc.id)} style={{width:28,height:28,borderRadius:'var(--r-xs)',border:'1.5px solid var(--ink-200)',background:'var(--white)',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',color:'var(--alert)',flexShrink:0}}><Trash2 size={12}/></button>
                         </div>
@@ -1038,7 +1038,7 @@ export default function HubPage(){
               <div key={m.id} style={{display:'flex',flexDirection:m.role==='user'?'row-reverse':'row',gap:10,alignItems:'flex-start'}}>
                 {m.role==='assistant'&&<div style={{width:26,height:26,borderRadius:'50%',background:'var(--maroon-50)',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,marginTop:2,fontSize:12}}>🦁</div>}
                 <div style={{maxWidth:'85%'}}>
-                  <div style={{fontSize:10,color:'var(--ink-400)',marginBottom:4,textAlign:m.role==='user'?'right':'left'}}>{m.role==='user'?'You':'Roam-io'} · {new Date(m.timestamp).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}</div>
+                  <div style={{fontSize:10,color:'var(--ink-400)',marginBottom:4,textAlign:m.role==='user'?'right':'left'}}>{m.role==='user'?'You':'Roam-io'} · {new Date(m.timestamp).toLocaleTimeString('en-GB',{timeZone:'Europe/London',hour:'2-digit',minute:'2-digit'})}</div>
                   {m.attachments&&m.attachments.length>0&&(
                     <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:6,justifyContent:m.role==='user'?'flex-end':'flex-start'}}>
                       {m.attachments.map((a,i)=>(
@@ -1201,7 +1201,7 @@ export default function HubPage(){
                           {m.tags.filter(t=>t!=='roam-io-memory'&&t!=='roam-io-chat').slice(0,5).map(t=>(
                             <span key={t} style={{fontSize:9,background:'var(--white)',padding:'2px 7px',borderRadius:'var(--r-pill)',color:'var(--ink-500)',border:'1px solid var(--ink-100)'}}>{t}</span>
                           ))}
-                          <span style={{fontSize:9,color:'var(--ink-400)',padding:'2px 0'}}>{new Date(m.uploadedAt).toLocaleDateString('en-GB',{day:'numeric',month:'short'})}</span>
+                          <span style={{fontSize:9,color:'var(--ink-400)',padding:'2px 0'}}>{new Date(m.uploadedAt).toLocaleDateString('en-GB',{timeZone:'Europe/London',day:'numeric',month:'short'})}</span>
                         </div>
                       </div>
                       <button onClick={()=>forgetMemory(m)} title="Forget this" style={{width:26,height:26,borderRadius:'var(--r-xs)',border:'1.5px solid var(--ink-200)',background:'var(--white)',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',color:'var(--alert)',flexShrink:0}}><Trash2 size={12}/></button>
