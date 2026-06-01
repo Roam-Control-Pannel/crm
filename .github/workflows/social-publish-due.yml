@@ -1,0 +1,73 @@
+# Redundant trigger for the social-post publisher.
+#
+# Why this exists: the publishing pipeline (/api/social/publish-due) is healthy,
+# but Netlify's scheduled-function cron has been unreliable on this site — the
+# inline schedule silently failed to register, so scheduled posts never went
+# out automatically. This workflow is a second, independent trigger that does
+# not depend on Netlify's scheduler: it just POSTs to the same secret-gated
+# endpoint the Netlify cron calls. If both fire, the endpoint is idempotent —
+# it only publishes posts whose status is still 'scheduled' and whose
+# scheduledAt has passed, so a double-trigger does no harm.
+#
+# Cadence: GitHub Actions' minimum schedule granularity is 5 minutes, and
+# scheduled runs can be delayed (sometimes 10-15 min) when GitHub is under
+# load. So worst-case publish lag here is looser than the Netlify cron's ~2
+# min. Treat this as a safety net; the Netlify cron remains the primary path.
+#
+# Setup (one-time):
+#   1. Add a repository secret named CRON_SECRET_V2 with the same value used
+#      in the Netlify environment:
+#        Settings → Secrets and variables → Actions → New repository secret
+#   2. (Optional) Override the target site by adding a repository variable
+#      SITE_URL; otherwise the production URL below is used.
+#   3. Scheduled workflows only run from the repository's DEFAULT branch, so
+#      this file must be merged to main before the schedule takes effect.
+
+name: social-publish-due
+
+on:
+  schedule:
+    # Every 5 minutes (GitHub Actions minimum). May be delayed under load.
+    - cron: '*/5 * * * *'
+  # Allow manual runs from the Actions tab for testing.
+  workflow_dispatch:
+
+# Don't let slow/delayed runs pile up on top of each other.
+concurrency:
+  group: social-publish-due
+  cancel-in-progress: false
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: POST /api/social/publish-due
+        env:
+          CRON_SECRET_V2: ${{ secrets.CRON_SECRET_V2 }}
+          SITE_URL: ${{ vars.SITE_URL || 'https://roam-crm-platform.netlify.app' }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CRON_SECRET_V2:-}" ]; then
+            echo "::error::CRON_SECRET_V2 repository secret is not set. Add it under Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+
+          # Capture body and HTTP status in one request. The status is appended
+          # on its own trailing line so we can split them apart afterwards.
+          response="$(curl -sS -X POST \
+            -H "x-internal-call: ${CRON_SECRET_V2}" \
+            -H "Content-Type: application/json" \
+            -w $'\n%{http_code}' \
+            "${SITE_URL}/api/social/publish-due")"
+
+          status="$(printf '%s' "$response" | tail -n1)"
+          body="$(printf '%s' "$response" | sed '$d')"
+
+          echo "HTTP ${status}"
+          echo "${body}"
+
+          if [ "${status}" != "200" ]; then
+            echo "::error::publish-due returned HTTP ${status}"
+            exit 1
+          fi
