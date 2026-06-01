@@ -166,11 +166,33 @@ async function handle(req: NextRequest) {
       break;
     }
 
+    // CLAIM-V1
+    // Re-read the freshest collection right before claiming this post. With the
+    // in-app client trigger plus the Netlify and GitHub cron paths, multiple
+    // invocations can run concurrently; without a claim they could each read the
+    // same 'scheduled' post from their initial snapshot and double-publish it.
+    // The blob store uses strong consistency, so re-reading here sees a competing
+    // run's 'publishing' write and lets us bail. Whoever writes 'publishing'
+    // first wins; the others skip. This shrinks the race to the sub-millisecond
+    // window between this read and the save below.
+    const startedAtIso = new Date().toISOString();
+    const fresh = (await getCollection<SocialPostStored[]>(DEFAULT_USER_ID, 'social_posts')) || [];
+    const live = fresh.find(p => p.id === post.id);
+    if (!live) continue;
+    const claimable =
+      live.status === 'scheduled' ||
+      (live.status === 'publishing' &&
+        !!live.publishingStartedAt &&
+        now - new Date(live.publishingStartedAt).getTime() > STALE_PUBLISHING_MS);
+    if (!claimable) {
+      // Another concurrent run already claimed or finished this post.
+      continue;
+    }
+
     // Mark THIS post 'publishing' and persist before any network work, so a
     // mid-run timeout leaves only this one post recoverable and never strands
     // posts we haven't reached yet.
-    const startedAtIso = new Date().toISOString();
-    collection = collection.map(p =>
+    collection = fresh.map(p =>
       p.id === post.id
         ? { ...p, status: 'publishing' as const, publishingStartedAt: startedAtIso }
         : p

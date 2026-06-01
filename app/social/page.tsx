@@ -338,6 +338,42 @@ export default function SocialPage() {
     return () => clearInterval(interval);
   }, [posts]);
 
+  // AUTO-PUBLISH-CLIENT-V1
+  // Publishing must not depend solely on the server cron. Netlify's scheduled
+  // functions have repeatedly failed to register/fire on this site, so due
+  // posts sat in 'scheduled' and never went out — even though the
+  // /api/social/publish-due endpoint itself is healthy (a manual trigger
+  // publishes them immediately). That endpoint is idempotent — it only acts on
+  // posts still in status 'scheduled' whose scheduledAt has passed — so it is
+  // safe to call on a timer. While the CRM is open, we trigger it ourselves the
+  // moment a post comes due, via the session-gated run-now proxy. The server
+  // crons (Netlify + GitHub Actions) remain the path for when the app is shut.
+  useEffect(() => {
+    let inFlight = false;
+    const tick = async () => {
+      if (inFlight) return;
+      const dueNow = posts.some(
+        p => p.status === 'scheduled' && new Date(p.scheduledAt).getTime() <= Date.now()
+      );
+      if (!dueNow) return;
+      inFlight = true;
+      try {
+        await fetch('/api/social/publish-due/run-now', { method: 'POST' });
+        // Status changes are picked up by the polling effect above (which also
+        // fires the publish notifications), so we don't setPosts here.
+      } catch {
+        /* best effort — the next tick retries */
+      } finally {
+        inFlight = false;
+      }
+    };
+    // Fire immediately so an already-overdue post (e.g. on page load) goes out
+    // now rather than waiting a full interval.
+    tick();
+    const id = setInterval(tick, 30000);
+    return () => clearInterval(id);
+  }, [posts]);
+
   // Debounced Unsplash search
   useEffect(() => {
     if (!unsplashQuery.trim()) { setUnsplash([]); return; }
