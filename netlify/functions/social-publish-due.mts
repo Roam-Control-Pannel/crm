@@ -56,5 +56,9 @@ export default async () => {
 };
 
 export const config: Config = {
-  schedule: '* * * * *',
+  // Must stay in sync with netlify.toml [functions."social-publish-due"].
+  // Every-minute ('* * * * *') is deliberately avoided — see the cadence note
+  // above: Netlify silently declined to register it and the job never fired,
+  // stranding scheduled posts in status 'scheduled'.
+  schedule: '*/2 * * * *',
 };
