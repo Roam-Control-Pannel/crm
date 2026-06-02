@@ -130,7 +130,7 @@ export async function POST(req: NextRequest) {
     let imageSocialHandles: any;
     // Context for the copywriter — only set for Brain images (rich
     // description + tags). Unsplash keeps theme-based copy.
-    let imageForCaption: { description?: string; tags?: string[] } | undefined;
+    let imageForCaption: { description?: string; tags?: string[]; location?: string } | undefined;
 
     if (withImage === 'brain') {
       // Brain images live in the 'roam-brain' Blob store, separate from
@@ -139,16 +139,28 @@ export async function POST(req: NextRequest) {
       try {
         const brainStore = getStore('roam-brain');
         const items = ((await brainStore.get('items', { type: 'json' })) as any[]) || [];
+        // Folders live in the same store under 'folders'. Map id -> name so
+        // each image carries its curated location label (e.g. "Manchester").
+        const folders = ((await brainStore.get('folders', { type: 'json' })) as any[]) || [];
+        const folderNameById = new Map<string, string>(
+          folders.filter(f => f?.id && f?.name).map(f => [f.id, f.name] as [string, string]),
+        );
         const liteItems = items
           .filter(i => i.mime?.startsWith('image/'))
           // Absolute URL — this is stored on the post and handed to Meta's
           // Graph API at publish time, which can't fetch a relative path.
-          .map(i => ({ id: i.id, url: `${origin}/api/images/${i.blobId}`, credit: i.description, tags: i.tags }));
+          .map(i => ({
+            id: i.id,
+            url: `${origin}/api/images/${i.blobId}`,
+            credit: i.description,
+            tags: i.tags,
+            folder: i.folderId ? folderNameById.get(i.folderId) : undefined,
+          }));
         const picked = pickBrainImage(liteItems, theme, undefined, brief);
         if (picked) {
           imageUrl = picked.url;
           imageCredit = picked.credit;
-          imageForCaption = { description: picked.credit, tags: picked.tags };
+          imageForCaption = { description: picked.credit, tags: picked.tags, location: picked.folder };
         }
       } catch (err) {
         console.error('[social/draft] Brain image pick failed:', err);
