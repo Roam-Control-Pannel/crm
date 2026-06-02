@@ -31,6 +31,7 @@ import type { AutoGenerateRunResult, AutoGenerateAccountResult } from '@/lib/soc
 import { getEffectiveSettings } from '@/lib/social-settings';
 import { DEFAULT_LOOKAHEAD_DAYS } from '@/lib/social-settings-types';
 import { addNotification } from '@/lib/notifications';
+import { pickBrainImageForContext } from '@/lib/brain-image-match';
 
 // Mirrors the SocialPost interface defined inline in app/social/page.tsx.
 // Kept in sync by convention — if that interface changes, this one must too.
@@ -166,44 +167,17 @@ export function pickTheme(themes: Theme[], briefId: string): Theme | null {
 // Image picker — Brain (by tag overlap) -> Unsplash -> none
 // ----------------------------------------------------------------------------
 
-/** Lowercase, split on non-alphanumerics, drop short noise words. */
-function keywordsOf(text: string): string[] {
-  return text
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter(w => w.length > 3);
-}
-
-/** Count how many of an item's tags overlap (substring either way) with the
- *  given keyword list. Each tag counts at most once. */
-function tagOverlap(tags: string[], words: string[]): number {
-  let score = 0;
-  for (const tag of tags) {
-    for (const w of words) {
-      if (tag.includes(w) || w.includes(tag)) {
-        score += 1;
-        break; // each tag counts once
-      }
-    }
-  }
-  return score;
-}
-
 /**
  * IMAGE-FIRST: pick a Brain image for a slot, ranked BRIEF-LED with the theme
  * as a tiebreak. The point is that "Fill calendar" chooses a photo relevant to
  * the account/brief first, and the caption is written about that photo
  * afterwards (see generateCaption's `image` arg).
  *
- * Scoring: each item gets a brief-overlap score (tags vs the brief's
- * name/audience/content brief) and a theme-overlap score (tags vs theme
- * title/prompt). Items are ranked by brief score first, then theme score —
- * so the photo fits the account, with the theme refining to the post angle.
- * An item is eligible if it has ANY relevance (brief OR theme), so we still
- * match when a brief's vocabulary is sparse.
+ * Thin wrapper over the shared matcher so Fill calendar, /api/social/draft and
+ * the Generate-with-AI modal all score images identically. Folder-name overlap
+ * is weighted there; folders are the human-curated location label.
  *
- * Returns the top match, or null if no Brain item overlaps at all. Keeps the
- * matching simple (substring tag overlap); future versions can use embeddings.
+ * Returns the top match, or null if no Brain item overlaps at all.
  */
 export function pickBrainImage(
   brainItems: BrainItemLite[],
@@ -211,46 +185,7 @@ export function pickBrainImage(
   excludeUrls?: Set<string>,
   brief?: Brief
 ): BrainItemLite | null {
-  if (brainItems.length === 0) return null;
-
-  const themeWords = keywordsOf(theme.title + ' ' + theme.prompt);
-  const briefWords = brief
-    ? keywordsOf([brief.name, brief.audience, brief.contentBrief].filter(Boolean).join(' '))
-    : [];
-
-  if (themeWords.length === 0 && briefWords.length === 0) return null;
-
-  // The folder name (e.g. "Manchester") is a human-curated label, more
-  // reliable than the vision auto-tags — so a folder match counts double.
-  const FOLDER_WEIGHT = 2;
-
-  type Scored = { item: BrainItemLite; briefScore: number; themeScore: number };
-  const scored: Scored[] = brainItems.map(item => {
-    const tags = (item.tags || []).map(t => t.toLowerCase());
-    const folderWords = item.folder ? keywordsOf(item.folder) : [];
-    return {
-      item,
-      briefScore: tagOverlap(tags, briefWords) + FOLDER_WEIGHT * tagOverlap(folderWords, briefWords),
-      themeScore: tagOverlap(tags, themeWords) + FOLDER_WEIGHT * tagOverlap(folderWords, themeWords),
-    };
-  });
-
-  // Eligible = any relevance to the account/brief OR the theme. Rank brief-led
-  // (account fit), then by theme (post angle).
-  const matches = scored
-    .filter(s => s.briefScore > 0 || s.themeScore > 0)
-    .sort((a, b) => (b.briefScore - a.briefScore) || (b.themeScore - a.themeScore));
-  if (matches.length === 0) return null;
-
-  // Prefer images not already used in this run so a month of posts doesn't
-  // reuse the single top-scoring image. Pick randomly within the strongest
-  // eligible tier (same brief AND theme score) — keeps relevance high while
-  // adding variety.
-  const unused = matches.filter(s => !excludeUrls?.has(s.item.url));
-  const eligible = unused.length > 0 ? unused : matches;
-  const top = eligible[0];
-  const topTier = eligible.filter(s => s.briefScore === top.briefScore && s.themeScore === top.themeScore);
-  return topTier[Math.floor(Math.random() * topTier.length)].item;
+  return pickBrainImageForContext(brainItems, theme.title + ' ' + theme.prompt, { brief, excludeUrls });
 }
 
 /**
