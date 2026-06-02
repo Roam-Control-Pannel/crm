@@ -921,6 +921,42 @@ Return ONLY the expanded caption text. No JSON, no markdown, no preamble. Just t
           picks.push(pick || null);
         }
 
+        // Unsplash fallback for any post with no Brain match — mirrors Fill
+        // calendar: a topic-based query, a distinct photo per slot, and
+        // theme-based copy (the Unsplash photo isn't described to the model).
+        // Full attribution is stored for the publish-time credit suffix.
+        type UnsplashImg = {
+          url: string; credit?: string; creditUrl?: string; photoUrl?: string;
+          unsplashUrl?: string; downloadLocation?: string;
+          socialHandles?: { instagram?: string|null; twitter?: string|null; unsplash?: string|null };
+        };
+        const unsplashByIndex: (UnsplashImg | null)[] = picks.map(() => null);
+        if (picks.some(p => !p) && genForm.theme.trim()) {
+          try {
+            const imgRes = await fetch('/api/images/search?query=' + encodeURIComponent(genForm.theme.trim()) + '&count=24');
+            const imgData = await imgRes.json();
+            const pool: UnsplashImg[] = (imgData.images || []).filter((im: any) => im?.url);
+            let pi = 0;
+            for (let i = 0; i < picks.length; i++) {
+              if (picks[i]) continue;
+              while (pi < pool.length && used.has(pool[pi].url)) pi++;
+              if (pi >= pool.length) break;
+              const img = pool[pi++];
+              used.add(img.url);
+              unsplashByIndex[i] = img;
+              // Unsplash compliance: ping the download endpoint on use.
+              // Fire-and-forget — don't block draft creation.
+              if (img.downloadLocation) {
+                fetch('/api/images/track-download', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ downloadLocation: img.downloadLocation }),
+                }).catch(err => console.warn('[social-generate] Unsplash download ping failed:', err));
+              }
+            }
+          } catch { /* leave those posts imageless */ }
+        }
+
         const imageAssignments = picks.map((p, i) => {
           if (!p) return `POST ${i + 1}: No image — write about the theme/topic.`;
           const loc = p.folder ? ` Location: ${p.folder}.` : '';
@@ -1046,9 +1082,10 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"..."},{"caption":"...
           dt.setHours(10 + (i % 3) * 2, 0, 0, 0);
           // IMAGE-FIRST: the photo for this post was chosen before the copy,
           // so resolution is a deterministic index lookup (no AI id-matching).
+          // Brain image wins; otherwise the Unsplash fallback (with its
+          // attribution) for the publish-time credit suffix.
           const pick = picks[i];
-          const resolvedImageUrl = pick ? pick.url : '';
-          const resolvedImageCredit = pick ? (pick.folder ? 'From Brain · ' + pick.folder : 'From Brain') : '';
+          const uns = unsplashByIndex[i];
           return {
             id: 'p' + Date.now() + Math.random(),
             briefId: genForm.briefId,
@@ -1057,8 +1094,12 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"..."},{"caption":"...
             scheduledAt: dt.toISOString(),
             status: 'draft' as const,
             createdAt: new Date().toISOString(),
-            imageUrl: resolvedImageUrl,
-            imageCredit: resolvedImageCredit,
+            imageUrl: pick ? pick.url : (uns?.url || ''),
+            imageCredit: pick ? (pick.folder ? 'From Brain · ' + pick.folder : 'From Brain') : (uns?.credit || ''),
+            imageCreditUrl: pick ? undefined : uns?.creditUrl,
+            imagePhotoUrl: pick ? undefined : uns?.photoUrl,
+            imageUnsplashUrl: pick ? undefined : uns?.unsplashUrl,
+            imageSocialHandles: pick ? undefined : uns?.socialHandles,
           };
         });
 
