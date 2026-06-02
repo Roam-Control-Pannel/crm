@@ -868,19 +868,31 @@ Return ONLY the expanded caption text. No JSON, no markdown, no preamble. Just t
     const selectedAccounts = accounts.filter(a => genForm.accountIds.includes(a.id));
     if (!selectedAccounts.length) { setGenerating(false); return; }
 
-    // Load brain items so the AI can pick imagery
-    let brainItems: BrainItem[] = [];
+    // IMAGE-FIRST: load brain items + folders so we can pick the photo BEFORE
+    // writing copy, then write each post about its chosen image. Mirrors the
+    // Fill-calendar engine via the shared matcher (lib/brain-image-match).
+    // Folders (e.g. "Manchester") are a curated location signal.
+    type ImgCand = { id: string; blobId: string; url: string; tags: string[]; description: string; folder?: string };
+    let imageCandidates: ImgCand[] = [];
     try {
-      const { fetchItems } = await import('@/lib/brain');
-      brainItems = await fetchItems();
-    } catch { brainItems = []; }
-    const brainCatalog = brainItems.length === 0 ? '' :
-      'Available brain images:\n' + brainItems.map(it =>
-        '  - id: ' + it.id + ' | tags: ' + (it.tags.join(', ') || '(none)') + ' | description: ' + (it.description || '(none)')
-      ).join('\n');
+      const { fetchItems, fetchFolders } = await import('@/lib/brain');
+      const [items, folders] = await Promise.all([fetchItems(), fetchFolders()]);
+      const folderName = new Map(folders.map(f => [f.id, f.name] as [string, string]));
+      imageCandidates = items
+        .filter(it => it.mime?.startsWith('image/') && it.blobId)
+        .map(it => ({
+          id: it.id,
+          blobId: it.blobId,
+          url: window.location.origin + '/api/images/' + it.blobId,
+          tags: it.tags || [],
+          description: it.description || '',
+          folder: it.folderId ? folderName.get(it.folderId) : undefined,
+        }));
+    } catch { imageCandidates = []; }
 
     const brief = briefs.find(b => b.id === genForm.briefId);
     const goalLabel = getGoalLabel(genForm.goal);
+    const { pickBrainImageForContext } = await import('@/lib/brain-image-match');
 
     try {
       // GENERATE-ACCURACY-V1: Track posts actually created across all
@@ -894,6 +906,28 @@ Return ONLY the expanded caption text. No JSON, no markdown, no preamble. Just t
         const tone = acc.toneOverride || brief?.tone || '';
         const contentBrief = acc.contentBriefOverride || brief?.contentBrief || '';
         const hashtags = acc.hashtagsOverride || brief?.hashtags || '';
+
+        // IMAGE-FIRST: choose a distinct Brain photo for each post up front
+        // (brief-led, topic-aware, folder-weighted), then tell the model to
+        // write each post ABOUT its assigned image. avoidReuse keeps a small
+        // visible batch from repeating the same photo.
+        const used = new Set<string>();
+        const picks: (ImgCand | null)[] = [];
+        for (let i = 0; i < genForm.postsPerAccount; i++) {
+          const pick = pickBrainImageForContext(imageCandidates, genForm.theme, {
+            brief, extraTopic: goalLabel, excludeUrls: used, avoidReuse: true,
+          });
+          if (pick) used.add(pick.url);
+          picks.push(pick || null);
+        }
+
+        const imageAssignments = picks.map((p, i) => {
+          if (!p) return `POST ${i + 1}: No image — write about the theme/topic.`;
+          const loc = p.folder ? ` Location: ${p.folder}.` : '';
+          const desc = p.description ? ` Shows: ${p.description}.` : '';
+          const tags = p.tags.length ? ` Tags: ${p.tags.join(', ')}.` : '';
+          return `POST ${i + 1}: Write this post ABOUT its image —${loc}${desc}${tags} Reference what's shown naturally, name the location where it fits, and don't describe things that aren't in the photo.`;
+        }).join('\n');
 
         const prompt = `You are writing ${genForm.postsPerAccount} social media posts for ${acc.handle} (${acc.platform}${acc.region ? ' · ' + acc.region : ''}).
 
@@ -910,13 +944,13 @@ ${buildVoiceRules(acc.platform)}
 
 Each of the ${genForm.postsPerAccount} posts must follow these voice and format rules independently. Vary the angle, hook, and observation across the batch — no two posts should feel like the same thought rephrased.
 
-${brainCatalog ? '\n' + brainCatalog + '\n\nFor EACH post, choose the brain image whose tags/description best fit the post. Set "brainItemId" to that id. If no brain image is a strong topical fit, set "brainItemId" to null.' : ''}
+IMAGE ASSIGNMENTS — each post already has its image chosen. Use the THEME as the framing, but write the copy to fit its assigned image:
+${imageAssignments}
 
-Return EXACTLY ${genForm.postsPerAccount} posts as a JSON array. Each post is an object with fields:
+Return EXACTLY ${genForm.postsPerAccount} posts as a JSON array, IN THE SAME ORDER as the image assignments above (post 1 first). Each post is an object with one field:
   - "caption": the post text (following the voice rules above)
-  - "brainItemId": ${brainCatalog ? 'one of the brain image ids above, or null if none fit' : 'always null'}
 
-Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"img_123"},{"caption":"...","brainItemId":null}]`;
+Output ONLY valid JSON, no markdown. Example: [{"caption":"..."},{"caption":"..."}]`;
 
         const res = await fetch('/api/ai/chat', {
           method: 'POST',
@@ -933,7 +967,7 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
         // PARSE-HARDENING-V1: see PR notes. Three layers of defence against
         // the AI returning slightly-malformed JSON that previously dumped raw
         // JSON strings into draft captions.
-        let generated: { caption: string; brainItemId?: string | null }[] = [];
+        let generated: { caption: string }[] = [];
         let parsed = false;
 
         // Layer 1: strip any markdown fence (```json, ```javascript, plain ```)
@@ -1010,16 +1044,11 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
           const dt = new Date(start);
           dt.setDate(dt.getDate() + i * 2);
           dt.setHours(10 + (i % 3) * 2, 0, 0, 0);
-          // Resolve brainItemId to a real URL if AI picked one
-          let resolvedImageUrl = '';
-          let resolvedImageCredit = '';
-          if (g.brainItemId) {
-            const match = brainItems.find(b => b.id === g.brainItemId);
-            if (match) {
-              resolvedImageUrl = window.location.origin + '/api/images/' + match.blobId;
-              resolvedImageCredit = 'From Brain';
-            }
-          }
+          // IMAGE-FIRST: the photo for this post was chosen before the copy,
+          // so resolution is a deterministic index lookup (no AI id-matching).
+          const pick = picks[i];
+          const resolvedImageUrl = pick ? pick.url : '';
+          const resolvedImageCredit = pick ? (pick.folder ? 'From Brain · ' + pick.folder : 'From Brain') : '';
           return {
             id: 'p' + Date.now() + Math.random(),
             briefId: genForm.briefId,
