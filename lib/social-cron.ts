@@ -14,8 +14,11 @@
  *   5. For each (account with briefId) x (slot in the next N days):
  *        - skip if a draft/scheduled already exists for that account+time
  *        - pick a random enabled theme matching the account's brief
- *        - build caption via /api/ai/chat (with brief + theme context)
- *        - pick image: Brain by tag overlap -> Unsplash -> none
+ *        - IMAGE-FIRST: pick image — Brain (brief-led tag + folder match) ->
+ *          Unsplash
+ *        - build caption via /api/ai/chat with brief + theme context, AND
+ *          (for Brain images) the photo's description/tags/folder-location so
+ *          the copy is written about the chosen image and names the real place
  *        - construct SocialPost { status: "draft", scheduledAt, ... }
  *   6. Append all new posts to social_posts via internal save
  *   7. Fire one de-duped social_drafted notification
@@ -78,6 +81,10 @@ interface BrainItemLite {
   url: string;
   credit?: string;
   tags?: string[];
+  // Brain folder name (e.g. "Manchester"). Human-curated location/topic label
+  // — more reliable than the vision auto-tags. Used as a weighted match signal
+  // and surfaced to the copywriter so captions can name the real place.
+  folder?: string;
 }
 
 // ----------------------------------------------------------------------------
@@ -159,51 +166,90 @@ export function pickTheme(themes: Theme[], briefId: string): Theme | null {
 // Image picker — Brain (by tag overlap) -> Unsplash -> none
 // ----------------------------------------------------------------------------
 
+/** Lowercase, split on non-alphanumerics, drop short noise words. */
+function keywordsOf(text: string): string[] {
+  return text
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(w => w.length > 3);
+}
+
+/** Count how many of an item's tags overlap (substring either way) with the
+ *  given keyword list. Each tag counts at most once. */
+function tagOverlap(tags: string[], words: string[]): number {
+  let score = 0;
+  for (const tag of tags) {
+    for (const w of words) {
+      if (tag.includes(w) || w.includes(tag)) {
+        score += 1;
+        break; // each tag counts once
+      }
+    }
+  }
+  return score;
+}
+
 /**
- * Score Brain items by tag overlap with theme prompt keywords + theme id.
- * Returns the top match, or null if no Brain item has any overlap.
+ * IMAGE-FIRST: pick a Brain image for a slot, ranked BRIEF-LED with the theme
+ * as a tiebreak. The point is that "Fill calendar" chooses a photo relevant to
+ * the account/brief first, and the caption is written about that photo
+ * afterwards (see generateCaption's `image` arg).
  *
- * Keeps the matching simple: lowercase substring of theme prompt words
- * against tags. Future versions can use embeddings.
+ * Scoring: each item gets a brief-overlap score (tags vs the brief's
+ * name/audience/content brief) and a theme-overlap score (tags vs theme
+ * title/prompt). Items are ranked by brief score first, then theme score —
+ * so the photo fits the account, with the theme refining to the post angle.
+ * An item is eligible if it has ANY relevance (brief OR theme), so we still
+ * match when a brief's vocabulary is sparse.
+ *
+ * Returns the top match, or null if no Brain item overlaps at all. Keeps the
+ * matching simple (substring tag overlap); future versions can use embeddings.
  */
 export function pickBrainImage(
   brainItems: BrainItemLite[],
   theme: Theme,
-  excludeUrls?: Set<string>
+  excludeUrls?: Set<string>,
+  brief?: Brief
 ): BrainItemLite | null {
   if (brainItems.length === 0) return null;
 
-  const promptWords = (theme.title + ' ' + theme.prompt)
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter(w => w.length > 3);
+  const themeWords = keywordsOf(theme.title + ' ' + theme.prompt);
+  const briefWords = brief
+    ? keywordsOf([brief.name, brief.audience, brief.contentBrief].filter(Boolean).join(' '))
+    : [];
 
-  if (promptWords.length === 0) return null;
+  if (themeWords.length === 0 && briefWords.length === 0) return null;
 
-  type Scored = { item: BrainItemLite; score: number };
+  // The folder name (e.g. "Manchester") is a human-curated label, more
+  // reliable than the vision auto-tags — so a folder match counts double.
+  const FOLDER_WEIGHT = 2;
+
+  type Scored = { item: BrainItemLite; briefScore: number; themeScore: number };
   const scored: Scored[] = brainItems.map(item => {
     const tags = (item.tags || []).map(t => t.toLowerCase());
-    let score = 0;
-    for (const tag of tags) {
-      for (const w of promptWords) {
-        if (tag.includes(w) || w.includes(tag)) {
-          score += 1;
-          break; // each tag counts once
-        }
-      }
-    }
-    return { item, score };
+    const folderWords = item.folder ? keywordsOf(item.folder) : [];
+    return {
+      item,
+      briefScore: tagOverlap(tags, briefWords) + FOLDER_WEIGHT * tagOverlap(folderWords, briefWords),
+      themeScore: tagOverlap(tags, themeWords) + FOLDER_WEIGHT * tagOverlap(folderWords, themeWords),
+    };
   });
 
-  const matches = scored.filter(s => s.score > 0).sort((a, b) => b.score - a.score);
+  // Eligible = any relevance to the account/brief OR the theme. Rank brief-led
+  // (account fit), then by theme (post angle).
+  const matches = scored
+    .filter(s => s.briefScore > 0 || s.themeScore > 0)
+    .sort((a, b) => (b.briefScore - a.briefScore) || (b.themeScore - a.themeScore));
   if (matches.length === 0) return null;
+
   // Prefer images not already used in this run so a month of posts doesn't
   // reuse the single top-scoring image. Pick randomly within the strongest
-  // eligible tier — keeps relevance high while adding variety.
+  // eligible tier (same brief AND theme score) — keeps relevance high while
+  // adding variety.
   const unused = matches.filter(s => !excludeUrls?.has(s.item.url));
   const eligible = unused.length > 0 ? unused : matches;
-  const topScore = eligible[0].score;
-  const topTier = eligible.filter(s => s.score === topScore);
+  const top = eligible[0];
+  const topTier = eligible.filter(s => s.briefScore === top.briefScore && s.themeScore === top.themeScore);
   return topTier[Math.floor(Math.random() * topTier.length)].item;
 }
 
@@ -300,7 +346,12 @@ export async function generateCaption(
   meta: AccountMetaLite,
   account: RealAccountLite,
   internalSecret: string,
-  scheduledFor?: string
+  scheduledFor?: string,
+  // IMAGE-FIRST: the photo already chosen for this slot. When present, the
+  // copy is written ABOUT this image (its description, tags, and curated
+  // folder location) rather than as generic theme copy. Omitted for the
+  // Unsplash fallback, where we don't have a rich description to anchor on.
+  image?: { description?: string; tags?: string[]; location?: string }
 ): Promise<string> {
   const tone = meta.toneOverride || brief.tone;
   const contentBrief = meta.contentBriefOverride || brief.contentBrief;
@@ -313,6 +364,23 @@ export async function generateCaption(
     instagram: 'Instagram caption. 60-150 words. Visual-first context. Hook in the first line. Hashtags at the end.',
   };
 
+  // IMAGE-FIRST: when a photo has been chosen, lead with it so the copy
+  // describes what is actually in the picture. The theme is demoted to an
+  // angle/framing rather than the subject.
+  const hasImageContext = !!(image && (image.description || (image.tags && image.tags.length) || image.location));
+  const imageLines = hasImageContext
+    ? [
+        '',
+        'IMAGE (already chosen — write the post about THIS photo):',
+        image!.location ? 'Location: ' + image!.location + ' (this is where the photo is — name it naturally where it fits; do not place the post anywhere else)' : '',
+        image!.description ? 'What it shows: ' + image!.description : '',
+        (image!.tags && image!.tags.length) ? 'Tags: ' + image!.tags.join(', ') : '',
+        'The post accompanies this image. Write copy that fits and complements what is shown — '
+          + 'reference it naturally and do not describe things that are not in the photo. '
+          + 'Use the THEME below as the angle/framing, not as a separate subject.',
+      ].filter(Boolean)
+    : [];
+
   const systemPrompt = [
     'You are writing a single social post.',
     '',
@@ -322,6 +390,7 @@ export async function generateCaption(
     'Tone: ' + tone,
     'Content brief: ' + contentBrief,
     'Hashtags (use sparingly, end of post): ' + hashtags,
+    ...imageLines,
     '',
     'THEME for this post:',
     theme.title,
@@ -458,6 +527,17 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
     // items aren't postable.
     let brainItems: BrainItemLite[] = [];
     try {
+      // Load folders too (id -> name) so each image carries its curated
+      // location/topic label (e.g. "Manchester"). Best-effort — if folders
+      // can't be loaded, items just have no folder and degrade to tags only.
+      const folderNameById = new Map<string, string>();
+      try {
+        const foldersRes = await fetchJsonInternal(input.origin, '/api/brain/folders', input.internalSecret);
+        for (const f of (foldersRes?.folders || [])) {
+          if (f?.id && f?.name) folderNameById.set(f.id, f.name);
+        }
+      } catch { /* folders optional */ }
+
       const brainRes = await fetchJsonInternal(input.origin, '/api/brain/items', input.internalSecret);
       const rawItems: any[] = brainRes?.items || brainRes?.data || [];
       brainItems = rawItems
@@ -467,6 +547,7 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
           url: `${input.origin}/api/images/${i.blobId}`,
           credit: i.description,
           tags: i.tags,
+          folder: i.folderId ? folderNameById.get(i.folderId) : undefined,
         }));
     } catch {
       // Brain endpoint may not exist or be auth-restricted — degrade gracefully
@@ -607,19 +688,8 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
       const batch = specs.slice(i, i + CONCURRENCY);
       const built = await Promise.all(batch.map(async (spec) => {
         try {
-          const caption = await generateCaption(
-            input.origin, spec.slotBrief, spec.theme, spec.metaForCaption,
-            spec.account, input.internalSecret, spec.iso,
-          );
-          // generateCaption returns '' on failure (e.g. an AI rate-limit
-          // under concurrency). Don't persist a body-less draft — leave the
-          // slot empty so the next Fill calendar run retries it.
-          if (!caption || !caption.trim()) {
-            console.warn('[social-cron] empty caption — skipping slot', spec.iso);
-            return null;
-          }
-
-          // Image — Brain first, then Unsplash. usedImageUrls steers both
+          // IMAGE-FIRST: choose the photo BEFORE writing any copy. Brain
+          // first (brief-led match), then Unsplash. usedImageUrls steers both
           // pickers away from photos already placed in this run.
           let imageUrl: string | undefined;
           let imageCredit: string | undefined;
@@ -627,10 +697,15 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
           let imagePhotoUrl: string | undefined;
           let imageUnsplashUrl: string | undefined;
           let imageSocialHandles: SocialPostDraft['imageSocialHandles'] | undefined;
-          const brain = pickBrainImage(brainItems, spec.theme, usedImageUrls);
+          // Context passed to the copywriter so the caption is written ABOUT
+          // the chosen photo. Only set for Brain images (rich description +
+          // tags); the Unsplash fallback keeps theme-based copy.
+          let imageForCaption: { description?: string; tags?: string[]; location?: string } | undefined;
+          const brain = pickBrainImage(brainItems, spec.theme, usedImageUrls, spec.slotBrief);
           if (brain) {
             imageUrl = brain.url;
             imageCredit = brain.credit;
+            imageForCaption = { description: brain.credit, tags: brain.tags, location: brain.folder };
           } else {
             const queryWords = spec.theme.title.split(' ').slice(0, 4).join(' ');
             const unsplash = await pickUnsplashImage(input.origin, queryWords, input.internalSecret, usedImageUrls);
@@ -642,6 +717,20 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
               imageUnsplashUrl = unsplash.unsplashUrl;
               imageSocialHandles = unsplash.socialHandles;
             }
+          }
+
+          // Now write the copy — anchored to the chosen image when we have one.
+          const caption = await generateCaption(
+            input.origin, spec.slotBrief, spec.theme, spec.metaForCaption,
+            spec.account, input.internalSecret, spec.iso,
+            imageForCaption,
+          );
+          // generateCaption returns '' on failure (e.g. an AI rate-limit
+          // under concurrency). Don't persist a body-less draft — leave the
+          // slot empty so the next Fill calendar run retries it.
+          if (!caption || !caption.trim()) {
+            console.warn('[social-cron] empty caption — skipping slot', spec.iso);
+            return null;
           }
 
           const post: SocialPostDraft = {
