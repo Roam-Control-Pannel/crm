@@ -1544,8 +1544,18 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"...","brainItemId":"i
                     {dp.length > 0 && (
                       <div className="soc-cell-dots" aria-label={`${dp.length} post${dp.length === 1 ? '' : 's'} scheduled`}>
                         {dp.slice(0, 4).map(p => {
-                          const acc = accounts.find(a => a.id === p.accountIds[0]);
-                          return <span key={p.id} className="dot" style={{ background: acc?.color || 'var(--ink-300)' }} />;
+                          // CAL-STATUS-COLOURS-V1: colour the mobile day dots by post
+                          // STATUS to match the calendar legend and the desktop pills
+                          // (draft = grey, scheduled/publishing = amber,
+                          // published/partial = green, failed = red) — previously they
+                          // used the account/platform colour, which didn't match the
+                          // legend the user reads the calendar by.
+                          const dotColor =
+                            (p.status === 'scheduled' || p.status === 'publishing') ? 'var(--warn)' :
+                            (p.status === 'published' || p.status === 'partial') ? '#15803d' :
+                            p.status === 'failed' ? 'var(--alert)' :
+                            'var(--ink-300)';
+                          return <span key={p.id} className="dot" style={{ background: dotColor }} />;
                         })}
                         {dp.length > 4 && <span className="more">+{dp.length - 4}</span>}
                       </div>
