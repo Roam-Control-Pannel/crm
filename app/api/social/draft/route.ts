@@ -119,22 +119,18 @@ export async function POST(req: NextRequest) {
       active: accountMeta.active,
     } : { accountId, briefId };
 
-    // 4. Generate caption (unless override provided)
-    let caption = captionOverride;
-    if (!caption) {
-      caption = await generateCaption(origin, brief, theme, meta, account, secret, scheduledAt);
-      if (!caption) {
-        return NextResponse.json({ ok: false, error: 'Caption generation failed' }, { status: 502 });
-      }
-    }
-
-    // 5. Optional image
+    // 4. IMAGE-FIRST: pick the image BEFORE writing copy, so a Brain photo's
+    //    description/tags can anchor the caption. (Mirrors the Fill-calendar
+    //    engine in lib/social-cron.ts.)
     let imageUrl: string | undefined;
     let imageCredit: string | undefined;
     let imageCreditUrl: string | undefined;
     let imagePhotoUrl: string | undefined;
     let imageUnsplashUrl: string | undefined;
     let imageSocialHandles: any;
+    // Context for the copywriter — only set for Brain images (rich
+    // description + tags). Unsplash keeps theme-based copy.
+    let imageForCaption: { description?: string; tags?: string[] } | undefined;
 
     if (withImage === 'brain') {
       // Brain images live in the 'roam-brain' Blob store, separate from
@@ -148,10 +144,11 @@ export async function POST(req: NextRequest) {
           // Absolute URL — this is stored on the post and handed to Meta's
           // Graph API at publish time, which can't fetch a relative path.
           .map(i => ({ id: i.id, url: `${origin}/api/images/${i.blobId}`, credit: i.description, tags: i.tags }));
-        const picked = pickBrainImage(liteItems, theme);
+        const picked = pickBrainImage(liteItems, theme, undefined, brief);
         if (picked) {
           imageUrl = picked.url;
           imageCredit = picked.credit;
+          imageForCaption = { description: picked.credit, tags: picked.tags };
         }
       } catch (err) {
         console.error('[social/draft] Brain image pick failed:', err);
@@ -166,6 +163,16 @@ export async function POST(req: NextRequest) {
         imagePhotoUrl = picked.photoUrl;
         imageUnsplashUrl = picked.unsplashUrl;
         imageSocialHandles = picked.socialHandles;
+      }
+    }
+
+    // 5. Generate caption (unless override provided) — anchored to the chosen
+    //    Brain image when there is one.
+    let caption = captionOverride;
+    if (!caption) {
+      caption = await generateCaption(origin, brief, theme, meta, account, secret, scheduledAt, imageForCaption);
+      if (!caption) {
+        return NextResponse.json({ ok: false, error: 'Caption generation failed' }, { status: 502 });
       }
     }
 
