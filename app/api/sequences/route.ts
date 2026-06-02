@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   recordCronRun,
   sendsToday,
+  claimDailyRun,
   type CronRunRecord,
 } from '@/lib/cron-status';
 import { fetchAllContacts } from '@/lib/brevo';
@@ -136,11 +137,46 @@ export async function GET(req: NextRequest) {
   // runs without a listId so it processes all contacts.
   const { searchParams } = new URL(req.url);
   const listId = searchParams.get('listId');
+  // Scheduled callers (the Netlify daily cron and the GitHub Actions backup)
+  // pass ?scheduled=1. Manual "Run now" does not, so it is never blocked.
+  const isScheduled = searchParams.get('scheduled') === '1';
 
   const now = new Date();
   const todayDate = now.toISOString().slice(0, 10);
   const counts = { day2: 0, day7: 0, day14: 0, errors: 0, processed: 0 };
   let capped = false;
+
+  // GUARD-DAILY-RUN-V1
+  // With a redundant backup trigger, the daily run could be invoked more than
+  // once per day. Sending email is not idempotent (a contact's dedup flag in
+  // Brevo is only updated AFTER the send), so two scheduled runs on the same
+  // day risk double-emailing contacts and blowing past the daily cap. Claim
+  // the day before doing any work: the first scheduled caller wins and runs;
+  // any later scheduled caller sees the claim and skips cheaply (before the
+  // expensive Brevo fetch). Manual runs bypass this entirely.
+  if (isScheduled) {
+    let claimed = false;
+    try {
+      claimed = await claimDailyRun(todayDate);
+    } catch (err: any) {
+      // If we can't determine whether the day is claimed, do NOT proceed —
+      // running blind could double-send. Return a transient error so the next
+      // backup attempt retries.
+      console.error('[sequences] claimDailyRun failed:', err?.message);
+      return NextResponse.json(
+        { success: false, error: 'Could not acquire daily run claim' },
+        { status: 503 }
+      );
+    }
+    if (!claimed) {
+      return NextResponse.json({
+        success: true,
+        skipped: true,
+        reason: 'Daily run already completed for ' + todayDate,
+        date: todayDate,
+      });
+    }
+  }
 
   try {
     // Cadence + cap come from the Settings page (Netlify Blobs). Defaults

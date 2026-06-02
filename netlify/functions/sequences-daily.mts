@@ -26,7 +26,9 @@ export default async () => {
   }
 
   try {
-    const res = await fetch(`${url}/api/sequences`, {
+    // scheduled=1 engages the once-per-day claim so this primary cron and the
+    // GitHub Actions backup can't both run the sequence on the same day.
+    const res = await fetch(`${url}/api/sequences?scheduled=1`, {
       method: 'GET',
       headers: { Authorization: `Bearer ${secret}` },
     });

@@ -1,0 +1,66 @@
+# Backup trigger for the daily outreach email sequences.
+#
+# Why this exists: the sequences runner is driven by a Netlify scheduled
+# function (08:00 UTC daily), and Netlify's scheduler has proven unreliable on
+# this site. If it silently fails to fire, follow-up emails stop going out. This
+# workflow is an independent backup that hits the same secret-gated endpoint.
+#
+# Safe to run alongside the Netlify cron: /api/sequences?scheduled=1 claims the
+# day before doing any work (see lib/cron-status.ts > claimDailyRun). Whichever
+# trigger runs first does the send; any later scheduled caller sees the claim
+# and skips cheaply. So this NEVER double-emails contacts — at worst it does the
+# work the primary missed.
+#
+# Cadence: these fire AFTER the primary's 08:00 UTC slot (and offset from the
+# top of the hour) so that, if the primary ran, the claim is already in place
+# and these no-op. GitHub Actions' scheduler is itself sparse/delayed, so two
+# attempts are used for redundancy. A no-op skip returns HTTP 200.
+#
+# Setup: reuses the same CRON_SECRET_V2 repository secret as social-publish-due.
+# Scheduled workflows only run from the default branch.
+
+name: sequences-daily
+
+on:
+  schedule:
+    - cron: '15 8 * * *'   # 15 min after the primary's 08:00 UTC slot
+    - cron: '45 9 * * *'   # second attempt if the first was skipped/delayed
+  workflow_dispatch:
+
+concurrency:
+  group: sequences-daily
+  cancel-in-progress: false
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: GET /api/sequences?scheduled=1
+        env:
+          CRON_SECRET_V2: ${{ secrets.CRON_SECRET_V2 }}
+          SITE_URL: ${{ vars.SITE_URL || 'https://roam-crm-platform.netlify.app' }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CRON_SECRET_V2:-}" ]; then
+            echo "::error::CRON_SECRET_V2 repository secret is not set. Add it under Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+
+          # The sequences endpoint authenticates via Bearer (not x-internal-call).
+          response="$(curl -sS -X GET \
+            -H "Authorization: Bearer ${CRON_SECRET_V2}" \
+            -w $'\n%{http_code}' \
+            "${SITE_URL}/api/sequences?scheduled=1")"
+
+          status="$(printf '%s' "$response" | tail -n1)"
+          body="$(printf '%s' "$response" | sed '$d')"
+
+          echo "HTTP ${status}"
+          echo "${body}"
+
+          # 200 covers both "did the run" and "skipped (already ran today)".
+          if [ "${status}" != "200" ]; then
+            echo "::error::sequences returned HTTP ${status}"
+            exit 1
+          fi
