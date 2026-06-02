@@ -26,6 +26,7 @@ export interface CronStatus {
 
 const STORE_NAME = 'roam-system';
 const KEY = 'sequences-cron-status';
+const CLAIM_KEY = 'sequences-cron-claim';
 const HISTORY_LIMIT = 14;
 
 function statusStore() {
@@ -51,6 +52,29 @@ export async function recordCronRun(record: CronRunRecord): Promise<void> {
     history: [record, ...current.history].slice(0, HISTORY_LIMIT),
   };
   await store.setJSON(KEY, next as any);
+}
+
+/**
+ * Claim the daily scheduled sequences run for `dateStr` (YYYY-MM-DD).
+ *
+ * Returns true if THIS caller acquired the claim, false if it was already
+ * claimed for that date. This lets a redundant trigger (e.g. a GitHub Actions
+ * backup) run the daily sequence ONLY when the primary Netlify cron didn't —
+ * without risk of double-emailing contacts. Whoever claims the day first does
+ * the work; later scheduled callers see the claim and skip.
+ *
+ * The store uses strong consistency, so the read sees a prior claim from any
+ * non-simultaneous caller. The remaining read-then-write window is sub-second;
+ * combined with scheduling the backup well after the primary's slot, two
+ * scheduled runs claiming the same day is effectively impossible. Manual
+ * "Run now" calls do not go through this path, so they are never blocked.
+ */
+export async function claimDailyRun(dateStr: string): Promise<boolean> {
+  const store = statusStore();
+  const existing = (await store.get(CLAIM_KEY, { type: 'json' })) as { date?: string } | null;
+  if (existing?.date === dateStr) return false;
+  await store.setJSON(CLAIM_KEY, { date: dateStr, claimedAt: new Date().toISOString() });
+  return true;
 }
 
 /**
