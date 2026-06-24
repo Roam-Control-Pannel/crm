@@ -2106,7 +2106,7 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"..."},{"caption":"...
                 <div>
                   <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--ink-600)', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Posts per account</label>
                   <select value={genForm.postsPerAccount} onChange={e => setGenForm({ ...genForm, postsPerAccount: Number(e.target.value) })} style={{ ...inp, cursor: 'pointer' }}>
-                    <option value={2}>2 posts</option><option value={3}>3 posts</option><option value={5}>5 posts</option>
+                    <option value={1}>1 post</option><option value={2}>2 posts</option><option value={3}>3 posts</option><option value={5}>5 posts</option>
                   </select>
                 </div>
                 <div>
