@@ -965,7 +965,12 @@ Return ONLY the expanded caption text. No JSON, no markdown, no preamble. Just t
           return `POST ${i + 1}: Write this post ABOUT its image —${loc}${desc}${tags} Reference what's shown naturally, name the location where it fits, and don't describe things that aren't in the photo.`;
         }).join('\n');
 
-        const prompt = `You are writing ${genForm.postsPerAccount} social media posts for ${acc.handle} (${acc.platform}${acc.region ? ' · ' + acc.region : ''}).
+        const n = genForm.postsPerAccount;
+        const postWord = n === 1 ? 'post' : 'posts';
+        const varyRule = n === 1
+          ? `Follow these voice and format rules.`
+          : `Each of the ${n} posts must follow these voice and format rules independently. Vary the angle, hook, and observation across the batch — no two posts should feel like the same thought rephrased.`;
+        const prompt = `You are writing ${n} social media ${postWord} for ${acc.handle} (${acc.platform}${acc.region ? ' · ' + acc.region : ''}).
 
 Brand context:
 - Audience: ${audience}
@@ -978,12 +983,12 @@ ${goalLabel ? 'Goal of these posts: ' + goalLabel : ''}
 
 ${buildVoiceRules(acc.platform)}
 
-Each of the ${genForm.postsPerAccount} posts must follow these voice and format rules independently. Vary the angle, hook, and observation across the batch — no two posts should feel like the same thought rephrased.
+${varyRule}
 
 IMAGE ASSIGNMENTS — each post already has its image chosen. Use the THEME as the framing, but write the copy to fit its assigned image:
 ${imageAssignments}
 
-Return EXACTLY ${genForm.postsPerAccount} posts as a JSON array, IN THE SAME ORDER as the image assignments above (post 1 first). Each post is an object with one field:
+Return EXACTLY ${n} ${postWord} as a JSON array, IN THE SAME ORDER as the image assignments above (post 1 first). Each post is an object with one field:
   - "caption": the post text (following the voice rules above)
 
 Output ONLY valid JSON, no markdown. Example: [{"caption":"..."},{"caption":"..."}]`;
@@ -2106,7 +2111,7 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"..."},{"caption":"...
                 <div>
                   <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--ink-600)', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Posts per account</label>
                   <select value={genForm.postsPerAccount} onChange={e => setGenForm({ ...genForm, postsPerAccount: Number(e.target.value) })} style={{ ...inp, cursor: 'pointer' }}>
-                    <option value={2}>2 posts</option><option value={3}>3 posts</option><option value={5}>5 posts</option>
+                    <option value={1}>1 post</option><option value={2}>2 posts</option><option value={3}>3 posts</option><option value={5}>5 posts</option>
                   </select>
                 </div>
                 <div>
