@@ -179,6 +179,40 @@ export function combineAccounts(
 }
 
 /**
+ * HANDLE-CACHE-V1: last-known display names for real accounts, keyed by
+ * account id. /api/accounts/status returns nothing for a provider whose
+ * token has expired, which used to leave the UI with only raw ids like
+ * 'meta-page:1724917047779739'. The cache is merge-only (entries are never
+ * deleted on disconnect — that's the whole point), so once an account has
+ * been seen connected its human name survives token lapses.
+ */
+export type AccountHandleCache = Record<string, { handle: string; platform: string }>;
+
+export async function fetchAccountHandleCache(): Promise<AccountHandleCache> {
+  const data = await loadWithMigration<AccountHandleCache>('account_handle_cache');
+  return data && typeof data === 'object' && !Array.isArray(data) ? data : {};
+}
+
+/**
+ * Merge freshly-fetched real accounts into the cache. Writes to the server
+ * store only when something actually changed, so the common page-load path
+ * costs a read, not a write.
+ */
+export async function updateAccountHandleCache(real: RealAccount[]): Promise<AccountHandleCache> {
+  const cache = await fetchAccountHandleCache();
+  let changed = false;
+  for (const r of real) {
+    const cur = cache[r.id];
+    if (!cur || cur.handle !== r.handle || cur.platform !== r.platform) {
+      cache[r.id] = { handle: r.handle, platform: r.platform };
+      changed = true;
+    }
+  }
+  if (changed) await saveRemote('account_handle_cache', cache);
+  return cache;
+}
+
+/**
  * Fetch real accounts from the server.
  */
 export async function fetchRealAccounts(): Promise<RealAccount[]> {

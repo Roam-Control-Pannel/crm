@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import { AlertTriangle, Calendar, Check, ChevronLeft, ChevronRight, Clock, Copy, Edit3, Image, List, Plus, RefreshCw, Settings, Sparkles, Trash2, WrapText, X } from 'lucide-react';
 import { Brief, fetchBriefs } from '@/lib/briefs';
 import { GOAL_OPTIONS, getGoalLabel } from '@/lib/goals';
-import { SocialAccount, fetchRealAccounts, combineAccounts, fetchAccountMeta } from '@/lib/social-accounts';
+import { SocialAccount, fetchRealAccounts, combineAccounts, fetchAccountMeta, AccountHandleCache, updateAccountHandleCache } from '@/lib/social-accounts';
 import { loadWithMigration, saveRemote } from '@/lib/client-store';
 import { buildUnsplashCredit } from '@/lib/unsplash-credit';
 import BrainPicker from '@/components/BrainPicker';
@@ -142,6 +142,12 @@ function platformFromAccountId(id: string): string {
   return '';
 }
 
+const PLATFORM_LABELS: Record<string, string> = {
+  facebook: 'Facebook',
+  instagram: 'Instagram',
+  linkedin: 'LinkedIn',
+};
+
 // Format a Date's local Y-M-D and H:M so they round-trip through the composer
 // inputs without timezone drift. toISOString() returns UTC date components,
 // which silently shifted scheduledAt by ±24h on edit when the user's local
@@ -157,6 +163,9 @@ export default function SocialPage() {
   const today = new Date();
 
   const [accounts, setAccounts] = useState<SocialAccount[]>([]);
+  // HANDLE-CACHE-V1: last-known account names, so pills/chips show
+  // "Ovington Co (IG)" instead of "meta-ig:1784…" while a token is expired.
+  const [handleCache, setHandleCache] = useState<AccountHandleCache>({});
   const [briefs, setBriefs] = useState<Brief[]>([]);
   const [posts, setPosts] = useState<SocialPost[]>([]);
   const [loading, setLoading] = useState(true);
@@ -272,6 +281,11 @@ export default function SocialPage() {
       setAccounts(combineAccounts(real, briefsData, accountMeta));
       setPosts(postsData);
       setLoading(false);
+      // HANDLE-CACHE-V1: merge whatever accounts DID resolve into the
+      // last-known-names cache (merge-only — a disconnected provider's
+      // entries are kept, that's the point). Not awaited before first
+      // paint; the cache arriving a beat later just upgrades labels.
+      updateAccountHandleCache(real).then(setHandleCache).catch(() => {});
     })();
   }, []);
 
@@ -1185,6 +1199,20 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"..."},{"caption":"...
   // — per-account results render inline so the user can see which leg failed.
   const failed = filtered.filter(p => p.status === 'failed');
 
+  // HANDLE-CACHE-V1: resolve an account id to something human-readable,
+  // best source first: live account → cached last-known name → readable
+  // platform + id tail ("Facebook …9739"). Raw ids never reach the UI.
+  function accountDisplay(id: string): { handle: string; platform: string } {
+    const a = accounts.find(x => x.id === id);
+    if (a) return { handle: a.handle, platform: a.platform };
+    const cached = handleCache[id];
+    const platform = cached?.platform || platformFromAccountId(id);
+    if (cached?.handle) return { handle: cached.handle, platform };
+    const tail = (id.split(':')[1] || '').slice(-4);
+    const label = PLATFORM_LABELS[platform] || 'Account';
+    return { handle: tail ? `${label} …${tail}` : label, platform };
+  }
+
   function postsForDay(day: number) {
     return filtered.filter(p => {
       const d = new Date(p.scheduledAt);
@@ -1236,11 +1264,12 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"..."},{"caption":"...
     const accs = post.accountIds.map(id => accounts.find(a => a.id === id)).filter(Boolean) as SocialAccount[];
     const primary = accs[0];
     // No resolvable account (expired token / disconnected channel) — still
-    // render the pill from the raw account id, like PostRow does. Returning
-    // null here made every post vanish from the calendar whenever the
-    // Meta/LinkedIn connection lapsed, which read as "my posts are gone".
-    const primaryPlatform = primary?.platform || platformFromAccountId(post.accountIds[0] || '');
-    const primaryHandle = primary?.handle || post.accountIds[0] || 'Unknown account';
+    // render the pill via accountDisplay (cached name, else readable
+    // platform label). Returning null here made every post vanish from the
+    // calendar whenever the Meta/LinkedIn connection lapsed.
+    const first = post.accountIds[0] ? accountDisplay(post.accountIds[0]) : null;
+    const primaryPlatform = primary?.platform || first?.platform || '';
+    const primaryHandle = primary?.handle || first?.handle || 'Unknown account';
     const extraCount = primary ? accs.length - 1 : post.accountIds.length - 1;
     const unresolved = !primary;
     const canDrag = post.status === 'draft' || post.status === 'scheduled';
@@ -1311,7 +1340,13 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"..."},{"caption":"...
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
             <PostStatusBadge status={post.status} />
             {brief && <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '2px 8px', borderRadius: 'var(--r-pill)', background: brief.color + '15', fontSize: 10, fontWeight: 600, color: brief.color }}><div style={{ width: 6, height: 6, borderRadius: '50%', background: brief.color }} />{brief.name}</div>}
-            {accs.map(a => <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: 'var(--ink-600)' }}><PlatformIcon platform={a.platform} size={10} color={a.color} />{a.handle}</div>)}
+            {/* HANDLE-CACHE-V1: map raw accountIds (not just resolved accs)
+                so unresolved accounts still get a readable name here. */}
+            {post.accountIds.map(id => {
+              const a = accounts.find(x => x.id === id);
+              const d = accountDisplay(id);
+              return <div key={id} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: 'var(--ink-600)' }}><PlatformIcon platform={d.platform} size={10} color={a?.color} />{d.handle}</div>;
+            })}
             <div style={{ fontSize: 10, color: 'var(--ink-400)' }}>· {new Date(post.scheduledAt).toLocaleDateString('en-GB', { timeZone: 'Europe/London' })} {new Date(post.scheduledAt).toLocaleTimeString('en-GB', { timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit' })}</div>
           </div>
           <div style={{ fontSize: 13, color: 'var(--ink-800)', lineHeight: 1.5, marginBottom: 6, whiteSpace: 'pre-wrap' }}>{post.caption.length > 240 ? post.caption.slice(0, 240) + '…' : post.caption}</div>
@@ -1323,9 +1358,7 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"..."},{"caption":"...
           {Object.keys(results).length > 0 && (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
               {Object.entries(results).map(([accountId, r]) => {
-                const a = accounts.find(x => x.id === accountId);
-                const handle = a?.handle || accountId;
-                const platform = a?.platform || '';
+                const { handle, platform } = accountDisplay(accountId);
                 const isOk = r.status === 'published';
                 const isFail = r.status === 'failed';
                 const chipBg = isOk ? '#dcfce7' : isFail ? '#fee2e2' : 'var(--paper)';
@@ -1752,8 +1785,9 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"..."},{"caption":"...
                   const primary = accs[0];
                   // Same fallback as PostPill — keep the row informative when
                   // the account can't be resolved (expired/disconnected).
-                  const rowPlatform = primary?.platform || platformFromAccountId(p.accountIds[0] || '');
-                  const rowHandle = primary?.handle || p.accountIds[0] || 'Unknown account';
+                  const rowFirst = p.accountIds[0] ? accountDisplay(p.accountIds[0]) : null;
+                  const rowPlatform = primary?.platform || rowFirst?.platform || '';
+                  const rowHandle = primary?.handle || rowFirst?.handle || 'Unknown account';
                   const rowExtra = primary ? accs.length - 1 : p.accountIds.length - 1;
                   const time = new Date(p.scheduledAt).toTimeString().slice(0, 5);
                   const statusColor = (p.status === 'scheduled' || p.status === 'publishing') ? 'var(--warn)' : (p.status === 'published' || p.status === 'partial') ? '#15803d' : p.status === 'failed' ? 'var(--alert)' : 'var(--ink-500)';

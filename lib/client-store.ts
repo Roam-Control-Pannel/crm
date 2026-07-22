@@ -11,6 +11,7 @@ export type CollectionKey =
   | 'social_posts'
   | 'briefs'
   | 'account_meta'
+  | 'account_handle_cache'
   | 'tasks'
   | 'hub_docs'
   | 'hub_chats';
@@ -23,6 +24,9 @@ const LEGACY_KEYS: Record<CollectionKey, string> = {
   social_posts: 'roam_social_posts',
   briefs: 'roam_briefs',
   account_meta: 'roam_account_meta',
+  // No pre-server-store legacy data for this one — key exists so the
+  // Record type stays total; migration simply finds nothing.
+  account_handle_cache: 'roam_account_handle_cache',
   tasks: 'roam_tasks',
   hub_docs: 'roam_docs',
   hub_chats: 'roam_chats',

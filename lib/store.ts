@@ -21,6 +21,7 @@ export const COLLECTION_KEYS = [
   'social_posts',
   'briefs',
   'account_meta',
+  'account_handle_cache',
   'tasks',
   'hub_docs',
   'hub_chats',
