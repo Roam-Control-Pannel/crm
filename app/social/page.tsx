@@ -2087,7 +2087,12 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"..."},{"caption":"...
                   </label>
                 </div>
                 {form.imageUrl && <div style={{ marginBottom: 8, position: 'relative' }}>
-                  <img src={form.imageUrl} style={{ width: '100%', height: 140, objectFit: 'cover', borderRadius: 'var(--r-md)', border: '1px solid var(--ink-100)', display: 'block' }} alt="" />
+                  {/* FULL-IMG-PREVIEW-V1 — show the whole image (no crop):
+                      height:auto keeps the aspect ratio at full width, the
+                      maxHeight cap stops portrait images swallowing the
+                      modal, and object-fit:contain letterboxes when capped
+                      instead of cropping. */}
+                  <img src={form.imageUrl} style={{ width: '100%', height: 'auto', maxHeight: 360, objectFit: 'contain', background: 'var(--paper)', borderRadius: 'var(--r-md)', border: '1px solid var(--ink-100)', display: 'block' }} alt="" />
                   <button onClick={() => setForm({ ...form, imageUrl: '', imageCredit: '', imageCreditUrl: '', imagePhotoUrl: '', imageUnsplashUrl: '', imageSocialHandles: {} })} style={{ position: 'absolute', top: 6, right: 6, width: 22, height: 22, borderRadius: '50%', background: 'rgba(0,0,0,0.5)', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white' }}><X size={11} /></button>
                   {/* Credit line per Unsplash attribution guidelines:
                       photographer name + Unsplash both link out, with UTMs
