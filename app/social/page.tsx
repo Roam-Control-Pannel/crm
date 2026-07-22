@@ -129,6 +129,19 @@ function PlatformIcon({ platform, size = 12, color = 'currentColor' }: { platfor
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
+// Account ids are stable and prefixed by provider ('li-personal:', 'li-company:',
+// 'meta-page:', 'meta-ig:'), so the platform can be recovered from the id alone.
+// This keeps posts visible on the calendar even when /api/accounts/status
+// returns nothing for that id — e.g. an expired Meta/LinkedIn token or a
+// disconnected account. Posts must never silently disappear from the calendar
+// just because a connection lapsed.
+function platformFromAccountId(id: string): string {
+  if (id.startsWith('li-')) return 'linkedin';
+  if (id.startsWith('meta-page:')) return 'facebook';
+  if (id.startsWith('meta-ig:')) return 'instagram';
+  return '';
+}
+
 // Format a Date's local Y-M-D and H:M so they round-trip through the composer
 // inputs without timezone drift. toISOString() returns UTC date components,
 // which silently shifted scheduledAt by ±24h on edit when the user's local
@@ -1152,7 +1165,11 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"..."},{"caption":"...
   // ============================================================================
   const filtered = posts.filter(p => {
     if (platFilter !== 'all') {
-      const has = p.accountIds.some(id => accounts.find(a => a.id === id)?.platform === platFilter);
+      // Fall back to the id-prefix platform so filtering keeps working when
+      // the account list is empty (expired token / disconnected channel).
+      const has = p.accountIds.some(id =>
+        (accounts.find(a => a.id === id)?.platform || platformFromAccountId(id)) === platFilter
+      );
       if (!has) return false;
     }
     if (acctFilter !== 'all' && !p.accountIds.includes(acctFilter)) return false;
@@ -1218,7 +1235,14 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"..."},{"caption":"...
   function PostPill({ post }: { post: SocialPost }) {
     const accs = post.accountIds.map(id => accounts.find(a => a.id === id)).filter(Boolean) as SocialAccount[];
     const primary = accs[0];
-    if (!primary) return null;
+    // No resolvable account (expired token / disconnected channel) — still
+    // render the pill from the raw account id, like PostRow does. Returning
+    // null here made every post vanish from the calendar whenever the
+    // Meta/LinkedIn connection lapsed, which read as "my posts are gone".
+    const primaryPlatform = primary?.platform || platformFromAccountId(post.accountIds[0] || '');
+    const primaryHandle = primary?.handle || post.accountIds[0] || 'Unknown account';
+    const extraCount = primary ? accs.length - 1 : post.accountIds.length - 1;
+    const unresolved = !primary;
     const canDrag = post.status === 'draft' || post.status === 'scheduled';
     // PUBLISH-UI-V1 / CAL-STATUS-COLOURS-V1: each state gets its own colour so
     // the calendar reads at a glance — grey = draft, amber = scheduled (queued
@@ -1239,15 +1263,15 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"..."},{"caption":"...
           e.dataTransfer.effectAllowed = 'move';
         } : undefined}
         onClick={e => { e.stopPropagation(); openComposer(post); }}
-        title={isScheduled ? 'Scheduled — drag to a different day to reschedule' : canDrag ? 'Draft — drag to a different day to reschedule' : isPublished ? 'Published — click to view' : isFailed ? 'Publish failed — click to retry' : undefined}
+        title={unresolved ? 'Account not connected — reconnect it in Channels' : isScheduled ? 'Scheduled — drag to a different day to reschedule' : canDrag ? 'Draft — drag to a different day to reschedule' : isPublished ? 'Published — click to view' : isFailed ? 'Publish failed — click to retry' : undefined}
         style={{
         background: bgColor, borderLeft: `3px solid ${borderColor}`,
         padding: '3px 6px', marginBottom: 2, borderRadius: 'var(--r-sm)',
         fontSize: 10, color: 'var(--ink-700)', display: 'flex', alignItems: 'center', gap: 4,
         cursor: canDrag ? 'grab' : 'pointer', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis',
       }}>
-        <PlatformIcon platform={primary.platform} size={9} />
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', flex: 1 }}>{primary.handle}{accs.length > 1 ? ` +${accs.length - 1}` : ''}</span>
+        <PlatformIcon platform={primaryPlatform} size={9} />
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', flex: 1 }}>{primaryHandle}{extraCount > 0 ? ` +${extraCount}` : ''}</span>
         {isPublished && <Check size={9} color="#15803d" />}
         {isFailed && <AlertTriangle size={9} color="var(--alert)" />}
         {isScheduled && <Clock size={9} color="var(--warn)" />}
@@ -1726,6 +1750,11 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"..."},{"caption":"...
                 ) : dayPosts.map(p => {
                   const accs = p.accountIds.map(id => accounts.find(a => a.id === id)).filter(Boolean) as SocialAccount[];
                   const primary = accs[0];
+                  // Same fallback as PostPill — keep the row informative when
+                  // the account can't be resolved (expired/disconnected).
+                  const rowPlatform = primary?.platform || platformFromAccountId(p.accountIds[0] || '');
+                  const rowHandle = primary?.handle || p.accountIds[0] || 'Unknown account';
+                  const rowExtra = primary ? accs.length - 1 : p.accountIds.length - 1;
                   const time = new Date(p.scheduledAt).toTimeString().slice(0, 5);
                   const statusColor = (p.status === 'scheduled' || p.status === 'publishing') ? 'var(--warn)' : (p.status === 'published' || p.status === 'partial') ? '#15803d' : p.status === 'failed' ? 'var(--alert)' : 'var(--ink-500)';
                   return (
@@ -1735,14 +1764,14 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"..."},{"caption":"...
                       onClick={() => { setDaySheet(null); openComposer(p); }}
                       className="soc-daysheet-row"
                     >
-                      {primary && (
-                        <div className="soc-daysheet-row-icon" style={{ background: primary.color + '22' }}>
-                          <PlatformIcon platform={primary.platform} size={14} color={primary.color} />
+                      {rowPlatform && (
+                        <div className="soc-daysheet-row-icon" style={{ background: primary ? primary.color + '22' : 'var(--paper)' }}>
+                          <PlatformIcon platform={rowPlatform} size={14} color={primary?.color || 'var(--ink-500)'} />
                         </div>
                       )}
                       <div className="soc-daysheet-row-body">
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3, flexWrap: 'wrap' }}>
-                          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink-900)' }}>{primary?.handle || 'Unknown'}{accs.length > 1 ? ` +${accs.length - 1}` : ''}</span>
+                          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink-900)' }}>{rowHandle}{rowExtra > 0 ? ` +${rowExtra}` : ''}</span>
                           <span style={{ fontSize: 11, color: 'var(--ink-400)' }}>{time}</span>
                           <span style={{ fontSize: 9, color: statusColor, textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 700, padding: '1px 6px', borderRadius: 'var(--r-pill)', background: 'var(--paper)' }}>{p.status}</span>
                         </div>
