@@ -199,6 +199,8 @@ export default function SocialPage() {
   const [showGen, setShowGen] = useState(false);
   // CRON-AUTOGEN-V1
   const [fillingCalendar, setFillingCalendar] = useState(false);
+  // FILL-CAL-AUTOLOOP-V1 — live progress label while the fill loop runs
+  const [fillStatus, setFillStatus] = useState<string | null>(null);
   const [genForm, setGenForm] = useState({
     briefId: '', accountIds: [] as string[],
     theme: '', goal: '',
@@ -1506,33 +1508,80 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"..."},{"caption":"...
               setHeaderMenuOpen(false);
               if (fillingCalendar) return;
               setFillingCalendar(true);
+              setFillStatus(null);
+              // FILL-CAL-AUTOLOOP-V1 — the generator caps each request at
+              // ~9s (Netlify kills synchronous functions at ~26s) and
+              // returns stoppedEarly + pendingCount when slots remain.
+              // Instead of asking the user to keep clicking, loop here
+              // until the calendar is full, refreshing between rounds so
+              // drafts appear as they're created.
+              let totalCreated = 0;
+              let totalSkipped = 0;
+              let pendingLeft = 0;
+              let loopError: string | null = null;
+              const MAX_ROUNDS = 20;   // hard cap: 20 rounds ≈ 80 drafts
+              const MAX_RETRIES = 2;   // per-round retries on gateway timeouts
               try {
-                const res = await fetch('/api/social/auto-generate/run-now', { method: 'POST' });
-                // Read as text first: a gateway timeout returns an HTML page,
-                // and res.json() would throw "Unexpected token '<'".
-                const raw = await res.text();
-                let data: any = null;
-                try { data = JSON.parse(raw); } catch { /* non-JSON (e.g. timeout HTML) */ }
-                if (data?.ok) {
-                  const more = data.stoppedEarly && data.pendingCount
-                    ? ` ${data.pendingCount} slot${data.pendingCount === 1 ? '' : 's'} left — click Fill calendar again to continue.`
-                    : '';
-                  alert(`Created ${data.createdCount} draft${data.createdCount === 1 ? '' : 's'} (skipped ${data.skippedCount}).${more}`);
-                } else {
-                  alert('Fill calendar: ' + (data?.error
-                    || (res.status === 502 || res.status === 504
-                      ? 'the generator ran out of time — please click Fill calendar again to continue.'
-                      : `unexpected response (HTTP ${res.status}).`)));
+                for (let round = 0; round < MAX_ROUNDS; round++) {
+                  let data: any = null;
+                  let status = 0;
+                  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+                    const res = await fetch('/api/social/auto-generate/run-now', { method: 'POST' });
+                    status = res.status;
+                    // Read as text first: a gateway timeout returns an HTML
+                    // page, and res.json() would throw "Unexpected token '<'".
+                    const raw = await res.text();
+                    try { data = JSON.parse(raw); } catch { data = null; }
+                    // Gateway timeouts are transient — the run may still have
+                    // saved partial progress, so just try the next round.
+                    if (data || (status !== 502 && status !== 504)) break;
+                  }
+                  if (!data?.ok) {
+                    loopError = data?.error
+                      || (status === 502 || status === 504
+                        ? 'the generator ran out of time.'
+                        : `unexpected response (HTTP ${status}).`);
+                    break;
+                  }
+                  totalCreated += data.createdCount || 0;
+                  // Slots skipped as duplicates are recounted every round —
+                  // keep the latest figure rather than summing.
+                  totalSkipped = data.skippedCount || 0;
+                  pendingLeft = data.pendingCount || 0;
+                  // Show progress as each batch lands.
+                  const fresh0 = await loadWithMigration<SocialPost[]>('social_posts');
+                  if (fresh0) setPosts(fresh0);
+                  if (!data.stoppedEarly || !pendingLeft) { pendingLeft = 0; break; }
+                  // A round that created nothing while slots remain means
+                  // generation is failing (e.g. AI rate-limited) — stop
+                  // rather than loop forever on the same failing slots.
+                  if (!data.createdCount) {
+                    loopError = 'generation stalled — try again in a few minutes.';
+                    break;
+                  }
+                  setFillStatus(`Filling… ${pendingLeft} left`);
                 }
-                // Refresh either way — a partial/stopped-early run still saved drafts.
+                const summary = `Created ${totalCreated} draft${totalCreated === 1 ? '' : 's'}`
+                  + ` (skipped ${totalSkipped} already-filled slot${totalSkipped === 1 ? '' : 's'}).`;
+                if (loopError) {
+                  alert(`${summary}\n\n${pendingLeft || 'Some'} slot${pendingLeft === 1 ? '' : 's'} could not be filled: ${loopError}`);
+                } else if (pendingLeft > 0) {
+                  // Hit the round cap with slots remaining — rare, but don't
+                  // claim the calendar is full when it isn't.
+                  alert(`${summary} ${pendingLeft} slot${pendingLeft === 1 ? '' : 's'} left — click Fill calendar again to continue.`);
+                } else {
+                  alert(`${summary} Calendar is full.`);
+                }
+                // Refresh either way — a partial run still saved drafts.
                 const fresh = await loadWithMigration<SocialPost[]>('social_posts');
                 if (fresh) setPosts(fresh);
               } catch (err: any) {
                 alert('Fill calendar failed: ' + (err?.message || err));
               } finally {
                 setFillingCalendar(false);
+                setFillStatus(null);
               }
-            }}>{fillingCalendar ? 'Filling...' : 'Fill calendar'}</button>
+            }}>{fillingCalendar ? (fillStatus || 'Filling...') : 'Fill calendar'}</button>
             {/* CRON-AUTOGEN-V1 Fill calendar button */}
             <button style={btnG} onClick={() => { setShowGen(true); setHeaderMenuOpen(false); }}><Sparkles size={13} /> Generate</button>
           </div>
