@@ -402,7 +402,7 @@ export default function SequencesPage() {
             </div>
             <div style={{ padding: '4px 0' }}>
               {[
-                { label: 'Sending account', value: 'hello@roam-local.com' },
+                { label: 'Sending account', value: 'hello@roam-everywhere.com' },
                 { label: 'Schedule',         value: 'Daily 08:00 UTC' },
                 { label: 'Daily send cap',   value: cronStatus ? `${cronStatus.dailyCap} emails` : '50 emails' },
                 { label: 'Follow-up delay',  value: '2 days' },

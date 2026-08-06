@@ -51,8 +51,8 @@ export interface AppSettings {
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   sender: {
     name: 'Roam Local Team',
-    email: 'hello@roam-local.com',
-    replyTo: 'replies@roam-local.com',
+    email: 'hello@roam-everywhere.com',
+    replyTo: 'replies@roam-everywhere.com',
   },
   cadence: {
     followUpDays: 2,
