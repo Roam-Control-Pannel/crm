@@ -382,7 +382,7 @@ function BrevoCard({ ok }: { ok: boolean | null }) {
       <ChannelHeader
         glyph={<Mail size={20} color="#2f7a4f" />}
         title="Brevo Email"
-        subtitle="Transactional email · hello@roam-everywhere.com"
+        subtitle="Transactional email · hello@roam-local.com"
         status={status}
       />
     </div>

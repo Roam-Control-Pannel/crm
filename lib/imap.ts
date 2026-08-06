@@ -20,6 +20,10 @@ import { simpleParser, type ParsedMail, type AddressObject } from 'mailparser';
 const IMAP_HOST = 'imap.gmail.com';
 const IMAP_PORT = 993;
 const REPLY_ALIASES = [
+  'replies@roam-local.com',
+  'reply@roam-local.com',
+  // Legacy roam-everywhere.com aliases: emails already sent carry the old
+  // reply-to address, so keep matching them until those threads go quiet.
   'replies@roam-everywhere.com',
   'reply@roam-everywhere.com',
 ];

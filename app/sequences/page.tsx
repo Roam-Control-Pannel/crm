@@ -402,13 +402,13 @@ export default function SequencesPage() {
             </div>
             <div style={{ padding: '4px 0' }}>
               {[
-                { label: 'Sending account', value: 'hello@roam-everywhere.com' },
+                { label: 'Sending account', value: 'hello@roam-local.com' },
                 { label: 'Schedule',         value: 'Daily 08:00 UTC' },
                 { label: 'Daily send cap',   value: cronStatus ? `${cronStatus.dailyCap} emails` : '50 emails' },
                 { label: 'Follow-up delay',  value: '2 days' },
                 { label: 'Final nudge',      value: 'Day 7' },
                 { label: 'Cold cutoff',      value: 'Day 14' },
-                { label: 'Links to',         value: 'roam-local.co.uk' },
+                { label: 'Links to',         value: 'www.roam-local.com' },
               ].map(s => (
                 <div key={s.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 20px', borderBottom: '1px solid var(--ink-100)', flexWrap: 'wrap', gap: 4 }}>
                   <span style={{ fontSize: 12, color: 'var(--ink-500)', fontWeight: 500 }}>{s.label}</span>

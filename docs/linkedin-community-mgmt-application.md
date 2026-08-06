@@ -12,7 +12,7 @@ Once approved (typically 1–2 weeks), the Channels page will automatically dete
 
 **Roam Local** is a hyper-local discovery and travel app helping people find and connect with independent businesses, venues, and experiences in their area. We operate primarily in the UK with active communities in the North East of England, Northern Ireland, and expanding nationally.
 
-Website: https://roam-local.co.uk
+Website: https://www.roam-local.com
 
 ### What is your use case for the Community Management API?
 
@@ -59,7 +59,7 @@ Only users with admin role on our company pages can post.
 
 ### Compliance
 
-- We have a privacy policy: https://roam-local.co.uk/privacy
+- We have a privacy policy: https://www.roam-local.com/privacy
 - We comply with GDPR (UK-based company)
 - Tokens are scoped only to the granted permissions
 - No client-side exposure of credentials

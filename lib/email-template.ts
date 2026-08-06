@@ -41,7 +41,7 @@ export interface TemplateVars {
 export const TEMPLATE_TOKENS = ['[Business]', '[Town]', '[known_for]'] as const;
 
 /** Where every CTA button points. Mirrors the "Links to" setting on the page. */
-export const SEQUENCE_LINK = 'https://roam-local.co.uk';
+export const SEQUENCE_LINK = 'https://www.roam-local.com';
 
 /**
  * Defaults mirror the previously-hardcoded copy so an empty blob preserves
@@ -84,15 +84,15 @@ const SIGNATURE = `
 <table style="margin-top:24px;padding-top:16px;border-top:1px solid #e4d8dc;font-family:Arial,sans-serif">
   <tr>
     <td style="padding-right:16px;vertical-align:top">
-      <img src="https://roam-local.co.uk/icon.png" width="40" height="40" style="border-radius:8px" alt="Roam"/>
+      <img src="https://www.roam-local.com/icon.png" width="40" height="40" style="border-radius:8px" alt="Roam"/>
     </td>
     <td style="vertical-align:top">
       <div style="font-weight:700;font-size:13px;color:#1a0d12">Roam Local Team</div>
       <div style="font-size:12px;color:#6b4a55;margin-top:2px">Discover the best of your town</div>
       <div style="margin-top:6px">
-        <a href="https://roam-local.co.uk" style="font-size:11px;color:#8B1A3A;text-decoration:none;font-family:Arial,sans-serif">roam-local.co.uk</a>
+        <a href="https://www.roam-local.com" style="font-size:11px;color:#8B1A3A;text-decoration:none;font-family:Arial,sans-serif">www.roam-local.com</a>
         <span style="color:#e4d8dc;margin:0 6px">|</span>
-        <a href="https://roam-local.co.uk" style="font-size:11px;color:#8B1A3A;text-decoration:none;font-family:Arial,sans-serif">List your business free</a>
+        <a href="https://www.roam-local.com" style="font-size:11px;color:#8B1A3A;text-decoration:none;font-family:Arial,sans-serif">List your business free</a>
       </div>
     </td>
   </tr>

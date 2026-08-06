@@ -10,7 +10,7 @@ const BREVO_BASE = 'https://api.brevo.com/v3';
  * for the ~95% case where contacts reply from the same address we sent to.
  * Unmatched senders queue for manual review (see /api/brevo/inbound).
  */
-export const REPLY_TO_ADDRESS = 'replies@roam-everywhere.com';
+export const REPLY_TO_ADDRESS = 'replies@roam-local.com';
 
 // Brevo's API can hang on slow incidents; cap each request so cron jobs and
 // UI calls don't sit on the Netlify function timeout (60s) waiting.
@@ -115,7 +115,7 @@ export async function sendTransactionalEmail(data: {
     body: JSON.stringify({
       sender: {
         name: data.senderName || 'Roam Local Team',
-        email: data.senderEmail || 'hello@roam-everywhere.com',
+        email: data.senderEmail || 'hello@roam-local.com',
       },
       to: data.to,
       subject: data.subject,
