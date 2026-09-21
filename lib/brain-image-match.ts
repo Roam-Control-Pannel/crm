@@ -14,6 +14,11 @@
  */
 
 import type { Brief } from '@/lib/briefs';
+import {
+  type ImageUsageMap,
+  isInCooldown,
+  byLeastRecentlyUsed,
+} from '@/lib/image-usage';
 
 /** Minimum shape an item needs to be matchable. Callers pass richer objects;
  *  the generic in pickBrainImageForContext preserves their extra fields. */
@@ -64,16 +69,42 @@ export function briefKeywords(brief?: Brief): string[] {
  * - An item is eligible if it has ANY relevance (brief OR topic), so we still
  *   match when a brief's vocabulary is sparse.
  * - Folder-name overlap is weighted (FOLDER_WEIGHT) on both axes.
- * - Within the strongest (brief, topic) score tier we pick at random for
- *   variety, preferring images not yet used this run/batch.
  * - `avoidReuse`: when set, return null instead of repeating an already-used
  *   image once the unused pool is exhausted (good for a small, user-visible
  *   batch). Default false keeps Fill calendar's "always fill the slot" behaviour.
+ *
+ * IMAGE-COOLDOWN-V1 — selection within the top-scoring tier
+ *
+ * This used to be `topTier[Math.floor(Math.random() * topTier.length)]`:
+ * uniform random, with no memory beyond an `excludeUrls` Set that (in Fill
+ * calendar's case) was always empty. Two changes:
+ *
+ *   1. Candidates used within `cooldownDays` of THIS slot are filtered out
+ *      before scoring tiers are considered, using history derived from the
+ *      posts themselves (lib/image-usage.ts).
+ *   2. Ties break to least-recently-used, not random. Random re-picks a
+ *      just-used photo roughly as often as a fresh one; LRU walks the
+ *      library. This is what actually produces variety from a finite set.
+ *
+ * If the cooldown empties the pool the filter is relaxed rather than failing
+ * the slot — but the fallback is still ordered least-recently-used, so the
+ * oldest photo comes back before the newest. `avoidReuse` callers get null
+ * instead, unchanged.
  */
 export function pickBrainImageForContext<T extends ImageCandidate>(
   items: T[],
   topicText: string,
-  opts?: { brief?: Brief; extraTopic?: string; excludeUrls?: Set<string>; avoidReuse?: boolean }
+  opts?: {
+    brief?: Brief;
+    extraTopic?: string;
+    excludeUrls?: Set<string>;
+    avoidReuse?: boolean;
+    /** Usage history derived from existing posts. */
+    usage?: ImageUsageMap;
+    /** Epoch ms of the slot being filled — cooldown is measured against this. */
+    slotTime?: number;
+    cooldownDays?: number;
+  }
 ): T | null {
   if (items.length === 0) return null;
 
@@ -98,10 +129,39 @@ export function pickBrainImageForContext<T extends ImageCandidate>(
   if (matches.length === 0) return null;
 
   const excludeUrls = opts?.excludeUrls;
+  // Already placed earlier in THIS run — always a hard exclusion.
   const unused = matches.filter(s => !excludeUrls?.has(s.item.url));
   if (unused.length === 0 && opts?.avoidReuse) return null;
-  const eligible = unused.length > 0 ? unused : matches;
+  let eligible = unused.length > 0 ? unused : matches;
+
+  // IMAGE-COOLDOWN-V1: drop anything used too recently relative to this slot.
+  const usage = opts?.usage;
+  const cooldownDays = opts?.cooldownDays ?? 0;
+  if (usage && cooldownDays > 0) {
+    const slotTime = opts?.slotTime ?? Date.now();
+    const fresh = eligible.filter(s => !isInCooldown(s.item.url, usage, slotTime, cooldownDays));
+    if (fresh.length > 0) {
+      eligible = fresh;
+    } else if (opts?.avoidReuse) {
+      return null;
+    }
+    // else: every candidate is in cooldown — keep `eligible` as-is and let the
+    // least-recently-used ordering below pick the stalest one. Failing the
+    // slot outright would leave a hole in the calendar for no benefit.
+  }
+
   const top = eligible[0];
-  const topTier = eligible.filter(s => s.briefScore === top.briefScore && s.topicScore === top.topicScore);
-  return topTier[Math.floor(Math.random() * topTier.length)].item;
+  const topTier = eligible.filter(
+    s => s.briefScore === top.briefScore && s.topicScore === top.topicScore
+  );
+  if (topTier.length === 1 || !usage) {
+    // No history to reason about — keep the original random tiebreak so
+    // behaviour is unchanged for callers that don't pass usage.
+    return topTier[Math.floor(Math.random() * topTier.length)].item;
+  }
+  // Least-recently-used within the tier.
+  const ordered = [...topTier].sort((a, b) =>
+    byLeastRecentlyUsed(a.item.url, b.item.url, usage)
+  );
+  return ordered[0].item;
 }

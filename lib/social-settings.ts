@@ -1,4 +1,5 @@
 import { getStore } from '@netlify/blobs';
+import { DEFAULT_IMAGE_COOLDOWN_DAYS } from './image-usage';
 import { readStored } from './store-read';
 import { SEED_THEMES, type Theme } from './social-themes';
 import {
@@ -143,6 +144,8 @@ export async function getEffectiveSettings(): Promise<EffectiveSocialSettings> {
     themes: mergeThemes(overrides),
     lookaheadDays: blob?.postingTimes?.lookaheadDays || DEFAULT_LOOKAHEAD_DAYS,
     briefWeights,
+    imageCooldownDays:
+      blob?.postingTimes?.imageCooldownDays ?? DEFAULT_IMAGE_COOLDOWN_DAYS,
   };
 }
 

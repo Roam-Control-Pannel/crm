@@ -32,6 +32,13 @@ import { getEffectiveSettings } from '@/lib/social-settings';
 import { DEFAULT_LOOKAHEAD_DAYS } from '@/lib/social-settings-types';
 import { addNotification } from '@/lib/notifications';
 import { pickBrainImageForContext } from '@/lib/brain-image-match';
+import {
+  buildImageUsage,
+  isInCooldown,
+  byLeastRecentlyUsed,
+  DEFAULT_IMAGE_COOLDOWN_DAYS,
+  type ImageUsageMap,
+} from '@/lib/image-usage';
 
 // Mirrors the SocialPost interface defined inline in app/social/page.tsx.
 // Kept in sync by convention — if that interface changes, this one must too.
@@ -39,6 +46,12 @@ import { pickBrainImageForContext } from '@/lib/brain-image-match';
 interface SocialPostDraft {
   id: string;
   briefId?: string;
+  /** THEME-ROTATION-V1: which theme produced this post. Recorded so theme
+   *  selection can rotate least-recently-used instead of picking at random
+   *  with no memory — the same fix as image cooldown, applied to angles.
+   *  Optional: posts created before this landed simply don't count towards
+   *  rotation, which self-corrects within one fill. */
+  themeId?: string;
   accountIds: string[];
   caption: string;
   imageUrl?: string;
@@ -157,10 +170,55 @@ export function pickWeightedBrief(
   return briefIds[briefIds.length - 1];
 }
 
-export function pickTheme(themes: Theme[], briefId: string): Theme | null {
+/**
+ * THEME-ROTATION-V1
+ *
+ * Was `eligible[Math.floor(Math.random() * eligible.length)]` — uniform random
+ * WITH replacement and no memory. Across a 14-day fill (~100 posts) drawn from
+ * 26 seed themes that guarantees heavy repetition: ~4 uses per theme on
+ * average, and the unlucky ones land 8+ times. It is the copy-side twin of the
+ * image bug.
+ *
+ * Now rotates least-recently-used against `themeUsage` (derived from existing
+ * posts, same approach as image cooldown). Themes never used sort first, so a
+ * newly-enabled theme gets picked up immediately. Ties break randomly so two
+ * accounts filling the same slot don't lock to the same angle.
+ */
+export function pickTheme(
+  themes: Theme[],
+  briefId: string,
+  themeUsage?: Map<string, number>
+): Theme | null {
   const eligible = themes.filter(t => t.enabled && t.briefIds.includes(briefId));
   if (eligible.length === 0) return null;
-  return eligible[Math.floor(Math.random() * eligible.length)];
+  if (!themeUsage) return eligible[Math.floor(Math.random() * eligible.length)];
+
+  // Least-recently-used first; never-used (undefined) counts as oldest.
+  let best: Theme[] = [];
+  let bestAt = Infinity;
+  for (const t of eligible) {
+    const at = themeUsage.get(t.id) ?? -1;
+    if (at < bestAt) { bestAt = at; best = [t]; }
+    else if (at === bestAt) { best.push(t); }
+  }
+  return best[Math.floor(Math.random() * best.length)];
+}
+
+/**
+ * THEME-ROTATION-V1: most recent use (epoch ms) per theme id, from posts.
+ */
+export function buildThemeUsage(
+  posts: Array<{ themeId?: string; scheduledAt?: string }>
+): Map<string, number> {
+  const usage = new Map<string, number>();
+  for (const p of posts) {
+    if (!p.themeId) continue;
+    const at = p.scheduledAt ? new Date(p.scheduledAt).getTime() : NaN;
+    const when = Number.isFinite(at) ? at : 0;
+    const prev = usage.get(p.themeId);
+    if (prev === undefined || when > prev) usage.set(p.themeId, when);
+  }
+  return usage;
 }
 
 // ----------------------------------------------------------------------------
@@ -183,9 +241,14 @@ export function pickBrainImage(
   brainItems: BrainItemLite[],
   theme: Theme,
   excludeUrls?: Set<string>,
-  brief?: Brief
+  brief?: Brief,
+  usageOpts?: { usage?: ImageUsageMap; slotTime?: number; cooldownDays?: number }
 ): BrainItemLite | null {
-  return pickBrainImageForContext(brainItems, theme.title + ' ' + theme.prompt, { brief, excludeUrls });
+  return pickBrainImageForContext(brainItems, theme.title + ' ' + theme.prompt, {
+    brief,
+    excludeUrls,
+    ...usageOpts,
+  });
 }
 
 /**
@@ -203,7 +266,8 @@ export async function pickUnsplashImage(
   origin: string,
   query: string,
   internalSecret: string,
-  excludeUrls?: Set<string>
+  excludeUrls?: Set<string>,
+  usageOpts?: { usage?: ImageUsageMap; slotTime?: number; cooldownDays?: number }
 ): Promise<{
   url: string;
   credit: string;
@@ -227,30 +291,48 @@ export async function pickUnsplashImage(
     const list: any[] = data?.images || data?.results || [];
     const usable = list.filter(img => img?.url);
     if (usable.length === 0) return null;
-    const unused = usable.filter(img => !excludeUrls?.has(img.url));
-    const pool = unused.length > 0 ? unused : usable;
-    const choice = pool[Math.floor(Math.random() * pool.length)];
 
-    // Fire the Unsplash download-tracking ping for the chosen photo.
-    // Required by their guidelines whenever a photo is "used" — which
-    // includes automated selection for a draft. Fire-and-forget; ping
-    // failures shouldn't block draft creation.
-    if (choice.downloadLocation) {
-      fetch(`${origin}/api/images/track-download`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-internal-call': internalSecret },
-        body: JSON.stringify({ downloadLocation: choice.downloadLocation }),
-      }).catch(err => console.warn('[social-cron] Unsplash download ping failed:', err));
-    }
-
-    return {
-      url: choice.url,
-      credit: choice.credit || choice.attribution || '',
-      creditUrl: choice.creditUrl,
-      photoUrl: choice.photoUrl,
-      unsplashUrl: choice.unsplashUrl,
-      socialHandles: choice.socialHandles,
+    // Shared exit: fire the Unsplash download-tracking ping (required by their
+    // guidelines whenever a photo is "used", which includes automated
+    // selection for a draft — fire-and-forget, a ping failure must not block
+    // draft creation) and shape the attribution payload. Declared once so the
+    // cooldown path below and the normal path cannot drift apart.
+    const finalise = (choice: any) => {
+      if (choice.downloadLocation) {
+        fetch(`${origin}/api/images/track-download`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-internal-call': internalSecret },
+          body: JSON.stringify({ downloadLocation: choice.downloadLocation }),
+        }).catch(err => console.warn('[social-cron] Unsplash download ping failed:', err));
+      }
+      return {
+        url: choice.url as string,
+        credit: (choice.credit || choice.attribution || '') as string,
+        creditUrl: choice.creditUrl as string | undefined,
+        photoUrl: choice.photoUrl as string | undefined,
+        unsplashUrl: choice.unsplashUrl as string | undefined,
+        socialHandles: choice.socialHandles,
+      };
     };
+    const unused = usable.filter(img => !excludeUrls?.has(img.url));
+    let pool = unused.length > 0 ? unused : usable;
+    // IMAGE-COOLDOWN-V1: apply the same recency rule to Unsplash. Their CDN
+    // URLs are stable, so the usage map derived from posts covers them too.
+    if (usageOpts?.usage && (usageOpts.cooldownDays ?? 0) > 0) {
+      const slotTime = usageOpts.slotTime ?? Date.now();
+      const fresh = pool.filter(
+        img => !isInCooldown(img.url, usageOpts.usage!, slotTime, usageOpts.cooldownDays!)
+      );
+      if (fresh.length > 0) {
+        pool = fresh;
+      } else {
+        // All in cooldown — take the stalest rather than a random repeat.
+        pool = [...pool].sort((a, b) => byLeastRecentlyUsed(a.url, b.url, usageOpts.usage!));
+        return finalise(pool[0]);
+      }
+    }
+    const choice = pool[Math.floor(Math.random() * pool.length)];
+    return finalise(choice);
   } catch (err) {
     console.error('[social-cron] Unsplash fetch failed:', err);
     return null;
@@ -452,6 +534,18 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
     const postsRes = await fetchJsonInternal(input.origin, '/api/store/social_posts', input.internalSecret);
     const existingPosts: SocialPostDraft[] = postsRes?.data || [];
 
+    // IMAGE-COOLDOWN-V1 / THEME-ROTATION-V1
+    // Derive what's been used, and when, from the calendar itself. This is
+    // the fix for the original complaint: the old per-run `usedImageUrls` Set
+    // started empty on every invocation, and a full 14-day fill takes ~21 of
+    // them (TIME_BUDGET_MS caps each at roughly one batch), so it never
+    // excluded anything. Because this route re-reads social_posts at the top
+    // of every invocation and saves its output at the end, deriving from
+    // posts gives run N+1 full sight of run N — and of every previous fill.
+    const imageUsage = buildImageUsage(existingPosts);
+    const themeUsage = buildThemeUsage(existingPosts);
+    const cooldownDays = settings.imageCooldownDays ?? DEFAULT_IMAGE_COOLDOWN_DAYS;
+
     // 5. Brain items (optional). The /api/brain/items payload is raw stored
     // items (blobId + mime + tags, with NO url field), so the old
     // `.filter(b => b.url)` dropped every item and Brain images were never
@@ -555,7 +649,7 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
         // the map defaults to weight 1 (equal).
         let slotBriefId = pickWeightedBrief(activeBriefIds, settings.briefWeights);
         let slotBrief = briefs.find(b => b.id === slotBriefId);
-        let theme: Theme | null = slotBrief ? pickTheme(settings.themes, slotBriefId) : null;
+        let theme: Theme | null = slotBrief ? pickTheme(settings.themes, slotBriefId, themeUsage) : null;
 
         // If the picked brief has no enabled themes, try the others in
         // the account's list before giving up. Avoids the whole account
@@ -564,7 +658,7 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
           for (const altBriefId of activeBriefIds) {
             if (altBriefId === slotBriefId) continue;
             const altBrief = briefs.find(b => b.id === altBriefId);
-            const altTheme = altBrief ? pickTheme(settings.themes, altBriefId) : null;
+            const altTheme = altBrief ? pickTheme(settings.themes, altBriefId, themeUsage) : null;
             if (altTheme) {
               slotBriefId = altBriefId;
               slotBrief = altBrief;
@@ -590,6 +684,12 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
           contentBriefOverride: overrides.contentBrief || meta!.contentBriefOverride,
           active: meta!.active,
         };
+
+        // THEME-ROTATION-V1: claim the theme for this slot straight away, so
+        // the next slot in this same run rotates past it. Without this the
+        // whole run would see identical usage data and pick the same theme
+        // every time — the in-run twin of the cross-run amnesia.
+        themeUsage.set(theme.id, new Date(iso).getTime());
 
         specs.push({ account, iso, slotBrief, theme, slotBriefId, metaForCaption, acctResult });
       }
@@ -624,8 +724,10 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
       const built = await Promise.all(batch.map(async (spec) => {
         try {
           // IMAGE-FIRST: choose the photo BEFORE writing any copy. Brain
-          // first (brief-led match), then Unsplash. usedImageUrls steers both
-          // pickers away from photos already placed in this run.
+          // first (brief-led match), then Unsplash. Two layers keep photos
+          // from repeating: `usedImageUrls` hard-excludes anything placed
+          // earlier in THIS run, and `imageUsage` (derived from the calendar)
+          // applies the cooldown window across runs and previous fills.
           let imageUrl: string | undefined;
           let imageCredit: string | undefined;
           let imageCreditUrl: string | undefined;
@@ -636,15 +738,38 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
           // the chosen photo. Only set for Brain images (rich description +
           // tags); the Unsplash fallback keeps theme-based copy.
           let imageForCaption: { description?: string; tags?: string[]; location?: string } | undefined;
-          const brain = pickBrainImage(brainItems, spec.theme, usedImageUrls, spec.slotBrief);
+          const slotTime = new Date(spec.iso).getTime();
+          const brain = pickBrainImage(
+            brainItems, spec.theme, usedImageUrls, spec.slotBrief,
+            { usage: imageUsage, slotTime, cooldownDays }
+          );
           if (brain) {
             imageUrl = brain.url;
-            imageCredit = brain.credit;
+            // IMAGE-CREDIT-V1: a Brain photo is OUR asset — it has no
+            // photographer to credit. `credit` previously carried the item's
+            // AI-generated description, which the composer rendered as
+            // "Photo by Marketing advertisement for Roam app showing...".
+            // The description is still passed to the copywriter below, where
+            // it belongs; it just isn't an attribution. (Published captions
+            // were never affected: buildUnsplashCredit short-circuits without
+            // an imageCreditUrl, which Brain images never set.)
+            imageCredit = undefined;
             imageForCaption = { description: brain.credit, tags: brain.tags, location: brain.folder };
+            // IMAGE-COOLDOWN-V1: reserve it NOW, inside the concurrent map.
+            // The old code only did this after Promise.all resolved, so all
+            // CONCURRENCY picks in a batch read the same snapshot and could
+            // choose the same photo. Reserving here closes that race — Set
+            // writes are synchronous and JS is single-threaded, so there is
+            // no interleaving between the pick above and this line.
+            usedImageUrls.add(brain.url);
           } else {
             const queryWords = spec.theme.title.split(' ').slice(0, 4).join(' ');
-            const unsplash = await pickUnsplashImage(input.origin, queryWords, input.internalSecret, usedImageUrls);
+            const unsplash = await pickUnsplashImage(
+              input.origin, queryWords, input.internalSecret, usedImageUrls,
+              { usage: imageUsage, slotTime, cooldownDays }
+            );
             if (unsplash) {
+              usedImageUrls.add(unsplash.url);
               imageUrl = unsplash.url;
               imageCredit = unsplash.credit;
               imageCreditUrl = unsplash.creditUrl;
@@ -671,6 +796,7 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
           const post: SocialPostDraft = {
             id: 'p' + Date.now().toString(36) + (postSeq++).toString(36) + Math.random().toString(36).slice(2, 6),
             briefId: spec.slotBriefId,  // MULTI-BRIEF-V1: the brief picked for THIS post
+            themeId: spec.theme.id,     // THEME-ROTATION-V1: feeds future rotation
             accountIds: [spec.account.id],
             caption,
             imageUrl,
@@ -692,6 +818,11 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
 
       for (const b of built) {
         if (!b) { result.errorCount += 1; continue; }
+        // Images are reserved at pick time now (see above), so this is
+        // belt-and-braces — Set.add is idempotent. Note the deliberate
+        // asymmetry: a slot whose caption failed keeps its image reserved for
+        // the rest of this run. Wasting one photo is strictly better than
+        // handing it to the next slot and printing a duplicate.
         if (b.imageUrl) usedImageUrls.add(b.imageUrl);
         newPosts.push(b.post);
         b.spec.acctResult.created += 1;

@@ -37,6 +37,17 @@ export interface PostingTimes {
   // CRON-AUTOGEN-V1: how many days ahead the auto-generate cron fills.
   // Optional — falls back to DEFAULT_LOOKAHEAD_DAYS when undefined.
   lookaheadDays?: number;
+  /**
+   * IMAGE-COOLDOWN-V1: days an image must sit out before it can be chosen
+   * again. Optional — falls back to DEFAULT_IMAGE_COOLDOWN_DAYS.
+   *
+   * There is a ceiling worth knowing about: the window can only be honoured
+   * while (posts per day x cooldown days) stays under the size of the image
+   * library. At ~7 posts/day against 324 Brain images that ceiling is about
+   * 44 days. Set it higher and the least-recently-used fallback simply runs
+   * all the time, which is the same behaviour with extra steps.
+   */
+  imageCooldownDays?: number;
 }
 
 // ============================================================
@@ -100,6 +111,8 @@ export interface EffectiveSocialSettings {
   lookaheadDays: number;
   // MULTI-BRIEF-V1: always defined (empty map if not configured)
   briefWeights: BriefWeights;
+  // IMAGE-COOLDOWN-V1: always defined (falls back to the default)
+  imageCooldownDays: number;
 }
 
 // ============================================================

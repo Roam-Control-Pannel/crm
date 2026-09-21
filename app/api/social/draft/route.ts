@@ -4,6 +4,7 @@ import { generateCaption, pickBrainImage, pickUnsplashImage } from '@/lib/social
 import { getEffectiveSettings } from '@/lib/social-settings';
 import { DEFAULT_BRIEFS, type Brief } from '@/lib/briefs';
 import { getCollection, saveCollection, DEFAULT_USER_ID } from '@/lib/store';
+import { buildImageUsage, DEFAULT_IMAGE_COOLDOWN_DAYS } from '@/lib/image-usage';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -132,6 +133,22 @@ export async function POST(req: NextRequest) {
     // description + tags). Unsplash keeps theme-based copy.
     let imageForCaption: { description?: string; tags?: string[]; location?: string } | undefined;
 
+    // IMAGE-COOLDOWN-V1: this route writes into the same calendar as Fill
+    // calendar (it backs Roam-io's create_post_draft), so it has to respect
+    // the same history — it previously passed no exclusions at all and could
+    // hand out a photo that went live yesterday.
+    const existingForUsage =
+      (await getCollection<Array<{ imageUrl?: string; scheduledAt?: string }>>(
+        DEFAULT_USER_ID, 'social_posts'
+      )) || [];
+    const draftUsage = buildImageUsage(existingForUsage);
+    const draftSlotTime = scheduledAt ? new Date(scheduledAt).getTime() : Date.now();
+    const draftUsageOpts = {
+      usage: draftUsage,
+      slotTime: Number.isFinite(draftSlotTime) ? draftSlotTime : Date.now(),
+      cooldownDays: DEFAULT_IMAGE_COOLDOWN_DAYS,
+    };
+
     if (withImage === 'brain') {
       // Brain images live in the 'roam-brain' Blob store, separate from
       // the per-user collection — so we hit getStore() directly here
@@ -156,10 +173,12 @@ export async function POST(req: NextRequest) {
             tags: i.tags,
             folder: i.folderId ? folderNameById.get(i.folderId) : undefined,
           }));
-        const picked = pickBrainImage(liteItems, theme, undefined, brief);
+        const picked = pickBrainImage(liteItems, theme, undefined, brief, draftUsageOpts);
         if (picked) {
           imageUrl = picked.url;
-          imageCredit = picked.credit;
+          // IMAGE-CREDIT-V1: a Brain photo is our own asset — no attribution.
+          // The description still reaches the copywriter via imageForCaption.
+          imageCredit = undefined;
           imageForCaption = { description: picked.credit, tags: picked.tags, location: picked.folder };
         }
       } catch (err) {
@@ -167,7 +186,7 @@ export async function POST(req: NextRequest) {
       }
     } else if (withImage === 'unsplash') {
       const query = `${theme.title} ${brief.name}`.slice(0, 80);
-      const picked = await pickUnsplashImage(origin, query, secret);
+      const picked = await pickUnsplashImage(origin, query, secret, undefined, draftUsageOpts);
       if (picked) {
         imageUrl = picked.url;
         imageCredit = picked.credit;

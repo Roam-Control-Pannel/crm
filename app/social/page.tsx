@@ -5,6 +5,7 @@ import { Brief, fetchBriefs } from '@/lib/briefs';
 import { GOAL_OPTIONS, getGoalLabel } from '@/lib/goals';
 import { SocialAccount, fetchRealAccounts, combineAccounts, fetchAccountMeta, AccountHandleCache, updateAccountHandleCache } from '@/lib/social-accounts';
 import { loadWithMigration, saveRemote } from '@/lib/client-store';
+import { buildImageUsage, DEFAULT_IMAGE_COOLDOWN_DAYS } from '@/lib/image-usage';
 import LoadErrorBanner from '@/components/LoadErrorBanner';
 import { buildUnsplashCredit } from '@/lib/unsplash-credit';
 import BrainPicker from '@/components/BrainPicker';
@@ -970,9 +971,17 @@ Return ONLY the expanded caption text. No JSON, no markdown, no preamble. Just t
         // visible batch from repeating the same photo.
         const used = new Set<string>();
         const picks: (ImgCand | null)[] = [];
+        // IMAGE-COOLDOWN-V1: `used` stops repeats inside this batch, but on
+        // its own it has no idea what the rest of the calendar already
+        // shows. Deriving usage from the loaded posts adds that memory, so
+        // Generate with AI and Fill calendar draw from the same history
+        // rather than each quietly re-picking the same favourites.
+        const genUsage = buildImageUsage(posts);
+        const genSlotTime = new Date(genForm.weekStart).getTime() || Date.now();
         for (let i = 0; i < genForm.postsPerAccount; i++) {
           const pick = pickBrainImageForContext(imageCandidates, genForm.theme, {
             brief, extraTopic: goalLabel, excludeUrls: used, avoidReuse: true,
+            usage: genUsage, slotTime: genSlotTime, cooldownDays: DEFAULT_IMAGE_COOLDOWN_DAYS,
           });
           if (pick) used.add(pick.url);
           picks.push(pick || null);
