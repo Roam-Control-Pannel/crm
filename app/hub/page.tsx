@@ -14,7 +14,7 @@ interface Message {
   confirmAction?:{type:string;label:string;detail:string;};
   // New: structured tool call awaiting confirmation. Survives reload because
   // it's persisted alongside the message in hub_chats.
-  pendingTool?:{name:string;input:any;tool_use_id:string;assistantContent:any[];};
+  pendingTool?:{name:string;input:any;tool_use_id:string;assistantContent:any[];signature?:string;};
   // New: tools that already ran this turn (no confirm needed) — shown as
   // small "✓ Created task: …" chips beneath the message.
   executedTools?:{name:string;input:any}[];
@@ -103,7 +103,7 @@ function groupChats(chats:Chat[]):{label:string;chats:Chat[]}[]{
 
 interface RoamioResult{
   text:string;
-  pendingTool?:{name:string;input:any;tool_use_id:string;assistantContent:any[];};
+  pendingTool?:{name:string;input:any;tool_use_id:string;assistantContent:any[];signature?:string;};
   executedTools?:{name:string;input:any}[];
 }
 
@@ -700,7 +700,7 @@ export default function HubPage(){
 
   // New structured tool-confirm flow. Server re-runs the tool with the
   // user's blessing and returns a fresh natural-language reply.
-  async function handleToolConfirm(chatId:string,msgId:string,pending:{name:string;input:any;tool_use_id:string;assistantContent:any[]}){
+  async function handleToolConfirm(chatId:string,msgId:string,pending:{name:string;input:any;tool_use_id:string;assistantContent:any[];signature?:string}){
     const chat=chats.find(c=>c.id===chatId)||activeChat;
     if(!chat)return;
     const updated=chat.messages.map(m=>m.id===msgId?{...m,confirmed:true,pendingTool:undefined}:m);
@@ -731,6 +731,9 @@ export default function HubPage(){
       input:pending.input,
       tool_use_id:pending.tool_use_id,
       assistant_content:pending.assistantContent,
+      // TOOL-CONFIRM-BINDING-V1: echo the server's signature back verbatim.
+      // Without it the server refuses to execute the confirmed tool.
+      signature:pending.signature,
     },memoryContext,briefs);
     const responseMsg:Message={
       id:Date.now().toString(),

@@ -1,26 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getStore } from '@netlify/blobs';
 import sharp from 'sharp';
+import {
+  MAX_UPLOAD_BYTES,
+  JPEG_QUALITY,
+  ALLOWED_IMAGE_MIME,
+  ALLOWED_IMAGE_EXTS,
+  extensionOf,
+} from '@/lib/uploads';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 const STORE_NAME = 'roam-uploads';
 
-// 10 MB ceiling — large enough for high-res photos, small enough that a
-// runaway client can't fill the blob store. Bump if a legitimate use case
-// needs more.
-const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
-
-// Explicit allowlist. We're an image uploader; anything else (PDFs, SVGs
-// which can carry script, executables) gets rejected at the boundary.
-const ALLOWED_MIME = new Set([
-  'image/jpeg',
-  'image/png',
-  'image/webp',
-  'image/gif',
-]);
-const ALLOWED_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif']);
+// UPLOAD-POLICY-V1: the size cap and the MIME / extension allowlists now
+// live in lib/uploads.ts so this route and /api/brain/items — the two
+// writers into roam-uploads — enforce the same policy, and so the public
+// reader at /api/images/[id] can clamp its response type against the same
+// list. Behaviour here is unchanged; only the source of the constants moved.
+// This route stays image-only (PDFs, SVGs which can carry script, and
+// executables are rejected at the boundary); the Brain route additionally
+// accepts PDF and text.
 
 // IMAGE-NORMALISE-V1
 // Instagram's Graph API only accepts JPEG for image containers — PNG /
@@ -40,8 +41,8 @@ const ALLOWED_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif']);
 // JPEG quality 85 is the "good enough for social" sweet spot — matches
 // Unsplash's `urls.regular` default. flatten() against white because
 // IG flattens transparency to black by default; white is closer to
-// what most users expect when uploading a logo or graphic.
-const JPEG_QUALITY = 85;
+// what most users expect when uploading a logo or graphic. The constant
+// itself lives in lib/uploads.ts alongside the rest of the policy.
 
 /**
  * Accept a multipart file upload, transcode to JPEG, store in Netlify
@@ -66,9 +67,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: 'Empty file' }, { status: 400 });
     }
 
-    const ext = file.name.split('.').pop()?.toLowerCase() || 'jpg';
+    const ext = extensionOf(file.name) || 'jpg';
 
-    if (!ALLOWED_MIME.has(file.type) || !ALLOWED_EXTS.has(ext)) {
+    if (!ALLOWED_IMAGE_MIME.has(file.type) || !ALLOWED_IMAGE_EXTS.has(ext)) {
       return NextResponse.json(
         { ok: false, error: 'Unsupported file type — JPEG, PNG, WEBP, or GIF only' },
         { status: 415 }
