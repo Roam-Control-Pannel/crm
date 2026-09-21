@@ -9,6 +9,7 @@ import { buildImageUsage, DEFAULT_IMAGE_COOLDOWN_DAYS } from '@/lib/image-usage'
 import { buildCaptionHistory, captionHistoryLines } from '@/lib/caption-history';
 import { MODEL_SONNET } from '@/lib/ai-models';
 import { fetchSemanticRank } from '@/lib/image-shortlist';
+import { GRAPHIC_FORMATS, type GraphicFormat } from '@/lib/graphic-formats';
 import LoadErrorBanner from '@/components/LoadErrorBanner';
 import { buildUnsplashCredit } from '@/lib/unsplash-credit';
 import BrainPicker from '@/components/BrainPicker';
@@ -208,6 +209,18 @@ export default function SocialPage() {
     scheduledTime: '10:00',
     status: 'draft' as SocialPost['status'],
   });
+
+  // GRAPHIC-COMPOSE-V1 — composer state for turning the attached photo into
+  // a branded graphic. `graphicSourceId` remembers the ORIGINAL photo so the
+  // settings can be changed and re-rendered without compounding: composing a
+  // graphic from a graphic would stack scrim on scrim and re-crop a crop.
+  const [graphicOpen, setGraphicOpen] = useState(false);
+  const [graphicSourceId, setGraphicSourceId] = useState<string | null>(null);
+  const [graphicFormat, setGraphicFormat] = useState<GraphicFormat>('square');
+  const [graphicKicker, setGraphicKicker] = useState('');
+  const [graphicHeadline, setGraphicHeadline] = useState('');
+  const [graphicLogo, setGraphicLogo] = useState(true);
+  const [graphicBusy, setGraphicBusy] = useState(false);
 
   const [showGen, setShowGen] = useState(false);
   // CRON-AUTOGEN-V1
@@ -644,6 +657,74 @@ export default function SocialPage() {
   }
 
 
+
+  /**
+   * GRAPHIC-COMPOSE-V1
+   * The blob id behind an image URL, or null if the image is not ours.
+   * Only our own store can be composed from — /api/social/compose takes an id,
+   * never a URL, so it never fetches anything on the caller's behalf.
+   */
+  function blobIdOf(url: string): string | null {
+    if (!url) return null;
+    const m = url.match(/\/api\/images\/([^/?#]+)$/);
+    if (!m) return null;
+    try { return decodeURIComponent(m[1]); } catch { return null; }
+  }
+
+  /** First sentence of the caption — the natural default for a headline. */
+  function firstSentence(text: string): string {
+    const clean = (text || '').replace(/\s+/g, ' ').trim();
+    if (!clean) return '';
+    const stop = clean.search(/[.!?](\s|$)/);
+    return (stop > 0 ? clean.slice(0, stop + 1) : clean).slice(0, 120);
+  }
+
+  function openGraphicPanel() {
+    const source = graphicSourceId || blobIdOf(form.imageUrl);
+    if (!source) return;
+    setGraphicSourceId(source);
+    if (!graphicHeadline) setGraphicHeadline(firstSentence(form.caption));
+    if (!graphicKicker && form.town) setGraphicKicker(form.town.toUpperCase());
+    setGraphicOpen(true);
+  }
+
+  async function buildGraphic() {
+    const source = graphicSourceId || blobIdOf(form.imageUrl);
+    if (!source) return;
+    setGraphicBusy(true);
+    try {
+      const res = await fetch('/api/social/compose', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          blobId: source,
+          format: graphicFormat,
+          headline: graphicHeadline,
+          kicker: graphicKicker,
+          logo: graphicLogo,
+        }),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        addNotification({ type: 'email_failed', title: 'Graphic failed', body: data.error || 'Unknown error' });
+        return;
+      }
+      setGraphicSourceId(source);
+      setForm(f => ({
+        ...f,
+        imageUrl: window.location.origin + data.url,
+        // The graphic is our own derivative, so any photographer credit that
+        // came with the source no longer applies to what gets published.
+        imageCredit: '', imageCreditUrl: '', imagePhotoUrl: '', imageUnsplashUrl: '',
+        imageSocialHandles: {},
+      }));
+      addNotification({ type: 'success', title: 'Graphic created', body: `${data.width}x${data.height}` });
+    } catch {
+      addNotification({ type: 'email_failed', title: 'Graphic failed', body: 'Network error' });
+    } finally {
+      setGraphicBusy(false);
+    }
+  }
 
   async function uploadOwnImage(file: File) {
     if (!file) return;
@@ -2181,6 +2262,62 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"..."},{"caption":"...
                     </div>
                   ) : form.imageCredit && (
                     <div style={{ fontSize: 10, color: 'var(--ink-400)', marginTop: 3 }}>Photo by {form.imageCredit}</div>
+                  )}
+                  {/* GRAPHIC-COMPOSE-V1 — only for images in our own store,
+                      because the composer works from a blob id, not a URL. */}
+                  {blobIdOf(form.imageUrl) && !graphicOpen && (
+                    <button type="button" onClick={openGraphicPanel} style={{ ...btnG, padding: '5px 10px', fontSize: 11, gap: 4, marginTop: 6 }}>
+                      <Sparkles size={11} /> Make branded graphic
+                    </button>
+                  )}
+                  {graphicOpen && (
+                    <div style={{ marginTop: 8, padding: 10, background: 'var(--paper)', borderRadius: 'var(--r-md)', border: '1px solid var(--ink-100)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-700)' }}>Branded graphic</div>
+                        <button type="button" onClick={() => setGraphicOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ink-400)', padding: 0 }}><X size={12} /></button>
+                      </div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8 }}>
+                        {(Object.keys(GRAPHIC_FORMATS) as GraphicFormat[]).map(k => (
+                          <button
+                            key={k}
+                            type="button"
+                            onClick={() => setGraphicFormat(k)}
+                            title={GRAPHIC_FORMATS[k].note}
+                            style={{
+                              padding: '4px 8px', fontSize: 10.5, borderRadius: 'var(--r-sm)', cursor: 'pointer',
+                              border: '1px solid ' + (graphicFormat === k ? 'var(--maroon-700)' : 'var(--ink-200)'),
+                              background: graphicFormat === k ? 'var(--maroon-700)' : 'var(--white)',
+                              color: graphicFormat === k ? 'white' : 'var(--ink-700)',
+                              fontFamily: 'inherit', fontWeight: 600,
+                            }}
+                          >{GRAPHIC_FORMATS[k].label}</button>
+                        ))}
+                      </div>
+                      <input
+                        value={graphicKicker}
+                        onChange={e => setGraphicKicker(e.target.value)}
+                        placeholder="Small line (a place name reads best)"
+                        style={{ ...inp, fontSize: 11, marginBottom: 6 }}
+                      />
+                      <textarea
+                        value={graphicHeadline}
+                        onChange={e => setGraphicHeadline(e.target.value)}
+                        placeholder="Headline — keep it short enough to read at a glance"
+                        rows={2}
+                        style={{ ...inp, fontSize: 11, marginBottom: 6, resize: 'vertical', fontFamily: 'inherit' }}
+                      />
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--ink-700)', marginBottom: 8, cursor: 'pointer' }}>
+                        <input type="checkbox" checked={graphicLogo} onChange={e => setGraphicLogo(e.target.checked)} />
+                        Show the lion mark
+                      </label>
+                      <button type="button" onClick={buildGraphic} disabled={graphicBusy} className="btn-primary" style={{ fontSize: 11, padding: '6px 12px', opacity: graphicBusy ? 0.6 : 1 }}>
+                        {graphicBusy ? 'Building...' : 'Create graphic'}
+                      </button>
+                      <div style={{ fontSize: 10.5, color: 'var(--ink-400)', marginTop: 6 }}>
+                        Builds from the original photo each time, so you can change
+                        the format or wording and rebuild without it stacking up.
+                      </div>
+                    </div>
                   )}
                 </div>}
                 {unsplash.length > 0 && <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 6, marginBottom: 8 }}>
