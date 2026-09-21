@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 // BRAIN-STORE-V1: shared, fail-closed index accessors. Folder delete reads
 // BOTH the folder list and the item index before writing both back, so the
 // old swallow-as-[] behaviour could wipe either one.
-import { getFolders, setFolders, getItems, setItems, type Folder, type Item } from '@/lib/brain-store';
+import { getFolders, setFolders, getItems, setItems } from '@/lib/brain-store';
 import { readErrorResponse } from '@/lib/store-read';
 
 export const dynamic = 'force-dynamic';

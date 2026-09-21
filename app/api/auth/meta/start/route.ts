@@ -22,7 +22,7 @@ const SCOPE = [
   'business_management',
 ].join(',');
 
-export async function GET(req: NextRequest) {
+export async function GET(_req: NextRequest) {
   const appId = process.env.META_APP_ID;
   if (!appId) {
     return NextResponse.json({ error: 'META_APP_ID not set' }, { status: 500 });

@@ -3,7 +3,7 @@ import { getStore } from '@netlify/blobs';
 // BRAIN-STORE-V1: shared, fail-closed index accessors. Read-only here, but
 // "item not found" and "index unreadable" must not look the same to the
 // caller — Roam-io reads item bodies through this route.
-import { getItems, type Item } from '@/lib/brain-store';
+import { getItems } from '@/lib/brain-store';
 import { readErrorResponse } from '@/lib/store-read';
 
 export const dynamic = 'force-dynamic';

@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { AlertTriangle, Calendar, Check, ChevronLeft, ChevronRight, Clock, Copy, Edit3, Image, List, Plus, RefreshCw, Settings, Sparkles, Trash2, WrapText, X } from 'lucide-react';
+import { AlertTriangle, Calendar, Check, ChevronLeft, ChevronRight, Clock, Copy, Edit3, Image as ImageIcon, List, Plus, RefreshCw, Settings, Sparkles, Trash2, WrapText, X } from 'lucide-react';
 import { Brief, fetchBriefs } from '@/lib/briefs';
 import { GOAL_OPTIONS, getGoalLabel } from '@/lib/goals';
 import { SocialAccount, fetchRealAccounts, combineAccounts, fetchAccountMeta, AccountHandleCache, updateAccountHandleCache } from '@/lib/social-accounts';
@@ -1339,7 +1339,6 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"..."},{"caption":"...
   }
 
   function PostRow({ post }: { post: SocialPost }) {
-    const accs = post.accountIds.map(id => accounts.find(a => a.id === id)).filter(Boolean) as SocialAccount[];
     const brief = briefs.find(b => b.id === post.briefId);
     // PUBLISH-UI-V1: collect per-account result data once so the chips and
     // the failure banner stay consistent.
@@ -2155,7 +2154,7 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"..."},{"caption":"...
                 </div>}
                 {!form.imageUrl && unsplash.length === 0 && (
                   <div style={{ background: 'var(--paper)', borderRadius: 'var(--r-md)', padding: 16, textAlign: 'center', border: '1.5px dashed var(--ink-200)' }}>
-                    <Image size={18} color="var(--ink-300)" style={{ margin: '0 auto 6px', display: 'block' }} />
+                    <ImageIcon size={18} color="var(--ink-300)" style={{ margin: '0 auto 6px', display: 'block' }} />
                     <div style={{ fontSize: 11, color: 'var(--ink-400)', marginBottom: 8 }}>Type a keyword above, or paste a URL</div>
                     <input value={form.imageUrl} onChange={e => setForm({ ...form, imageUrl: e.target.value })} placeholder="Paste image URL..." style={{ ...inp, fontSize: 11 }} />
                   </div>

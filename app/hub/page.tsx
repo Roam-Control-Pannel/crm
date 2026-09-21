@@ -78,10 +78,6 @@ async function fetchDocs():Promise<RoamDoc[]>{
     return [];
   }
 }
-async function persistDocs(_docs:RoamDoc[]):Promise<void>{
-  // No-op: docs are persisted in the Brain by the underlying upload/delete
-  // calls. Kept here so existing call sites don't need to change.
-}
 function fmtSize(b:number):string{if(b<1024)return b+"B";if(b<1048576)return Math.round(b/1024)+"KB";return Math.round(b/1048576)+"MB";}
 
 function groupChats(chats:Chat[]):{label:string;chats:Chat[]}[]{
@@ -610,8 +606,8 @@ export default function HubPage(){
     // Step 1: upload every image to Brain in parallel. Each gives us a
     // blobId we can reference in chat history. If any single upload fails
     // we still send the others and the text — partial success is OK.
-    let attachmentRefs:{blobId:string;mime:string;description?:string}[]=[];
-    let visionBlocks:any[]=[];
+    const attachmentRefs:{blobId:string;mime:string;description?:string}[]=[];
+    const visionBlocks:any[]=[];
     if(attachmentsToSend.length>0){
       setUploadingImage(true);
       try{

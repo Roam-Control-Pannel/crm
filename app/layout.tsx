@@ -1,4 +1,4 @@
-import type { Metadata, Viewport } from 'next';
+import type { Metadata } from 'next';
 import './globals.css';
 import AppShell from '@/components/AppShell';
 import SessionWrapper from '@/components/SessionWrapper';

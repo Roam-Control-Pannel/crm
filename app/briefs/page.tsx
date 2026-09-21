@@ -1,8 +1,8 @@
 'use client';
 import { useState, useEffect } from 'react';
 import LoadErrorBanner from '@/components/LoadErrorBanner';
-import { Plus, X, Edit3, Trash2, Check, Sparkles, Layers } from 'lucide-react';
-import { Brief, fetchBriefs, persistBriefs, DEFAULT_BRIEFS } from '@/lib/briefs';
+import { Plus, X, Edit3, Trash2, Check, Layers } from 'lucide-react';
+import { Brief, fetchBriefs, persistBriefs } from '@/lib/briefs';
 
 interface SocialAccount {
   id: string;

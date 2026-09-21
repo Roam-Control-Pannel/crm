@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, useMemo, useRef } from 'react';
 import Link from 'next/link';
-import { Plus, FolderPlus, Folder as FolderIcon, ChevronRight, Upload, X, Edit3, Trash2, Search, Brain as BrainIcon, ChevronDown, Image as ImageIcon, Loader, FileText, Download, Printer, Sparkles, ExternalLink, Link as LinkIcon, Globe, CheckSquare, Check } from 'lucide-react';
+import { FolderPlus, Folder as FolderIcon, ChevronRight, Upload, X, Edit3, Trash2, Search, Brain as BrainIcon, ChevronDown, Image as ImageIcon, Loader, FileText, Download, Printer, Sparkles, ExternalLink, Link as LinkIcon, Globe, CheckSquare, Check } from 'lucide-react';
 import {
   Folder, BrainItem, FolderNode,
   fetchFolders, createFolder, renameFolder, deleteFolder,
@@ -181,6 +181,11 @@ export default function BrainPage() {
       .catch(() => { if (!cancelled) setPreviewContent(null); })
       .finally(() => { if (!cancelled) setPreviewLoading(false); });
     return () => { cancelled = true; };
+    // Deliberately narrower than `editing`: only the id and mime decide what
+    // we fetch. Depending on the whole object would re-run this on every tag
+    // or description keystroke in the open modal and refetch the body each
+    // time. exhaustive-deps cannot see that, so it is silenced here only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editing?.id, editing?.mime]);
 
   async function submitUrl() {

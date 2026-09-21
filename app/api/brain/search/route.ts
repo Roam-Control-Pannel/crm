@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 // Brain because a read failed makes the assistant confidently answer "you
 // have nothing saved about that", which is worse than an error. The handler
 // surfaces a read failure as 503.
-import { getItems, getFolders, type Item, type Folder } from '@/lib/brain-store';
+import { getItems, getFolders } from '@/lib/brain-store';
 import { readErrorResponse } from '@/lib/store-read';
 
 export const dynamic = 'force-dynamic';

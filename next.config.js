@@ -20,6 +20,13 @@ const securityHeaders = [
 
 const nextConfig = {
   reactStrictMode: true,
+  // LINT-V1: `next lint` defaults to app/pages/components/lib/src, which
+  // leaves the scheduled functions in netlify/ unchecked — the very code that
+  // had no fetch timeouts. Listing the dirs explicitly brings them in, for
+  // both `npm run lint` and the build-time lint pass.
+  eslint: {
+    dirs: ['app', 'components', 'lib', 'netlify', 'types'],
+  },
   async headers() {
     return [{ source: '/:path*', headers: securityHeaders }];
   },

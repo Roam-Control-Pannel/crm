@@ -3,7 +3,7 @@ import { getStore } from '@netlify/blobs';
 // BRAIN-STORE-V1: the index accessors are shared and fail closed. The local
 // copies this file used to carry returned [] on a read failure, so a PATCH
 // or DELETE landing during a Blobs blip rewrote the whole index.
-import { getItems, setItems, type Item } from '@/lib/brain-store';
+import { getItems, setItems } from '@/lib/brain-store';
 import { readErrorResponse } from '@/lib/store-read';
 
 export const dynamic = 'force-dynamic';
