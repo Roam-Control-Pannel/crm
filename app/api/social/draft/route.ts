@@ -6,6 +6,7 @@ import { DEFAULT_BRIEFS, type Brief } from '@/lib/briefs';
 import { getCollection, saveCollection, DEFAULT_USER_ID } from '@/lib/store';
 import { buildImageUsage, DEFAULT_IMAGE_COOLDOWN_DAYS } from '@/lib/image-usage';
 import { buildCaptionHistory } from '@/lib/caption-history';
+import { fetchSemanticRank } from '@/lib/image-shortlist';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -177,11 +178,24 @@ export async function POST(req: NextRequest) {
           .map(i => ({
             id: i.id,
             url: `${origin}/api/images/${i.blobId}`,
+            // IMAGE-RANK-V2: the matcher scores this now; `credit` carried it
+            // before under a name that made it look like an attribution.
+            description: i.description,
             credit: i.description,
             tags: i.tags,
             folder: i.folderId ? folderNameById.get(i.folderId) : undefined,
           }));
-        const picked = pickBrainImage(liteItems, theme, undefined, brief, draftUsageOpts);
+        // IMAGE-SEMANTIC-V1: same shortlist Fill calendar uses, so a draft
+        // created from Roam-io picks by the same judgement.
+        const semanticRank = settings.semanticImageMatch
+          ? await fetchSemanticRank(
+              origin, liteItems, theme.title + ' ' + theme.prompt,
+              { briefName: brief.name, internalSecret: secret }
+            )
+          : null;
+        const picked = pickBrainImage(
+          liteItems, theme, undefined, brief, { ...draftUsageOpts, semanticRank }
+        );
         if (picked) {
           imageUrl = picked.url;
           // IMAGE-CREDIT-V1: a Brain photo is our own asset — no attribution.

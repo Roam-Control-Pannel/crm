@@ -104,6 +104,13 @@ export interface SocialSettingsBlob {
    * the API (which would surface as every caption coming back empty).
    */
   captionModel?: string;
+  /**
+   * IMAGE-SEMANTIC-V1: let a model shortlist Brain photos per theme instead
+   * of relying on word overlap. Optional — defaults to on. Costs one small
+   * request per theme per run; turning it off restores the purely lexical
+   * ranking with no other change.
+   */
+  semanticImageMatch?: boolean;
   updatedAt: string;     // ISO timestamp
 }
 
@@ -122,6 +129,8 @@ export interface EffectiveSocialSettings {
   imageCooldownDays: number;
   // AI-MODELS-V1: always defined and always a known id.
   captionModel: string;
+  // IMAGE-SEMANTIC-V1: always defined (defaults to true).
+  semanticImageMatch: boolean;
 }
 
 // ============================================================

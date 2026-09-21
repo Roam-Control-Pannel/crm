@@ -8,6 +8,7 @@ import { loadWithMigration, saveRemote } from '@/lib/client-store';
 import { buildImageUsage, DEFAULT_IMAGE_COOLDOWN_DAYS } from '@/lib/image-usage';
 import { buildCaptionHistory, captionHistoryLines } from '@/lib/caption-history';
 import { MODEL_SONNET } from '@/lib/ai-models';
+import { fetchSemanticRank } from '@/lib/image-shortlist';
 import LoadErrorBanner from '@/components/LoadErrorBanner';
 import { buildUnsplashCredit } from '@/lib/unsplash-credit';
 import BrainPicker from '@/components/BrainPicker';
@@ -991,10 +992,18 @@ Return ONLY the expanded caption text. No JSON, no markdown, no preamble. Just t
         // rather than each quietly re-picking the same favourites.
         const genUsage = buildImageUsage(posts);
         const genSlotTime = new Date(genForm.weekStart).getTime() || Date.now();
+        // IMAGE-SEMANTIC-V1: one shortlist for this account's batch. Relative
+        // origin — the browser has a session cookie, so no internal secret.
+        // Null on any failure, which falls back to the lexical ranking.
+        const genRank = await fetchSemanticRank(
+          '', imageCandidates, [genForm.theme, goalLabel].filter(Boolean).join(' '),
+          { briefName: brief?.name }
+        );
         for (let i = 0; i < genForm.postsPerAccount; i++) {
           const pick = pickBrainImageForContext(imageCandidates, genForm.theme, {
             brief, extraTopic: goalLabel, excludeUrls: used, avoidReuse: true,
             usage: genUsage, slotTime: genSlotTime, cooldownDays: DEFAULT_IMAGE_COOLDOWN_DAYS,
+            semanticRank: genRank,
           });
           if (pick) used.add(pick.url);
           picks.push(pick || null);

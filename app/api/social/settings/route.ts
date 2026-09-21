@@ -70,10 +70,19 @@ export async function PUT(req: NextRequest) {
     const incomingWeights: Record<string, number> | undefined = body.briefWeights;
     // AI-MODELS-V1: optional caption model id.
     const incomingModel: unknown = body.captionModel;
+    // IMAGE-SEMANTIC-V1: optional boolean.
+    const incomingSemantic: unknown = body.semanticImageMatch;
 
-    if (!incomingTimes && !incomingOverrides && !incomingWeights && incomingModel === undefined) {
+    if (
+      !incomingTimes && !incomingOverrides && !incomingWeights &&
+      incomingModel === undefined && incomingSemantic === undefined
+    ) {
       return NextResponse.json(
-        { error: 'Provide postingTimes, themeOverrides, briefWeights, or captionModel in body' },
+        {
+          error:
+            'Provide postingTimes, themeOverrides, briefWeights, captionModel, ' +
+            'or semanticImageMatch in body',
+        },
         { status: 400 }
       );
     }
@@ -84,6 +93,12 @@ export async function PUT(req: NextRequest) {
     if (incomingModel !== undefined && !isKnownCaptionModel(incomingModel)) {
       return NextResponse.json(
         { error: 'Unknown captionModel' },
+        { status: 400 }
+      );
+    }
+    if (incomingSemantic !== undefined && typeof incomingSemantic !== 'boolean') {
+      return NextResponse.json(
+        { error: 'semanticImageMatch must be a boolean' },
         { status: 400 }
       );
     }
@@ -110,6 +125,10 @@ export async function PUT(req: NextRequest) {
       briefWeights: validWeights || existing?.briefWeights || {},
       captionModel:
         incomingModel === undefined ? existing?.captionModel : (incomingModel as string),
+      semanticImageMatch:
+        incomingSemantic === undefined
+          ? existing?.semanticImageMatch
+          : (incomingSemantic as boolean),
       updatedAt: new Date().toISOString(),
     };
 

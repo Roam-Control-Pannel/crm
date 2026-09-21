@@ -151,6 +151,9 @@ export async function getEffectiveSettings(): Promise<EffectiveSocialSettings> {
     captionModel: isKnownCaptionModel(blob?.captionModel)
       ? blob!.captionModel!
       : DEFAULT_CAPTION_MODEL,
+    // IMAGE-SEMANTIC-V1: on unless explicitly turned off. `?? true` rather
+    // than `|| true` so a stored `false` survives the read.
+    semanticImageMatch: blob?.semanticImageMatch ?? true,
   };
 }
 

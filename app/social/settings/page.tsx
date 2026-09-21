@@ -238,6 +238,8 @@ export default function SocialSettingsPage() {
   // AI-MODELS-V1: which model writes captions. Resolved server-side, so this
   // is always a known id by the time it gets here.
   const [captionModel, setCaptionModel] = useState<string>(DEFAULT_CAPTION_MODEL);
+  // IMAGE-SEMANTIC-V1: whether a model shortlists photos per theme.
+  const [semanticImageMatch, setSemanticImageMatch] = useState(true);
 
   // Edit modal state
   const [editing, setEditing] = useState<Theme | null>(null);
@@ -261,6 +263,7 @@ export default function SocialSettingsPage() {
       setPostingTimes(json.settings.postingTimes);
       setThemes(json.settings.themes);
       setCaptionModel(json.settings.captionModel || DEFAULT_CAPTION_MODEL);
+      setSemanticImageMatch(json.settings.semanticImageMatch !== false);
     } catch (e: any) {
       setError(e?.message || 'Failed to load settings');
     } finally {
@@ -276,6 +279,7 @@ export default function SocialSettingsPage() {
     postingTimes?: PostingTimes;
     themeOverrides?: ThemeOverrides;
     captionModel?: string;
+    semanticImageMatch?: boolean;
   }) {
     setSaving(true);
     setError(null);
@@ -291,6 +295,7 @@ export default function SocialSettingsPage() {
       setPostingTimes(json.settings.postingTimes);
       setThemes(json.settings.themes);
       setCaptionModel(json.settings.captionModel || DEFAULT_CAPTION_MODEL);
+      setSemanticImageMatch(json.settings.semanticImageMatch !== false);
     } catch (e: any) {
       setError(e?.message || 'Save failed');
     } finally {
@@ -586,6 +591,32 @@ export default function SocialSettingsPage() {
             days. A photo inside its window is skipped; if every candidate is,
             the least-recently-used one wins rather than a random repeat.
           </span>
+        </div>
+
+        {/* IMAGE-SEMANTIC-V1 photo matching */}
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 4 }}>
+          <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink-700)', paddingTop: 2 }}>
+            Photo matching
+          </label>
+          <div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={semanticImageMatch}
+                onChange={e => {
+                  setSemanticImageMatch(e.target.checked);
+                  putPartial({ semanticImageMatch: e.target.checked });
+                }}
+              />
+              Let AI read the photo descriptions and shortlist per theme
+            </label>
+            <div style={{ fontSize: 12, color: 'var(--ink-500)', marginTop: 4, maxWidth: 520 }}>
+              On: one small request per theme picks the photos that actually suit
+              it, which word-matching can't do for a theme like &ldquo;the wrong
+              turn&rdquo;. Off: photos are matched on shared words only. Either way
+              the reuse window and least-recently-used rotation still apply.
+            </div>
+          </div>
         </div>
 
         {/* AI-MODELS-V1 caption model */}

@@ -46,7 +46,8 @@ import {
   type CaptionHistory,
   type CaptionSourcePost,
 } from '@/lib/caption-history';
-import { captionModelSpec } from '@/lib/ai-models';
+import { captionModelSpec, SHORTLIST_TIMEOUT_MS } from '@/lib/ai-models';
+import { fetchSemanticRank, type SemanticRank } from '@/lib/image-shortlist';
 
 // Mirrors the SocialPost interface defined inline in app/social/page.tsx.
 // Kept in sync by convention — if that interface changes, this one must too.
@@ -101,6 +102,15 @@ interface AccountMetaLite {
 interface BrainItemLite {
   id: string;
   url: string;
+  /**
+   * IMAGE-RANK-V2: the vision model's sentence about the photo. It was
+   * carried only as `credit` — a name left over from Unsplash attribution
+   * that made it look like a photographer byline, which is why the matcher
+   * never scored it and why it once reached the composer as "Photo by
+   * Marketing advertisement showing...". Named for what it is now; `credit`
+   * stays only where an actual attribution is meant.
+   */
+  description?: string;
   credit?: string;
   tags?: string[];
   // Brain folder name (e.g. "Manchester"). Human-curated location/topic label
@@ -250,7 +260,13 @@ export function pickBrainImage(
   theme: Theme,
   excludeUrls?: Set<string>,
   brief?: Brief,
-  usageOpts?: { usage?: ImageUsageMap; slotTime?: number; cooldownDays?: number }
+  usageOpts?: {
+    usage?: ImageUsageMap;
+    slotTime?: number;
+    cooldownDays?: number;
+    /** IMAGE-SEMANTIC-V1: shortlist ordering for this theme, when available. */
+    semanticRank?: Map<string, number>;
+  }
 ): BrainItemLite | null {
   return pickBrainImageForContext(brainItems, theme.title + ' ' + theme.prompt, {
     brief,
@@ -622,6 +638,27 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
     // back to the default rather than reaching the API.
     const captionModel = captionModelSpec(settings.captionModel);
 
+    // IMAGE-SEMANTIC-V1
+    // One shortlist per (theme, brief), memoised for the whole invocation.
+    // The PROMISE is cached, not the result: the four slots in a batch run
+    // concurrently and would otherwise each fire the same request before any
+    // of them had an answer to store.
+    const rankCache = new Map<string, Promise<SemanticRank | null>>();
+    function rankFor(theme: Theme, brief: Brief | undefined): Promise<SemanticRank | null> {
+      if (!settings.semanticImageMatch) return Promise.resolve(null);
+      const key = theme.id + '|' + (brief?.id || '');
+      const hit = rankCache.get(key);
+      if (hit) return hit;
+      const pending = fetchSemanticRank(
+        input.origin,
+        brainItems,
+        theme.title + ' ' + theme.prompt,
+        { briefName: brief?.name, internalSecret: input.internalSecret }
+      );
+      rankCache.set(key, pending);
+      return pending;
+    }
+
     // 5. Brain items (optional). The /api/brain/items payload is raw stored
     // items (blobId + mime + tags, with NO url field), so the old
     // `.filter(b => b.url)` dropped every item and Brain images were never
@@ -650,6 +687,7 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
         .map(i => ({
           id: i.id,
           url: `${input.origin}/api/images/${i.blobId}`,
+          description: i.description,
           credit: i.description,
           tags: i.tags,
           folder: i.folderId ? folderNameById.get(i.folderId) : undefined,
@@ -795,9 +833,15 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
     // (fewer slots per click, never a hard kill).
     const SYNC_CEILING_MS = 24_000;
     const PERSIST_RESERVE_MS = 2_500;
+    // IMAGE-SEMANTIC-V1 adds one ranking request in front of the caption
+    // request. The rankings for a batch run inside the same Promise.all, so
+    // the batch grows by one ranking latency, not four — subtract it once.
+    // Cost of being wrong here is a hard kill and an HTML error page, so the
+    // subtraction is unconditional even though most batches reuse a cached
+    // ranking and pay nothing.
     const TIME_BUDGET_MS = Math.max(
       1_000,
-      SYNC_CEILING_MS - PERSIST_RESERVE_MS - captionModel.captionTimeoutMs
+      SYNC_CEILING_MS - PERSIST_RESERVE_MS - captionModel.captionTimeoutMs - SHORTLIST_TIMEOUT_MS
     );
     const CONCURRENCY = 4;
     let postSeq = 0;
@@ -827,9 +871,13 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
           // tags); the Unsplash fallback keeps theme-based copy.
           let imageForCaption: { description?: string; tags?: string[]; location?: string } | undefined;
           const slotTime = new Date(spec.iso).getTime();
+          // IMAGE-SEMANTIC-V1: ask the model which photos suit this theme
+          // before scoring. Null (disabled, failed, timed out) means the
+          // lexical ranking decides, exactly as it did before.
+          const semanticRank = await rankFor(spec.theme, spec.slotBrief);
           const brain = pickBrainImage(
             brainItems, spec.theme, usedImageUrls, spec.slotBrief,
-            { usage: imageUsage, slotTime, cooldownDays }
+            { usage: imageUsage, slotTime, cooldownDays, semanticRank }
           );
           if (brain) {
             imageUrl = brain.url;

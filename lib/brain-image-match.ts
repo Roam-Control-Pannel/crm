@@ -8,9 +8,30 @@
  * Pure + dependency-free (types only) so it can run on the server AND in the
  * browser. Keeping it here stops the three flows from drifting apart again.
  *
- * Scoring is BRIEF-LED with the post topic/theme as a tiebreak, and the Brain
- * FOLDER name counts double — it's a human-curated label (e.g. "Manchester"),
- * more reliable than the vision auto-tags.
+ * IMAGE-RANK-V2 — scoring is THEME-LED, with the brief as a tiebreak.
+ *
+ * It used to be the other way round, and that was the real cause of "the same
+ * images keep coming back". The sort was lexicographic:
+ *
+ *     (b.briefScore - a.briefScore) || (b.topicScore - a.topicScore)
+ *
+ * The brief is CONSTANT for a whole Fill calendar run; the theme is the only
+ * thing that varies per post. Sorting on the constant first means the theme
+ * can never overcome a brief lead, so whichever handful of photos happen to
+ * carry a brief-vocabulary tag win every slot. Measured against the repo's own
+ * 25 seed themes and 3 default briefs: ONE photo was chosen for all 18 Roam
+ * Local themes, and one for all 18 Roam NI themes. A photo scoring brief=1
+ * topic=0 beat one scoring brief=0 topic=2.
+ *
+ * Phase A's cooldown then rotated within that tiny dominant set rather than
+ * across the library — it treated the symptom. This is the cause.
+ *
+ * Three changes:
+ *   1. Theme-led. One topical hit outranks any amount of brief relevance;
+ *      the brief separates photos the theme scored equally.
+ *   2. The DESCRIPTION is scored. It was ignored entirely.
+ *   3. Stemmed token matching instead of substring containment, so a tag
+ *      "pub" stops matching "published". See lib/text-match.ts.
  */
 
 import type { Brief } from '@/lib/briefs';
@@ -19,6 +40,8 @@ import {
   isInCooldown,
   byLeastRecentlyUsed,
 } from '@/lib/image-usage';
+import { tokenSet, overlapCount } from '@/lib/text-match';
+
 
 /** Minimum shape an item needs to be matchable. Callers pass richer objects;
  *  the generic in pickBrainImageForContext preserves their extra fields. */
@@ -27,70 +50,81 @@ export interface ImageCandidate {
   tags?: string[];
   /** Curated Brain folder name, e.g. "Manchester". */
   folder?: string;
-}
-
-/** The folder name is human-curated, so a folder match outweighs a tag match. */
-const FOLDER_WEIGHT = 2;
-
-/** Lowercase, split on non-alphanumerics, drop short noise words. */
-export function keywordsOf(text: string): string[] {
-  return text
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter(w => w.length > 3);
-}
-
-/** Count how many of an item's tags overlap (substring either way) with the
- *  given keyword list. Each tag counts at most once. */
-export function tagOverlap(tags: string[], words: string[]): number {
-  let score = 0;
-  for (const tag of tags) {
-    for (const w of words) {
-      if (tag.includes(w) || w.includes(tag)) {
-        score += 1;
-        break; // each tag counts once
-      }
-    }
-  }
-  return score;
-}
-
-/** Derive the brief's matching vocabulary (name + audience + content brief). */
-export function briefKeywords(brief?: Brief): string[] {
-  if (!brief) return [];
-  return keywordsOf([brief.name, brief.audience, brief.contentBrief].filter(Boolean).join(' '));
+  /**
+   * The vision model's one-sentence description of the photo, written at
+   * upload time by /api/brain/items.
+   *
+   * IMAGE-RANK-V2: this was not scored at all. It is the richest thing the
+   * Brain knows about a photo — the matcher looked only at 3-6 kebab-case
+   * tags and the folder name and ignored the sentence describing the actual
+   * picture. A photo whose description reads "Fishing boats moored in the
+   * harbour at sunrise" scored ZERO against a coastal theme unless a tag
+   * happened to share a substring.
+   */
+  description?: string;
 }
 
 /**
- * Pick the Brain image most relevant to a post, BRIEF-LED with the topic as a
- * tiebreak. `topicText` is the post angle — a theme's title+prompt for Fill
- * calendar, or the user's "what's this about" topic for Generate with AI.
+ * IMAGE-RANK-V2 — field weights.
  *
- * - An item is eligible if it has ANY relevance (brief OR topic), so we still
- *   match when a brief's vocabulary is sparse.
- * - Folder-name overlap is weighted (FOLDER_WEIGHT) on both axes.
- * - `avoidReuse`: when set, return null instead of repeating an already-used
- *   image once the unused pool is exhausted (good for a small, user-visible
- *   batch). Default false keeps Fill calendar's "always fill the slot" behaviour.
+ * Per-hit, not per-field-total, so an item cannot win by having more tags.
  *
- * IMAGE-COOLDOWN-V1 — selection within the top-scoring tier
- *
- * This used to be `topTier[Math.floor(Math.random() * topTier.length)]`:
- * uniform random, with no memory beyond an `excludeUrls` Set that (in Fill
- * calendar's case) was always empty. Two changes:
- *
- *   1. Candidates used within `cooldownDays` of THIS slot are filtered out
- *      before scoring tiers are considered, using history derived from the
- *      posts themselves (lib/image-usage.ts).
- *   2. Ties break to least-recently-used, not random. Random re-picks a
- *      just-used photo roughly as often as a fresh one; LRU walks the
- *      library. This is what actually produces variety from a finite set.
- *
- * If the cooldown empties the pool the filter is relaxed rather than failing
- * the slot — but the fallback is still ordered least-recently-used, so the
- * oldest photo comes back before the newest. `avoidReuse` callers get null
- * instead, unchanged.
+ *   folder (3) is a human-curated label — someone filed this photo under
+ *     "Bangor" on purpose, which beats anything inferred.
+ *   tags (2) are the vision model's distilled labels: fewer, chosen.
+ *   description (1) is prose. It has many more tokens and therefore many
+ *     more chances to hit, including incidental ones ("busy", "afternoon"),
+ *     so each hit is worth less.
  */
+const W_FOLDER = 3;
+const W_TAGS = 2;
+const W_DESCRIPTION = 1;
+
+/**
+ * Multiplier that makes the brief a TIEBREAK rather than a precedence.
+ * Larger than any achievable brief score, so brief relevance can only ever
+ * separate photos the theme scored equally. See the header note on
+ * IMAGE-RANK-V2 for why this had to change.
+ */
+const TOPIC_SCALE = 1000;
+
+interface ItemTokens {
+  folder: Set<string>;
+  tags: Set<string>;
+  description: Set<string>;
+}
+
+function tokensFor(item: ImageCandidate): ItemTokens {
+  return {
+    folder: tokenSet(item.folder || ''),
+    tags: tokenSet((item.tags || []).join(' ')),
+    description: tokenSet(item.description || ''),
+  };
+}
+
+/** Weighted overlap of one item against one query token set. */
+function scoreAgainst(tokens: ItemTokens, query: Set<string>): number {
+  if (query.size === 0) return 0;
+  return (
+    W_FOLDER * overlapCount(tokens.folder, query) +
+    W_TAGS * overlapCount(tokens.tags, query) +
+    W_DESCRIPTION * overlapCount(tokens.description, query)
+  );
+}
+
+/** Derive the brief's matching vocabulary (name + audience + content brief). */
+export function briefTokens(brief?: Brief): Set<string> {
+  if (!brief) return new Set();
+  return tokenSet([brief.name, brief.audience, brief.contentBrief].filter(Boolean).join(' '));
+}
+
+/**
+ * Topic score given to the best semantically-shortlisted photo. High enough
+ * that anything on the shortlist outranks anything scored only lexically,
+ * and large enough to hold a shortlist of any realistic length.
+ */
+const SEMANTIC_BASE = 10_000;
+
 export function pickBrainImageForContext<T extends ImageCandidate>(
   items: T[],
   topicText: string,
@@ -104,28 +138,43 @@ export function pickBrainImageForContext<T extends ImageCandidate>(
     /** Epoch ms of the slot being filled — cooldown is measured against this. */
     slotTime?: number;
     cooldownDays?: number;
+    /**
+     * IMAGE-RANK-V2: an ordering supplied by the semantic shortlist
+     * (lib/image-shortlist.ts) — url -> rank, 0 = best. When present it
+     * replaces the lexical topic score, because a model that has read the
+     * descriptions beats token overlap. The brief tiebreak, the cooldown
+     * window and the least-recently-used fallback all still apply on top,
+     * so the deterministic half of the picker is unchanged.
+     */
+    semanticRank?: Map<string, number>;
   }
 ): T | null {
   if (items.length === 0) return null;
 
-  const topicWords = keywordsOf([topicText, opts?.extraTopic].filter(Boolean).join(' '));
-  const briefWords = briefKeywords(opts?.brief);
-  if (topicWords.length === 0 && briefWords.length === 0) return null;
+  const topicQuery = tokenSet([topicText, opts?.extraTopic].filter(Boolean).join(' '));
+  const briefQuery = briefTokens(opts?.brief);
+  const semanticRank = opts?.semanticRank;
+  if (topicQuery.size === 0 && briefQuery.size === 0 && !semanticRank) return null;
 
-  type Scored = { item: T; briefScore: number; topicScore: number };
+  type Scored = { item: T; topicScore: number; briefScore: number; relevance: number };
   const scored: Scored[] = items.map(item => {
-    const tags = (item.tags || []).map(t => t.toLowerCase());
-    const folderWords = item.folder ? keywordsOf(item.folder) : [];
-    return {
-      item,
-      briefScore: tagOverlap(tags, briefWords) + FOLDER_WEIGHT * tagOverlap(folderWords, briefWords),
-      topicScore: tagOverlap(tags, topicWords) + FOLDER_WEIGHT * tagOverlap(folderWords, topicWords),
-    };
+    const tokens = tokensFor(item);
+    // A shortlisted photo's topic score is its position, inverted so that
+    // rank 0 scores highest. Anything the model left off the list keeps its
+    // lexical score, which is how a shortlist that covers only part of the
+    // library degrades instead of discarding the rest.
+    const rank = semanticRank?.get(item.url);
+    const topicScore =
+      rank === undefined
+        ? scoreAgainst(tokens, topicQuery)
+        : SEMANTIC_BASE - rank;
+    const briefScore = scoreAgainst(tokens, briefQuery);
+    return { item, topicScore, briefScore, relevance: topicScore * TOPIC_SCALE + briefScore };
   });
 
   const matches = scored
-    .filter(s => s.briefScore > 0 || s.topicScore > 0)
-    .sort((a, b) => (b.briefScore - a.briefScore) || (b.topicScore - a.topicScore));
+    .filter(s => s.topicScore > 0 || s.briefScore > 0)
+    .sort((a, b) => b.relevance - a.relevance);
   if (matches.length === 0) return null;
 
   const excludeUrls = opts?.excludeUrls;
@@ -151,9 +200,7 @@ export function pickBrainImageForContext<T extends ImageCandidate>(
   }
 
   const top = eligible[0];
-  const topTier = eligible.filter(
-    s => s.briefScore === top.briefScore && s.topicScore === top.topicScore
-  );
+  const topTier = eligible.filter(s => s.relevance === top.relevance);
   if (topTier.length === 1 || !usage) {
     // No history to reason about — keep the original random tiebreak so
     // behaviour is unchanged for callers that don't pass usage.

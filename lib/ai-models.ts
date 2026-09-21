@@ -22,7 +22,7 @@ export const MODEL_SONNET = 'claude-sonnet-5';
 export const MODEL_OPUS = 'claude-opus-5';
 
 /** Cheapest and fastest. Good for short, mechanical classification work. */
-export const MODEL_HAIKU = 'claude-haiku-4-5-20251001';
+export const MODEL_HAIKU = 'claude-haiku-4-5';
 
 /**
  * Default for /api/ai/chat when a caller names no model. Sonnet is the right
@@ -33,6 +33,24 @@ export const DEFAULT_CHAT_MODEL = MODEL_SONNET;
 
 /** Vision model for auto-describing Brain uploads. */
 export const BRAIN_VISION_MODEL = MODEL_SONNET;
+
+/**
+ * IMAGE-SEMANTIC-V1: the model that ranks Brain photos against a post theme.
+ *
+ * Sonnet rather than Haiku. The work is cheap either way — one request per
+ * theme per run against a catalogue that caches — and the difference between
+ * the tiers is exactly the judgement this call exists to supply: deciding
+ * that a quiet side street suits a theme about wrong turns is not a lookup.
+ */
+export const SHORTLIST_MODEL = MODEL_SONNET;
+
+/**
+ * Per-ranking timeout. Subtracted from the Fill calendar batch budget in
+ * lib/social-cron.ts alongside the caption timeout, so adding this step
+ * cannot push a run past the hosting platform's synchronous ceiling — it
+ * just places fewer slots per click.
+ */
+export const SHORTLIST_TIMEOUT_MS = 6_000;
 
 export interface CaptionModelSpec {
   id: string;
