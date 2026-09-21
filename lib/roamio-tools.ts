@@ -989,12 +989,37 @@ export async function executeTool(name: string, input: any): Promise<any> {
       });
       const data = await res.json().catch(() => ({ ok: false, error: 'Bad response' }));
       if (!data.ok) return { ok: false, error: data.error || 'Regenerate failed' };
-      // Replace old post's caption with the new one, drop the freshly-created duplicate.
       const updatedCaption = data.post.caption;
-      posts[idx] = { ...old, caption: updatedCaption };
-      // The /draft endpoint already appended a new post — remove it.
-      const filtered = posts.filter((p: any) => p.id !== data.post.id);
-      await saveCollection(DEFAULT_USER_ID, 'social_posts', filtered);
+
+      // REGENERATE-MERGE-ON-WRITE-V1
+      // The /draft call above is a 10-15s AI generation that ITSELF appends
+      // a post to this same collection, so the `posts` array read before it
+      // is stale in two ways by the time we get here.
+      //
+      // The old code wrote that stale array straight back with
+      // saveCollection, a full replace. Its filter(p => p.id !== data.post.id)
+      // was a no-op by construction — the post being removed was created
+      // after the snapshot was taken, so it was never in the array; the
+      // duplicate only disappeared because the whole collection was
+      // overwritten. That same overwrite reverted anything else that changed
+      // in the window: with publish-due on */2, a post the cron published
+      // and marked 'published' mid-call came back as 'scheduled' with a
+      // scheduledAt in the past, and went out to the platform a second time
+      // on the next tick.
+      //
+      // Re-read and apply both mutations to the fresh array, keyed by id.
+      const fresh = (await getCollection<any[]>(DEFAULT_USER_ID, 'social_posts')) || [];
+      const freshIdx = fresh.findIndex((p: any) => p.id === input.id);
+      if (freshIdx === -1) {
+        return { ok: false, error: `Post ${input.id} no longer exists` };
+      }
+      const merged = fresh
+        // Drop the throwaway post /draft created — it really is in this array.
+        .filter((p: any) => p.id !== data.post.id)
+        // Apply only the caption change to whatever the post looks like now,
+        // so a status or schedule change made meanwhile is preserved.
+        .map((p: any) => (p.id === input.id ? { ...p, caption: updatedCaption } : p));
+      await saveCollection(DEFAULT_USER_ID, 'social_posts', merged);
       return { ok: true, id: input.id, captionPreview: updatedCaption.slice(0, 100) };
     }
 

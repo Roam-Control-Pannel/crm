@@ -702,7 +702,31 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
 
     // 7. Persist
     if (newPosts.length > 0) {
-      const all = [...existingPosts, ...newPosts];
+      // AUTOGEN-MERGE-ON-WRITE-V1
+      // `existingPosts` was read at step 5, before a long run of AI caption
+      // generations. Writing [...existingPosts, ...newPosts] replaced the
+      // whole collection from that stale snapshot, so any post the
+      // publish-due cron published during the run (it fires every 2 minutes)
+      // was restored to its pre-publish state — back to 'scheduled', with a
+      // scheduledAt now in the past — and went out to the platform a second
+      // time on the next tick.
+      //
+      // Re-read immediately before the write and merge: the fresh array is
+      // the base, and we append only posts that aren't already in it.
+      let base = existingPosts;
+      try {
+        const freshRes = await fetchJsonInternal(input.origin, '/api/store/social_posts', input.internalSecret);
+        if (Array.isArray(freshRes?.data)) base = freshRes.data;
+      } catch (err) {
+        // A failed re-read must not silently fall back to the stale
+        // snapshot — that is the exact overwrite this guard exists to
+        // prevent. Abort the persist; the slots stay unfilled and the next
+        // run picks them up.
+        console.error('[social-cron] pre-save re-read failed, skipping persist:', err);
+        throw new Error('Could not re-read social_posts before saving; aborted to avoid overwriting newer data');
+      }
+      const existingIds = new Set(base.map((p: SocialPostDraft) => p.id));
+      const all = [...base, ...newPosts.filter(p => !existingIds.has(p.id))];
       const saveRes = await fetch(`${input.origin}/api/store/social_posts`, {
         method: 'POST',
         headers: {

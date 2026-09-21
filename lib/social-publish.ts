@@ -14,6 +14,49 @@ import { getUserTokens, DEFAULT_USER_ID } from '@/lib/tokens';
 
 export type PublishPlatform = 'linkedin' | 'facebook' | 'instagram';
 
+/**
+ * PUBLISH-DEADLINE-V1
+ *
+ * Worst-case wall-clock for a single account publish. This used to be a
+ * bare constant in publish-due/route.ts used only for budget arithmetic —
+ * nothing enforced it. Every fetch in this module ran with no `signal`, so
+ * one hung Graph or LinkedIn call made a post's duration unbounded and the
+ * route's "we can fit another post" calculation fiction. When the platform
+ * then killed the function mid-run, the post was left in 'publishing' and
+ * re-published from scratch 15 minutes later.
+ *
+ * It now lives here, next to the code that honours it, and the route
+ * imports it so the arithmetic and the enforcement can't drift apart.
+ */
+export const MAX_POST_MS = 15_000;
+
+/**
+ * No single request may hold the whole budget. Clamped further by whatever
+ * is actually left of the post deadline.
+ */
+const REQUEST_TIMEOUT_MS = 10_000;
+
+/** Below this, a request cannot plausibly complete — fail rather than start. */
+const MIN_USEFUL_MS = 300;
+
+class PublishDeadlineExceeded extends Error {
+  constructor() {
+    super('Publish deadline exceeded');
+    this.name = 'PublishDeadlineExceeded';
+  }
+}
+
+/**
+ * An AbortSignal bounded by BOTH the per-request cap and the time left on
+ * the post's deadline, so total publish duration is bounded even when every
+ * individual call is merely slow rather than hung.
+ */
+function budgetedSignal(deadline: number, cap = REQUEST_TIMEOUT_MS): AbortSignal {
+  const remaining = deadline - Date.now();
+  if (remaining < MIN_USEFUL_MS) throw new PublishDeadlineExceeded();
+  return AbortSignal.timeout(Math.min(cap, remaining));
+}
+
 export interface PublishInput {
   accountId: string;
   platform: PublishPlatform;
@@ -21,6 +64,12 @@ export interface PublishInput {
   imageUrl?: string;
   metaPageId?: string;
   linkedinAuthorUrn?: string;
+  /**
+   * Absolute epoch-ms deadline for this publish. Callers running inside a
+   * function budget (publish-due) pass the time they can actually spare;
+   * everyone else gets MAX_POST_MS from now.
+   */
+  deadline?: number;
 }
 
 export interface PublishResult {
@@ -117,19 +166,21 @@ function resolveRoutingFromAccountId(input: PublishInput): PublishInput {
 async function waitForInstagramContainer(
   containerId: string,
   accessToken: string,
+  deadline: number,
 ): Promise<{ error: string; details?: unknown } | null> {
-  // 8 × 1.5s = up to 12s of polling. Kept deliberately bounded: the
-  // publish-due cron budgets ~15s of worst-case work per post against
-  // Netlify's ~26s function limit (see PUBLISH-DUE-BUDGET-V1), and a longer
-  // wait here would let a single Instagram post blow that budget and get the
-  // whole run killed mid-publish. Typical container ingest finishes in a few
-  // seconds, so 12s stays comfortably generous.
-  const maxAttempts = 8;
+  // PUBLISH-DEADLINE-V1: 5 × 1.5s = up to 7.5s of sleeping, down from 8 ×
+  // 1.5s = 12s. The old figure plus its eight round trips did not fit the
+  // 15s per-post budget the publish-due route assumes, which is how a
+  // single three-account post came to exceed the whole function budget on
+  // its own. Every poll is also bounded by the post deadline, and we stop
+  // early rather than sleeping past it.
+  const maxAttempts = 5;
   const intervalMs = 1500;
   let last: unknown;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const res = await fetch(
       `https://graph.facebook.com/v21.0/${containerId}?fields=status_code&access_token=${encodeURIComponent(accessToken)}`,
+      { signal: budgetedSignal(deadline) },
     );
     const data = await res.json();
     last = data;
@@ -144,7 +195,9 @@ async function waitForInstagramContainer(
         details: data,
       };
     }
-    // IN_PROGRESS (or an unexpected/missing status) — wait and re-poll.
+    // IN_PROGRESS (or an unexpected/missing status) — wait and re-poll, but
+    // never sleep into (or past) the deadline.
+    if (Date.now() + intervalMs + MIN_USEFUL_MS > deadline) break;
     await new Promise(resolve => setTimeout(resolve, intervalMs));
   }
   return {
@@ -211,6 +264,8 @@ export async function publishToAccount(rawInput: PublishInput): Promise<PublishR
 
   const input = resolveRoutingFromAccountId(rawInput);
   const { accountId, platform, caption, imageUrl, metaPageId, linkedinAuthorUrn } = input;
+  // PUBLISH-DEADLINE-V1: every network call below is bounded by this.
+  const deadline = rawInput.deadline ?? Date.now() + MAX_POST_MS;
   const tokens = await getUserTokens(DEFAULT_USER_ID);
 
   try {
@@ -225,8 +280,20 @@ export async function publishToAccount(rawInput: PublishInput): Promise<PublishR
       if (isCompanyPost && !tokens.linkedin.capabilities?.postCompany) {
         return fail(input, 'LinkedIn company posting capability not granted (Community Management API approval required)', 403);
       }
-      if (!isCompanyPost && !tokens.linkedin.capabilities?.postPersonal && !linkedinAuthorUrn) {
-        return fail(input, 'LinkedIn personal posting capability not granted', 403);
+      // LINKEDIN-SCOPE-GUARD-V1
+      // The `&& !linkedinAuthorUrn` clause that used to be here made this
+      // branch unreachable: resolveRoutingFromAccountId() runs first and
+      // sets linkedinAuthorUrn from the account id prefix for BOTH
+      // li-personal and li-company, and every real account id carries one.
+      // With the guard dead, a token issued without w_member_social got all
+      // the way through initializeUpload, the source-image download and the
+      // binary PUT before /rest/posts returned a bare 403 — burning a
+      // LinkedIn image upload on every retry and recording "LinkedIn 403"
+      // with no hint that a missing scope was the cause. The isCompanyPost
+      // test above already routes company posts away, so the clause was
+      // never needed.
+      if (!isCompanyPost && !tokens.linkedin.capabilities?.postPersonal) {
+        return fail(input, 'LinkedIn personal posting capability not granted (w_member_social scope missing — reconnect the account)', 403);
       }
 
       const authorUrn = linkedinAuthorUrn || tokens.linkedin.memberUrn;
@@ -255,6 +322,7 @@ export async function publishToAccount(rawInput: PublishInput): Promise<PublishR
             'X-Restli-Protocol-Version': '2.0.0',
           },
           body: JSON.stringify({ initializeUploadRequest: { owner: authorUrn } }),
+          signal: budgetedSignal(deadline),
         });
         if (!initRes.ok) {
           const initErr = await initRes.text();
@@ -269,7 +337,7 @@ export async function publishToAccount(rawInput: PublishInput): Promise<PublishR
           return fail(input, 'LinkedIn did not return upload URL', 502, initData);
         }
 
-        const imgRes = await fetch(imageUrl);
+        const imgRes = await fetch(imageUrl, { signal: budgetedSignal(deadline) });
         if (!imgRes.ok) {
           console.error('Source image fetch failed:', imgRes.status, imageUrl);
           return fail(input, `Could not fetch source image (${imgRes.status})`, 502);
@@ -284,6 +352,7 @@ export async function publishToAccount(rawInput: PublishInput): Promise<PublishR
             'Content-Type': imgContentType,
           },
           body: imgBuffer,
+          signal: budgetedSignal(deadline),
         });
         if (!uploadRes.ok) {
           const uploadErr = await uploadRes.text().catch(() => '');
@@ -303,6 +372,7 @@ export async function publishToAccount(rawInput: PublishInput): Promise<PublishR
           'X-Restli-Protocol-Version': '2.0.0',
         },
         body: JSON.stringify(payload),
+        signal: budgetedSignal(deadline),
       });
 
       const postUrn = postRes.headers.get('x-restli-id') || postRes.headers.get('X-RestLi-Id');
@@ -347,6 +417,7 @@ export async function publishToAccount(rawInput: PublishInput): Promise<PublishR
             caption,
             access_token: page.pageToken,
           }),
+          signal: budgetedSignal(deadline),
         });
         const photoData = await photoRes.json();
         if (photoData.error) {
@@ -366,6 +437,7 @@ export async function publishToAccount(rawInput: PublishInput): Promise<PublishR
           message: caption,
           access_token: page.pageToken,
         }),
+        signal: budgetedSignal(deadline),
       });
       const fbData = await fbRes.json();
       if (fbData.error) {
@@ -409,6 +481,7 @@ export async function publishToAccount(rawInput: PublishInput): Promise<PublishR
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ image_url: igImageUrl, caption, access_token: page.pageToken }),
+          signal: budgetedSignal(deadline),
         }
       );
       const container = await containerRes.json();
@@ -435,7 +508,7 @@ export async function publishToAccount(rawInput: PublishInput): Promise<PublishR
       // ingest and fails with "Media ID is not available". Wait for the
       // container to reach FINISHED before publishing. See
       // waitForInstagramContainer() above.
-      const notReady = await waitForInstagramContainer(container.id, page.pageToken);
+      const notReady = await waitForInstagramContainer(container.id, page.pageToken, deadline);
       if (notReady) {
         console.error('[social-publish] IG container not ready:', JSON.stringify(notReady.details));
         return fail(input, notReady.error, 502, notReady.details);
@@ -447,6 +520,7 @@ export async function publishToAccount(rawInput: PublishInput): Promise<PublishR
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ creation_id: container.id, access_token: page.pageToken }),
+          signal: budgetedSignal(deadline),
         }
       );
       const publishData = await publishRes.json();
@@ -461,6 +535,22 @@ export async function publishToAccount(rawInput: PublishInput): Promise<PublishR
 
     return fail(input, 'Unknown platform', 400);
   } catch (err: any) {
+    // PUBLISH-DEADLINE-V1: distinguish "we ran out of time" from a genuine
+    // platform error. The caller records this verbatim into post.results, so
+    // a timeout needs to be legible in the UI and the 🐛 debug output rather
+    // than surfacing as a bare "Unknown error".
+    if (
+      err?.name === 'PublishDeadlineExceeded' ||
+      err?.name === 'TimeoutError' ||
+      err?.name === 'AbortError'
+    ) {
+      console.error(`[social-publish] ${platform} publish exceeded its deadline`);
+      return fail(
+        input,
+        `${platform} publish timed out (exceeded ${MAX_POST_MS}ms budget)`,
+        504
+      );
+    }
     console.error('publish error:', err);
     return fail(input, err?.message || 'Unknown error', 500);
   }
