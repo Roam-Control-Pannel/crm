@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getStore } from '@netlify/blobs';
+import { MODEL_SONNET } from '@/lib/ai-models';
 
 export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
@@ -248,7 +249,7 @@ export async function POST(req: NextRequest) {
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
+        model: MODEL_SONNET,
         max_tokens: 2048,
         system: SYSTEM,
         messages: [

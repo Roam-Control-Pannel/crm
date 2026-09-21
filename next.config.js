@@ -27,6 +27,17 @@ const nextConfig = {
   eslint: {
     dirs: ['app', 'components', 'lib', 'netlify', 'types'],
   },
+  // GRAPHIC-COMPOSE-V1
+  // lib/compose-graphic.ts reads the brand font and the lion mark from disk at
+  // render time, through paths built from process.cwd(). Next's tracer follows
+  // static imports, not runtime path joins, so without this the files are left
+  // out of the deployed function bundle. A missing logo is skipped with a
+  // warning; a missing font makes the route throw by design, because the
+  // alternative is Pango quietly substituting a face and shipping an off-brand
+  // graphic nobody notices.
+  outputFileTracingIncludes: {
+    '/api/social/compose': ['./assets/fonts/**', './public/logo-lionFav-icon.png'],
+  },
   async headers() {
     return [{ source: '/:path*', headers: securityHeaders }];
   },

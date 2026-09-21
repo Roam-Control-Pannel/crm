@@ -37,6 +37,17 @@ export interface PostingTimes {
   // CRON-AUTOGEN-V1: how many days ahead the auto-generate cron fills.
   // Optional — falls back to DEFAULT_LOOKAHEAD_DAYS when undefined.
   lookaheadDays?: number;
+  /**
+   * IMAGE-COOLDOWN-V1: days an image must sit out before it can be chosen
+   * again. Optional — falls back to DEFAULT_IMAGE_COOLDOWN_DAYS.
+   *
+   * There is a ceiling worth knowing about: the window can only be honoured
+   * while (posts per day x cooldown days) stays under the size of the image
+   * library. At ~7 posts/day against 324 Brain images that ceiling is about
+   * 44 days. Set it higher and the least-recently-used fallback simply runs
+   * all the time, which is the same behaviour with extra steps.
+   */
+  imageCooldownDays?: number;
 }
 
 // ============================================================
@@ -86,6 +97,20 @@ export interface SocialSettingsBlob {
   themeOverrides: ThemeOverrides;
   // MULTI-BRIEF-V1: optional — empty map means all briefs equal.
   briefWeights?: BriefWeights;
+  /**
+   * AI-MODELS-V1: which Anthropic model writes social captions. Optional —
+   * falls back to DEFAULT_CAPTION_MODEL. Validated against CAPTION_MODELS on
+   * both write and read, so a corrupt blob can never send an unknown id to
+   * the API (which would surface as every caption coming back empty).
+   */
+  captionModel?: string;
+  /**
+   * IMAGE-SEMANTIC-V1: let a model shortlist Brain photos per theme instead
+   * of relying on word overlap. Optional — defaults to on. Costs one small
+   * request per theme per run; turning it off restores the purely lexical
+   * ranking with no other change.
+   */
+  semanticImageMatch?: boolean;
   updatedAt: string;     // ISO timestamp
 }
 
@@ -100,6 +125,12 @@ export interface EffectiveSocialSettings {
   lookaheadDays: number;
   // MULTI-BRIEF-V1: always defined (empty map if not configured)
   briefWeights: BriefWeights;
+  // IMAGE-COOLDOWN-V1: always defined (falls back to the default)
+  imageCooldownDays: number;
+  // AI-MODELS-V1: always defined and always a known id.
+  captionModel: string;
+  // IMAGE-SEMANTIC-V1: always defined (defaults to true).
+  semanticImageMatch: boolean;
 }
 
 // ============================================================

@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createHmac } from 'node:crypto';
 import { getToolSchemas, executeTool, REQUIRES_CONFIRM } from '@/lib/roamio-tools';
 import { safeEqual } from '@/lib/safe-equal';
+import { DEFAULT_CHAT_MODEL } from '@/lib/ai-models';
+import { normaliseSystem } from '@/lib/ai-system-blocks';
 
 // sharp-free but Node-only (node:crypto for the confirm binding below).
 export const runtime = 'nodejs';
@@ -81,6 +83,24 @@ const TIMEOUT_MESSAGE =
   "Sorry — that took longer than I'm able to spend on a single reply. " +
   'Try asking something more specific, or break it into smaller steps and I can pick up from there.';
 
+/**
+ * Log what the cache actually did. Without this, "we added prompt caching"
+ * is an assumption rather than a measurement — the prefix may be below the
+ * model's minimum, or the 5-minute TTL may have lapsed between calls, and
+ * both look identical from the outside. Only logs when a cache field is
+ * non-zero, so it stays quiet on the uncached path.
+ */
+function logCacheUsage(model: string, data: any): void {
+  const u = data?.usage;
+  if (!u) return;
+  const created = u.cache_creation_input_tokens || 0;
+  const read = u.cache_read_input_tokens || 0;
+  if (created === 0 && read === 0) return;
+  console.log(
+    `[ai/chat] cache ${model}: written=${created} read=${read} uncached=${u.input_tokens || 0}`
+  );
+}
+
 async function callAnthropic(
   body: any,
   deadline: number
@@ -154,9 +174,9 @@ export async function POST(req: NextRequest) {
 
     // ----- First model call ----------------------------------------------
     const baseBody: any = {
-      model: model || 'claude-sonnet-4-6',
+      model: model || DEFAULT_CHAT_MODEL,
       max_tokens: maxTokens || (toolMode ? CHAT_MAX_TOKENS : 4096),
-      system: systemPrompt,
+      system: normaliseSystem(systemPrompt),
       messages,
     };
     if (toolMode) baseBody.tools = toolSchemas;
@@ -175,6 +195,7 @@ export async function POST(req: NextRequest) {
 
     // ----- Non-tool path: legacy behaviour preserved ---------------------
     if (!toolMode) {
+      logCacheUsage(baseBody.model, data);
       return NextResponse.json({ content: data?.content?.[0]?.text || '' });
     }
 
@@ -364,9 +385,9 @@ async function runConfirmedTool(opts: {
   ];
 
   const { ok, status, data, raw, timedOut } = await callAnthropic({
-    model: model || 'claude-sonnet-4-6',
+    model: model || DEFAULT_CHAT_MODEL,
     max_tokens: maxTokens || CHAT_MAX_TOKENS,
-    system: systemPrompt,
+    system: normaliseSystem(systemPrompt),
     messages: convo,
     tools: toolSchemas,
   }, deadline);

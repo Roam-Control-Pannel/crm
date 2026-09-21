@@ -8,6 +8,7 @@ import {
   storedContentTypeFor,
   storedExtensionFor,
 } from '@/lib/uploads';
+import { BRAIN_VISION_MODEL } from '@/lib/ai-models';
 // BRAIN-STORE-V1: shared, fail-closed index accessors. This route is the
 // worst case for the old swallow-as-[] behaviour: both branches of POST are
 // read-append-write, so one failed read during an upload replaced the entire
@@ -60,7 +61,7 @@ async function autoTagImage(base64: string, mediaType: string): Promise<{ tags: 
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
+        model: BRAIN_VISION_MODEL,
         max_tokens: 400,
         messages: [
           {
