@@ -48,7 +48,11 @@ jobs:
           fi
 
           # The sequences endpoint authenticates via Bearer (not x-internal-call).
+          # --max-time / --connect-timeout: the sequences run iterates the
+          # whole contact list, so it gets a longer ceiling than publish-due,
+          # but it must still have one.
           response="$(curl -sS -X GET \
+            --connect-timeout 15 --max-time 120 \
             -H "Authorization: Bearer ${CRON_SECRET_V2}" \
             -w $'\n%{http_code}' \
             "${SITE_URL}/api/sequences?scheduled=1")"
@@ -63,4 +67,16 @@ jobs:
           if [ "${status}" != "200" ]; then
             echo "::error::sequences returned HTTP ${status}"
             exit 1
+          fi
+
+          # CRON-REPORTING-V1: gate on content too. The route answers 200 with
+          # success:false when the run itself failed after sending some mail.
+          if ! printf '%s' "$body" | jq -e '.success == true or .skipped == true' >/dev/null 2>&1; then
+            echo "::error::sequences run reported failure: $(printf '%s' "$body" | jq -r '.error // .message // "no detail"')"
+            exit 1
+          fi
+
+          errors="$(printf '%s' "$body" | jq -r '.errors // 0')"
+          if [ "${errors}" != "0" ] && [ "${errors}" != "null" ]; then
+            echo "::warning::sequences completed with ${errors} per-contact error(s) — check the body above."
           fi

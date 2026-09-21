@@ -25,6 +25,14 @@ const REPLY_ALIASES = [
 ];
 const PROCESSED_LABEL = 'crm-processed';
 
+// IMAP-SEARCH-SCOPE-V1: how far back each poll looks. The job runs every 15
+// minutes and the outreach cadence tops out at 14 days, so 30 days is
+// generous headroom while still bounding the work if the processed-label
+// filter ever stops matching. A reply older than this that was never
+// processed would be missed — which is why the label filter, not this
+// window, is the primary exclusion.
+const SEARCH_WINDOW_DAYS = 30;
+
 export interface InboundReply {
   uid: number;
   fromEmail: string;
@@ -36,6 +44,29 @@ export interface InboundReply {
   isAutoResponder: boolean;
   deliveredTo: string;    // which alias the mail was addressed to
 }
+
+/**
+ * IMAP-TIMEOUTS-V1
+ *
+ * imapflow defaults every one of these to no limit. Combined with the
+ * `finally { await client.logout() }` blocks below, that produced the one
+ * failure mode that compounds: if imap.gmail.com accepts the TCP connection
+ * and then stalls — which is the shape Gmail throttling takes — the await on
+ * connect() never returns, the finally never runs, and the socket is orphaned
+ * when the platform kills the function. At a 15-minute cadence that is four
+ * leaked sessions an hour against Gmail's ~15-connection ceiling, so within a
+ * few hours every subsequent connect fails with "Too many simultaneous
+ * connections" and inbound polling is dead until the sessions age out — then
+ * the cycle repeats.
+ *
+ * The three budgets sum to well under the function's own limit, so a stalled
+ * mailbox now fails the run quickly and cleanly instead of silently consuming
+ * a connection slot.
+ */
+const CONNECTION_TIMEOUT_MS = 10_000; // TCP + TLS handshake
+const GREETING_TIMEOUT_MS = 10_000;   // server banner after connect
+const SOCKET_TIMEOUT_MS = 20_000;     // inactivity on an established socket
+const LOGOUT_TIMEOUT_MS = 5_000;      // graceful close before we force it
 
 /** Connect with credentials from env. Throws if unconfigured. */
 async function connect(): Promise<ImapFlow> {
@@ -50,9 +81,42 @@ async function connect(): Promise<ImapFlow> {
     secure: true,
     auth: { user, pass },
     logger: false, // imapflow's own logging is too chatty for production
+    connectionTimeout: CONNECTION_TIMEOUT_MS,
+    greetingTimeout: GREETING_TIMEOUT_MS,
+    socketTimeout: SOCKET_TIMEOUT_MS,
   });
-  await client.connect();
+  try {
+    await client.connect();
+  } catch (err) {
+    // A failed connect can still leave a socket half-open. close() is
+    // synchronous and forceful, and is safe to call on a client that never
+    // finished connecting.
+    try { client.close(); } catch { /* already gone */ }
+    throw err;
+  }
   return client;
+}
+
+/**
+ * IMAP-TIMEOUTS-V1: always give the connection back.
+ *
+ * logout() is itself a network round trip and can hang on exactly the stalled
+ * server we are defending against, so it gets its own budget and is always
+ * followed by close(). close() on an already-closed client is a no-op.
+ */
+async function disconnect(client: ImapFlow): Promise<void> {
+  try {
+    await Promise.race([
+      client.logout(),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('logout timed out')), LOGOUT_TIMEOUT_MS)
+      ),
+    ]);
+  } catch (err: any) {
+    console.error('[imap] graceful logout failed, forcing close:', err?.message);
+  } finally {
+    try { client.close(); } catch { /* already gone */ }
+  }
 }
 
 /**
@@ -179,16 +243,28 @@ export async function fetchPendingReplies(): Promise<InboundReply[]> {
   try {
     const lock = await client.getMailboxLock('INBOX');
     try {
-      // Search: messages addressed to any of our aliases that DON'T already
-      // have our processed label. Gmail exposes labels as IMAP keywords so
-      // we can use $NOT-keyword in search criteria.
-      // Note: Gmail's IMAP search OR semantics are awkward — we issue
-      // multiple searches and merge UID sets.
+      // IMAP-SEARCH-SCOPE-V1
+      // The search now excludes already-processed mail server-side and is
+      // bounded by date. Previously it asked only `{ to: alias }`, with a
+      // comment claiming imapflow "doesn't expose 'not' cleanly" — it does
+      // (SearchObject.not, and a Gmail-specific labels.not), so every run was
+      // pulling the ENTIRE reply archive and filtering after download.
+      //
+      // This had to land together with the UID fix below. Until now the fetch
+      // was silently reading sequence numbers, so it never actually pulled
+      // the full archive it had asked for; correcting the fetch without also
+      // narrowing the search would have turned a wrong-messages bug into a
+      // download-everything timeout on the very first run.
+      //
+      // Gmail's IMAP search OR semantics are awkward, so we still issue one
+      // search per alias and merge the UID sets.
+      const since = new Date(Date.now() - SEARCH_WINDOW_DAYS * 86_400_000);
       const allUids = new Set<number>();
       for (const alias of REPLY_ALIASES) {
         const uids = await client.search({
           to: alias,
-          // not: { keyword: PROCESSED_LABEL }  // imapflow doesn't expose 'not' cleanly; we filter post-fetch
+          since,
+          not: { keyword: PROCESSED_LABEL },
         }, { uid: true });
         if (Array.isArray(uids)) uids.forEach((u) => allUids.add(u));
       }
@@ -197,13 +273,25 @@ export async function fetchPendingReplies(): Promise<InboundReply[]> {
         return [];
       }
 
-      // Fetch headers + flags + full source for each candidate
-      for await (const msg of client.fetch([...allUids], {
-        uid: true,
-        flags: true,
-        source: true,
-      })) {
-        // Skip messages already labelled processed
+      // IMAP-UID-FETCH-V1
+      // `uid` means two different things in imapflow and they are NOT
+      // interchangeable:
+      //   FetchQueryObject.uid — "include the UID in the response"
+      //   FetchOptions.uid     — "treat the range as UIDs, not sequence numbers"
+      // The range here comes from search({...}, { uid: true }), so it is UIDs.
+      // Passing uid only in the QUERY (as this did) left the range interpreted
+      // as sequence numbers, so the poller fetched whichever messages happened
+      // to sit at those positions — on any mailbox where a message has ever
+      // been deleted, seq and uid diverge and the wrong mail is read. It is
+      // now set in BOTH: the query so msg.uid is populated, the options so the
+      // range means what we intend.
+      for await (const msg of client.fetch(
+        [...allUids],
+        { uid: true, flags: true, source: true },
+        { uid: true }
+      )) {
+        // Belt and braces: the search already excludes the processed label,
+        // but a message labelled between search and fetch would slip through.
         const flags = msg.flags ? Array.from(msg.flags) : [];
         if (flags.includes(PROCESSED_LABEL)) continue;
 
@@ -228,7 +316,7 @@ export async function fetchPendingReplies(): Promise<InboundReply[]> {
       lock.release();
     }
   } finally {
-    await client.logout();
+    await disconnect(client);
   }
 
   return replies;
@@ -256,6 +344,6 @@ export async function markProcessed(uids: number[]): Promise<void> {
   } catch (err: any) {
     console.error('[imap] markProcessed failed:', err?.message);
   } finally {
-    await client.logout();
+    await disconnect(client);
   }
 }

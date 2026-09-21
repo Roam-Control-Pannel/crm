@@ -25,9 +25,38 @@ export interface CronStatus {
   history: CronRunRecord[]; // most recent 14 entries, newest first
 }
 
+/**
+ * INBOUND-HEALTH-V1
+ *
+ * The inbound IMAP poller was the only scheduled job with no health surface
+ * at all: nothing recorded or exposed a run, and /api/settings/diagnostics
+ * and /api/sequences/status both reported the sequences cron only. When the
+ * poller stopped, replies were never ingested, OUTREACH_STATUS was never
+ * flipped to `responded`, and the 08:00 sequences run went on to send a
+ * "final nudge" to prospects who had already written back — with nothing
+ * anywhere in the UI to show the poller had died.
+ *
+ * Deliberately a separate, smaller record from CronRunRecord: the two jobs
+ * share a store but not a shape, and overloading the sequences history would
+ * corrupt sendsToday().
+ */
+export interface InboundRunRecord {
+  ranAt: string;   // ISO timestamp
+  ok: boolean;
+  fetched: number; // replies pulled from the mailbox
+  errors: number;
+  message: string;
+}
+
+export interface InboundStatus {
+  lastRun?: InboundRunRecord;
+  history: InboundRunRecord[];
+}
+
 const STORE_NAME = 'roam-system';
 const KEY = 'sequences-cron-status';
 const CLAIM_KEY = 'sequences-cron-claim';
+const INBOUND_KEY = 'inbound-poll-status';
 const HISTORY_LIMIT = 14;
 
 function statusStore() {
@@ -125,3 +154,40 @@ export async function sendsToday(): Promise<number> {
 
 /** Daily cap (emails per UTC day). */
 export const DAILY_SEND_CAP = 50;
+
+
+/**
+ * INBOUND-HEALTH-V1: last inbound-poll runs. Same fail-closed contract as
+ * getCronStatus — returns an empty history only when nothing was ever
+ * recorded, throws if the read failed.
+ */
+export async function getInboundStatus(): Promise<InboundStatus> {
+  const data = await readStored<InboundStatus>('the inbound poll history', () =>
+    statusStore().get(INBOUND_KEY, { type: 'json' })
+  );
+  return data ?? { history: [] };
+}
+
+export async function recordInboundRun(record: InboundRunRecord): Promise<void> {
+  const store = statusStore();
+  let current: InboundStatus;
+  try {
+    current = await getInboundStatus();
+  } catch (err) {
+    // Same reasoning as recordCronRun: losing one record beats writing a
+    // single-entry history over the rest, and this runs after the work.
+    if (isStoreReadError(err)) {
+      console.error(
+        '[cron-status] inbound history unreadable — skipping the run record. Run was:',
+        JSON.stringify(record)
+      );
+      return;
+    }
+    throw err;
+  }
+  const next: InboundStatus = {
+    lastRun: record,
+    history: [record, ...current.history].slice(0, HISTORY_LIMIT),
+  };
+  await store.setJSON(INBOUND_KEY, next as any);
+}

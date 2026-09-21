@@ -368,12 +368,34 @@ async function handle(req: NextRequest) {
     processed++;
   }
 
-  return NextResponse.json({
-    ok: true,
-    dueCount: duePosts.length,
-    processed,
-    skipped: Math.max(0, duePosts.length - processed),
-    stoppedEarly,
-    results: summary,
-  });
+  // CRON-REPORTING-V1
+  // This used to answer a flat 200 { ok: true } no matter what happened, so a
+  // run in which EVERY account failed — the shape a 60-day-expired LinkedIn
+  // refresh token or an invalidated Meta page token takes — was indis-
+  // tinguishable from a clean one. Both the GitHub Actions backup and the
+  // Netlify wrapper only checked the status code, so the failure could run
+  // silently for weeks. Compounding it: failed posts are excluded from the
+  // due filter, so they are never retried even once the token is fixed.
+  //
+  // 207 Multi-Status is the honest answer when some of the work inside a
+  // successful request did not succeed. `ok` stays true because the ROUTE
+  // ran correctly; the caller is expected to look at failedAccounts.
+  const failedAccounts = summary.reduce(
+    (n, p) => n + p.accountResults.filter(r => !r.ok).length,
+    0
+  );
+  const degraded = summary.some(p => p.status === 'partial' || p.status === 'failed');
+
+  return NextResponse.json(
+    {
+      ok: true,
+      dueCount: duePosts.length,
+      processed,
+      skipped: Math.max(0, duePosts.length - processed),
+      stoppedEarly,
+      failedAccounts,
+      results: summary,
+    },
+    { status: degraded ? 207 : 200 }
+  );
 }

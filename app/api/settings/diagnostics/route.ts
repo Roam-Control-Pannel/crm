@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getCronStatus, sendsToday } from '@/lib/cron-status';
+import { getCronStatus, sendsToday, getInboundStatus } from '@/lib/cron-status';
 import { getAppSettings } from '@/lib/app-settings';
 import { getHiddenListIds } from '@/lib/hidden-lists';
 
@@ -18,11 +18,13 @@ export async function GET() {
   // "0 of 50 sent today" when the history is simply unreadable is exactly
   // the misreading that let the send cap reset unnoticed.
   const FAILED = Symbol('failed');
-  const [brevo, cron, settings, hiddenIds] = await Promise.all([
+  const [brevo, cron, settings, hiddenIds, inbound] = await Promise.all([
     probeBrevo().catch(err => ({ ok: false as const, error: err?.message || String(err) })),
     getCronStatus().catch(() => FAILED as any),
     getAppSettings().catch(() => null),
     getHiddenListIds().catch(() => FAILED as any),
+    // INBOUND-HEALTH-V1
+    getInboundStatus().catch(() => FAILED as any),
   ]);
 
   const sends = await sendsToday().catch(() => FAILED as any);
@@ -38,6 +40,26 @@ export async function GET() {
       dailyCap,
     },
     hiddenLists: hiddenIds === FAILED ? null : (hiddenIds as number[]).length,
+    // INBOUND-HEALTH-V1: the reply poller had no health surface at all. A
+    // stale `lastRun` here is the signal that replies are not being ingested
+    // — which is what lets the sequences cron send a "final nudge" to someone
+    // who already wrote back.
+    inbound: inbound === FAILED
+      ? { unavailable: true, lastRun: null, staleMinutes: null }
+      : (() => {
+          const last = (inbound as any).lastRun || null;
+          const staleMinutes = last
+            ? Math.round((Date.now() - new Date(last.ranAt).getTime()) / 60000)
+            : null;
+          return {
+            unavailable: false,
+            lastRun: last,
+            staleMinutes,
+            // The job is scheduled every 15 minutes; flag it well before a
+            // human would notice replies had stopped arriving.
+            stale: staleMinutes === null || staleMinutes > 45,
+          };
+        })(),
   });
 }
 

@@ -35,6 +35,12 @@
 
 # CRON-INBOUND-V1
 # Poll the inbound IMAP mailbox for replies every 15 minutes.
+# A GitHub Actions backup now mirrors this at the same cadence
+# (.github/workflows/inbound-poll.yml) — this was the only one of the three
+# scheduled jobs without one, on a site where Netlify's scheduler has silently
+# failed to register before. Double-firing is safe: the IMAP search excludes
+# messages already carrying the crm-processed label, and storeReply is keyed
+# on (email, uid).
 [functions."inbound-poll"]
   schedule = "*/15 * * * *"
 

@@ -1,6 +1,17 @@
 import type { Config } from '@netlify/functions';
 
 /**
+ * SCHEDULED-FETCH-TIMEOUT-V1
+ *
+ * A scheduled function whose fetch has no signal can sit on an unresponsive
+ * app until the platform kills it, which logs as a generic invocation failure
+ * with no indication of what stalled. 25s leaves room for the wrapper to
+ * report the timeout itself before Netlify's own limit lands.
+ */
+const WRAPPER_TIMEOUT_MS = 25_000;
+
+
+/**
  * CRON-PUBLISH-V1
  *
  * Scheduled function: every 2 minutes, hit /api/social/publish-due so any
@@ -41,12 +52,25 @@ export default async () => {
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'x-internal-call': secret },
+      signal: AbortSignal.timeout(WRAPPER_TIMEOUT_MS),
     });
     const body = await res.text();
+    // CRON-REPORTING-V1: res.ok covers 200-299, so a 207 (some accounts
+    // failed) used to log as a clean run. Inspect the payload, not just the
+    // status — an expired LinkedIn refresh token fails every account while
+    // the request itself succeeds perfectly.
     if (!res.ok) {
       console.error(`[scheduled:social-publish-due] failed ${res.status}: ${body.slice(0, 500)}`);
     } else {
-      console.log(`[scheduled:social-publish-due] ok: ${body.slice(0, 500)}`);
+      let failedAccounts = 0;
+      try { failedAccounts = JSON.parse(body)?.failedAccounts ?? 0; } catch { /* non-JSON, logged below */ }
+      if (res.status === 207 || failedAccounts > 0) {
+        console.error(
+          `[scheduled:social-publish-due] DEGRADED (${res.status}), ${failedAccounts} account publish(es) failed: ${body.slice(0, 500)}`
+        );
+      } else {
+        console.log(`[scheduled:social-publish-due] ok: ${body.slice(0, 500)}`);
+      }
     }
     return new Response(body, { status: res.status });
   } catch (err) {

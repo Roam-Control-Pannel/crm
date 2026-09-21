@@ -1,6 +1,17 @@
 import type { Config } from '@netlify/functions';
 
 /**
+ * SCHEDULED-FETCH-TIMEOUT-V1
+ *
+ * A scheduled function whose fetch has no signal can sit on an unresponsive
+ * app until the platform kills it, which logs as a generic invocation failure
+ * with no indication of what stalled. 25s leaves room for the wrapper to
+ * report the timeout itself before Netlify's own limit lands.
+ */
+const WRAPPER_TIMEOUT_MS = 25_000;
+
+
+/**
  * Daily outreach sequences cron.
  *
  * Fires at 08:00 UTC every day, which is:
@@ -31,6 +42,7 @@ export default async () => {
     const res = await fetch(`${url}/api/sequences?scheduled=1`, {
       method: 'GET',
       headers: { Authorization: `Bearer ${secret}` },
+      signal: AbortSignal.timeout(WRAPPER_TIMEOUT_MS),
     });
     const body = await res.text();
     if (!res.ok) {
