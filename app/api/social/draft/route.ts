@@ -5,6 +5,7 @@ import { getEffectiveSettings } from '@/lib/social-settings';
 import { DEFAULT_BRIEFS, type Brief } from '@/lib/briefs';
 import { getCollection, saveCollection, DEFAULT_USER_ID } from '@/lib/store';
 import { buildImageUsage, DEFAULT_IMAGE_COOLDOWN_DAYS } from '@/lib/image-usage';
+import { buildCaptionHistory } from '@/lib/caption-history';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -85,7 +86,8 @@ export async function POST(req: NextRequest) {
     }
 
     // 2. Resolve theme (pick random enabled if not specified)
-    const { themes } = await getEffectiveSettings();
+    const settings = await getEffectiveSettings();
+    const { themes } = settings;
     const candidates = themes.filter(t => t.enabled && t.briefIds.includes(briefId));
     let theme = themeId ? candidates.find(t => t.id === themeId) : candidates[Math.floor(Math.random() * candidates.length)];
     if (!theme && candidates.length > 0) theme = candidates[0];
@@ -137,16 +139,22 @@ export async function POST(req: NextRequest) {
     // calendar (it backs Roam-io's create_post_draft), so it has to respect
     // the same history — it previously passed no exclusions at all and could
     // hand out a photo that went live yesterday.
-    const existingForUsage =
-      (await getCollection<Array<{ imageUrl?: string; scheduledAt?: string }>>(
-        DEFAULT_USER_ID, 'social_posts'
-      )) || [];
-    const draftUsage = buildImageUsage(existingForUsage);
+    // CAPTION-VARIETY-V1 reads the same array for caption history, so the
+    // element type carries the caption fields too and the collection is read
+    // once rather than twice.
+    const existingForHistory =
+      (await getCollection<Array<{
+        imageUrl?: string; scheduledAt?: string; caption?: string; accountIds?: string[];
+      }>>(DEFAULT_USER_ID, 'social_posts')) || [];
+    const draftUsage = buildImageUsage(existingForHistory);
     const draftSlotTime = scheduledAt ? new Date(scheduledAt).getTime() : Date.now();
     const draftUsageOpts = {
       usage: draftUsage,
+      // Honour the configured window rather than the compiled-in default —
+      // Fill calendar reads it from settings and this route writes into the
+      // same calendar.
       slotTime: Number.isFinite(draftSlotTime) ? draftSlotTime : Date.now(),
-      cooldownDays: DEFAULT_IMAGE_COOLDOWN_DAYS,
+      cooldownDays: settings.imageCooldownDays ?? DEFAULT_IMAGE_COOLDOWN_DAYS,
     };
 
     if (withImage === 'brain') {
@@ -201,7 +209,16 @@ export async function POST(req: NextRequest) {
     //    Brain image when there is one.
     let caption = captionOverride;
     if (!caption) {
-      caption = await generateCaption(origin, brief, theme, meta, account, secret, scheduledAt, imageForCaption);
+      // CAPTION-VARIETY-V1 / AI-MODELS-V1: same history and model the Fill
+      // calendar engine uses, so a one-off draft can't reopen with a hook
+      // this account used last week.
+      const history = buildCaptionHistory(
+        existingForHistory, accountId, new Date(scheduledAt).getTime() || Date.now()
+      );
+      caption = await generateCaption(
+        origin, brief, theme, meta, account, secret, scheduledAt, imageForCaption,
+        { history, model: settings.captionModel }
+      );
       if (!caption) {
         return NextResponse.json({ ok: false, error: 'Caption generation failed' }, { status: 502 });
       }

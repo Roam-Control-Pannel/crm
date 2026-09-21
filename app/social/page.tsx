@@ -6,6 +6,8 @@ import { GOAL_OPTIONS, getGoalLabel } from '@/lib/goals';
 import { SocialAccount, fetchRealAccounts, combineAccounts, fetchAccountMeta, AccountHandleCache, updateAccountHandleCache } from '@/lib/social-accounts';
 import { loadWithMigration, saveRemote } from '@/lib/client-store';
 import { buildImageUsage, DEFAULT_IMAGE_COOLDOWN_DAYS } from '@/lib/image-usage';
+import { buildCaptionHistory, captionHistoryLines } from '@/lib/caption-history';
+import { MODEL_SONNET } from '@/lib/ai-models';
 import LoadErrorBanner from '@/components/LoadErrorBanner';
 import { buildUnsplashCredit } from '@/lib/unsplash-credit';
 import BrainPicker from '@/components/BrainPicker';
@@ -705,6 +707,16 @@ export default function SocialPage() {
     const contentBrief = acc.contentBriefOverride || brief.contentBrief;
     const hashtags = acc.hashtagsOverride || brief.hashtags;
     const theme = form.town?.trim() || form.caption.trim().slice(0, 200) || "an upcoming post";
+    // BRAND-VOICE-IN-CAPTIONS-V1: the voice guide the user writes on the
+    // Briefs page reached the Roam-io chat and nothing else. It belongs in
+    // every path that drafts copy.
+    const voiceGuide = brief.brandVoice && brief.brandVoice.trim()
+      ? `\nBRAND VOICE (follow strictly — outranks the generic rules below):\n${brief.brandVoice.trim()}\n`
+      : '';
+    // CAPTION-VARIETY-V1: show it what this account has already said.
+    const historyBlock = captionHistoryLines(
+      buildCaptionHistory(posts, acc.id, new Date(form.scheduledDate + 'T' + form.scheduledTime).getTime() || Date.now())
+    ).join('\n');
 
     const prompt = `You are writing a single social media post for ${acc.handle} (${acc.platform}${acc.region ? ' · ' + acc.region : ''}).
 
@@ -713,10 +725,11 @@ Brand context:
 - Tone: ${tone}
 - Content focus: ${contentBrief}
 - Hashtags to use: ${hashtags}
-
+${voiceGuide}
 Theme / topic: ${theme}
 
 ${buildVoiceRules(acc.platform)}
+${historyBlock}
 
 Return ONLY the caption text. No JSON, no markdown, no preamble. Just the caption ready to publish.`;
 
@@ -725,7 +738,7 @@ Return ONLY the caption text. No JSON, no markdown, no preamble. Just the captio
       const res = await fetch('/api/ai/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: [{ role: 'user', content: prompt }], model: 'claude-sonnet-4-5' }),
+        body: JSON.stringify({ messages: [{ role: 'user', content: prompt }], model: MODEL_SONNET }),
       });
       const data = await res.json();
       const txt = (typeof data.content === 'string' ? data.content : (data.content?.[0]?.text || data.text || '')).trim();
@@ -787,7 +800,7 @@ Return ONLY the expanded caption text. No JSON, no markdown, no preamble. Just t
       const res = await fetch('/api/ai/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: [{ role: 'user', content: prompt }], model: 'claude-sonnet-4-5' }),
+        body: JSON.stringify({ messages: [{ role: 'user', content: prompt }], model: MODEL_SONNET }),
       });
       const data = await res.json();
       const txt = (typeof data.content === 'string' ? data.content : (data.content?.[0]?.text || data.text || '')).trim();
@@ -1033,6 +1046,13 @@ Return ONLY the expanded caption text. No JSON, no markdown, no preamble. Just t
 
         const n = genForm.postsPerAccount;
         const postWord = n === 1 ? 'post' : 'posts';
+        // CAPTION-VARIETY-V1: the batch already varies WITHIN itself (one
+        // call, N posts, the rule below). What it could not see is the rest
+        // of the calendar, so a fresh batch happily reopened with the same
+        // hook as last week's. Scoped per account, same as Fill calendar.
+        const batchHistoryBlock = captionHistoryLines(
+          buildCaptionHistory(posts, acc.id, new Date(genForm.weekStart).getTime() || Date.now())
+        ).join('\n');
         const varyRule = n === 1
           ? `Follow these voice and format rules.`
           : `Each of the ${n} posts must follow these voice and format rules independently. Vary the angle, hook, and observation across the batch — no two posts should feel like the same thought rephrased.`;
@@ -1048,6 +1068,7 @@ Theme / topic for this batch: ${genForm.theme}
 ${goalLabel ? 'Goal of these posts: ' + goalLabel : ''}
 
 ${buildVoiceRules(acc.platform)}
+${batchHistoryBlock}
 
 ${varyRule}
 

@@ -39,6 +39,14 @@ import {
   DEFAULT_IMAGE_COOLDOWN_DAYS,
   type ImageUsageMap,
 } from '@/lib/image-usage';
+import {
+  buildCaptionHistory,
+  captionHistoryLines,
+  EMPTY_CAPTION_HISTORY,
+  type CaptionHistory,
+  type CaptionSourcePost,
+} from '@/lib/caption-history';
+import { captionModelSpec } from '@/lib/ai-models';
 
 // Mirrors the SocialPost interface defined inline in app/social/page.tsx.
 // Kept in sync by convention — if that interface changes, this one must too.
@@ -343,14 +351,24 @@ export async function pickUnsplashImage(
 // Caption generation
 // ----------------------------------------------------------------------------
 
-// Per-caption timeout. A single AI generation is ~10-15s; capping it keeps
-// one slow call from pushing a batch past the platform's ~26s synchronous
-// function limit (see runAutoGenerate's budget note).
-const CAPTION_TIMEOUT_MS = 13000;
+/**
+ * Everything the copywriter needs about what has already gone out on this
+ * account, plus the model to use. Grouped into one argument because the
+ * call sites (Fill calendar, /api/social/draft, the composer's Generate
+ * button) all need to pass the same set and a fourth positional string
+ * would be a bug waiting to happen.
+ */
+export interface CaptionOptions {
+  /** CAPTION-VARIETY-V1: previous posts on this account. */
+  history?: CaptionHistory;
+  /** AI-MODELS-V1: resolved caption model id. Defaults to Sonnet. */
+  model?: string;
+}
 
 /**
- * Build a system prompt that fuses the brief, the theme, and per-account
- * overrides. Then call /api/ai/chat and return the generated caption.
+ * Build a system prompt that fuses the brief, the brand voice, the theme,
+ * per-account overrides and what this account has already published. Then
+ * call /api/ai/chat and return the generated caption.
  *
  * Returns empty string on failure — the slot still gets a post with an
  * empty caption so the user can spot it and fill it in manually. Better
@@ -368,11 +386,13 @@ export async function generateCaption(
   // copy is written ABOUT this image (its description, tags, and curated
   // folder location) rather than as generic theme copy. Omitted for the
   // Unsplash fallback, where we don't have a rich description to anchor on.
-  image?: { description?: string; tags?: string[]; location?: string }
+  image?: { description?: string; tags?: string[]; location?: string },
+  options?: CaptionOptions
 ): Promise<string> {
   const tone = meta.toneOverride || brief.tone;
   const contentBrief = meta.contentBriefOverride || brief.contentBrief;
   const hashtags = meta.hashtagsOverride || brief.hashtags;
+  const spec = captionModelSpec(options?.model);
 
   const platform = account.platform;
   const platformGuidance: Record<string, string> = {
@@ -398,7 +418,31 @@ export async function generateCaption(
       ].filter(Boolean)
     : [];
 
-  const systemPrompt = [
+  // BRAND-VOICE-IN-CAPTIONS-V1
+  // brief.brandVoice is the long-form voice guide the user writes on the
+  // Briefs page — "vocabulary, phrasing dos/don'ts, taglines, and any other
+  // voice rules the AI should follow". It was wired into the Roam-io chat
+  // (app/hub/page.tsx) and nowhere else, so every automatically generated
+  // post — the overwhelming majority of what actually gets published —
+  // ignored it. It belongs here more than anywhere.
+  const brandVoiceLines = brief.brandVoice && brief.brandVoice.trim()
+    ? ['', 'BRAND VOICE (follow strictly — these rules outrank the generic platform guidance below):', brief.brandVoice.trim()]
+    : [];
+
+  // PROMPT-CACHE-V1
+  // Split into a stable half and a per-slot half. The stable half is
+  // identical for every post on this brief+account+platform across a whole
+  // Fill calendar run, so it is offered to Anthropic as a cacheable prefix.
+  //
+  // Honest note on the payoff: a prefix is only cached once it reaches the
+  // model's minimum (1,024 tokens on Sonnet 5, 512 on Opus 5 — recorded as
+  // minCacheableTokens in lib/ai-models.ts). A lean brief with no brand
+  // voice will not reach either, and the marker is then ignored rather than
+  // rejected. It starts paying the moment a brief carries a real voice
+  // guide, which is the direction this is heading. The split is worth doing
+  // regardless: stable brand context first, volatile per-slot context
+  // second, is simply the right shape for this prompt.
+  const stablePrompt = [
     'You are writing a single social post.',
     '',
     'BRIEF:',
@@ -407,14 +451,19 @@ export async function generateCaption(
     'Tone: ' + tone,
     'Content brief: ' + contentBrief,
     'Hashtags (use sparingly, end of post): ' + hashtags,
+    ...brandVoiceLines,
+    '',
+    'PLATFORM:',
+    platformGuidance[platform] || '',
+  ].join('\n');
+
+  const variablePrompt = [
     ...imageLines,
     '',
     'THEME for this post:',
     theme.title,
     theme.prompt,
-    '',
-    'PLATFORM:',
-    platformGuidance[platform] || '',
+    ...captionHistoryLines(options?.history || EMPTY_CAPTION_HISTORY),
     '',
     'Output ONLY the post text. No preamble, no explanations, no "Here is your post:". The output is published verbatim.',
   ].join('\n');
@@ -429,18 +478,27 @@ export async function generateCaption(
   // Bound each call so one slow generation can't push a batch past the
   // platform's ~26s synchronous-function limit. On timeout the fetch
   // aborts, we return '' and the caller leaves the slot for the next run.
+  // The bound is per-model: Opus writes better and slower, and the batch
+  // budget in runAutoGenerate is derived from this same number so the two
+  // cannot drift apart.
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), CAPTION_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), spec.captionTimeoutMs);
   try {
     const res = await fetch(`${origin}/api/ai/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-internal-call': internalSecret },
       body: JSON.stringify({
-        systemPrompt,
+        // Structured system blocks: /api/ai/chat passes an array straight
+        // through to Anthropic, so the cache marker survives.
+        systemPrompt: [
+          { type: 'text', text: stablePrompt, cache_control: { type: 'ephemeral' } },
+          { type: 'text', text: variablePrompt },
+        ],
         messages: [
           { role: 'user', content: userMessage },
         ],
         maxTokens: 800,
+        model: spec.id,
       }),
       signal: controller.signal,
     });
@@ -545,6 +603,24 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
     const imageUsage = buildImageUsage(existingPosts);
     const themeUsage = buildThemeUsage(existingPosts);
     const cooldownDays = settings.imageCooldownDays ?? DEFAULT_IMAGE_COOLDOWN_DAYS;
+
+    // CAPTION-VARIETY-V1
+    // The same trick for copy. `captionSource` starts as the calendar and
+    // grows as this run writes posts, so a later batch can see what an
+    // earlier one said. Within a single batch the CONCURRENCY slots share a
+    // snapshot — the same deliberate limitation as the image picker, and for
+    // the same reason: they are in flight simultaneously. It matters less
+    // here than it looks, because specs are interleaved across accounts and
+    // the history is scoped per account.
+    const captionSource: CaptionSourcePost[] = existingPosts.map(p => ({
+      caption: p.caption,
+      accountIds: p.accountIds,
+      scheduledAt: p.scheduledAt,
+    }));
+
+    // AI-MODELS-V1: one resolved spec for the whole run. Unknown ids fall
+    // back to the default rather than reaching the API.
+    const captionModel = captionModelSpec(settings.captionModel);
 
     // 5. Brain items (optional). The /api/brain/items payload is raw stored
     // items (blobId + mime + tags, with NO url field), so the old
@@ -700,17 +776,29 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
     // than filling one account before starting the next.
     specs.sort((a, b) => (a.iso < b.iso ? -1 : a.iso > b.iso ? 1 : 0));
 
-    // 7. Generate captions + pick images. Each caption is a real ~10-15s AI
-    // call. Netlify kills a synchronous function at ~26s regardless of the
+    // 7. Generate captions + pick images. Each caption is a real AI call.
+    // Netlify kills a synchronous function at ~26s regardless of the
     // maxDuration we set, so we can only fit a handful per request: an
     // earlier larger budget ran past that ceiling and the route returned an
     // HTML timeout page (the "Unexpected token '<'" Fill-calendar failure).
-    // Budget conservatively below the ceiling — accounting for setup time
-    // already elapsed and one in-flight batch (each call capped at
-    // CAPTION_TIMEOUT_MS) plus the final save — and return cleanly with
-    // partial progress. The calendar dedups filled slots, so clicking Fill
-    // calendar again continues where this left off.
-    const TIME_BUDGET_MS = 9000;
+    // Return cleanly with partial progress instead. The calendar dedups
+    // filled slots, so clicking Fill calendar again continues where this
+    // left off.
+    //
+    // The budget is DERIVED rather than tuned, because it has to hold for
+    // whichever caption model is configured. The check below happens before
+    // a batch starts, so the worst case is: check passes at TIME_BUDGET_MS,
+    // the batch then runs for a full captionTimeoutMs, and the persist
+    // follows. Solving that against the ceiling is the line below — with
+    // Sonnet's 13s timeout it lands on 8.5s, near the 9s that was working
+    // empirically, and with Opus's 18s it correctly tightens to 3.5s
+    // (fewer slots per click, never a hard kill).
+    const SYNC_CEILING_MS = 24_000;
+    const PERSIST_RESERVE_MS = 2_500;
+    const TIME_BUDGET_MS = Math.max(
+      1_000,
+      SYNC_CEILING_MS - PERSIST_RESERVE_MS - captionModel.captionTimeoutMs
+    );
     const CONCURRENCY = 4;
     let postSeq = 0;
 
@@ -779,11 +867,18 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
             }
           }
 
-          // Now write the copy — anchored to the chosen image when we have one.
+          // Now write the copy — anchored to the chosen image when we have
+          // one, and shown what this account has already published so it
+          // varies the hook, structure and examples for real rather than
+          // being told to vary them from posts it cannot see.
+          const history = buildCaptionHistory(
+            captionSource, spec.account.id, slotTime
+          );
           const caption = await generateCaption(
             input.origin, spec.slotBrief, spec.theme, spec.metaForCaption,
             spec.account, input.internalSecret, spec.iso,
             imageForCaption,
+            { history, model: captionModel.id },
           );
           // generateCaption returns '' on failure (e.g. an AI rate-limit
           // under concurrency). Don't persist a body-less draft — leave the
@@ -824,6 +919,14 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
         // the rest of this run. Wasting one photo is strictly better than
         // handing it to the next slot and printing a duplicate.
         if (b.imageUrl) usedImageUrls.add(b.imageUrl);
+        // CAPTION-VARIETY-V1: feed this run's own output back in, so the
+        // next batch sees it. Cross-invocation the re-read at step 4 covers
+        // this for free; this line closes the within-invocation gap.
+        captionSource.push({
+          caption: b.post.caption,
+          accountIds: b.post.accountIds,
+          scheduledAt: b.post.scheduledAt,
+        });
         newPosts.push(b.post);
         b.spec.acctResult.created += 1;
         b.spec.acctResult.themeIdsUsed.push(b.spec.theme.id);

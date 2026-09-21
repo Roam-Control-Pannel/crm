@@ -97,6 +97,13 @@ export interface SocialSettingsBlob {
   themeOverrides: ThemeOverrides;
   // MULTI-BRIEF-V1: optional — empty map means all briefs equal.
   briefWeights?: BriefWeights;
+  /**
+   * AI-MODELS-V1: which Anthropic model writes social captions. Optional —
+   * falls back to DEFAULT_CAPTION_MODEL. Validated against CAPTION_MODELS on
+   * both write and read, so a corrupt blob can never send an unknown id to
+   * the API (which would surface as every caption coming back empty).
+   */
+  captionModel?: string;
   updatedAt: string;     // ISO timestamp
 }
 
@@ -113,6 +120,8 @@ export interface EffectiveSocialSettings {
   briefWeights: BriefWeights;
   // IMAGE-COOLDOWN-V1: always defined (falls back to the default)
   imageCooldownDays: number;
+  // AI-MODELS-V1: always defined and always a known id.
+  captionModel: string;
 }
 
 // ============================================================

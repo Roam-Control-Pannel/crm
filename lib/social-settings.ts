@@ -1,5 +1,6 @@
 import { getStore } from '@netlify/blobs';
 import { DEFAULT_IMAGE_COOLDOWN_DAYS } from './image-usage';
+import { DEFAULT_CAPTION_MODEL, isKnownCaptionModel } from './ai-models';
 import { readStored } from './store-read';
 import { SEED_THEMES, type Theme } from './social-themes';
 import {
@@ -146,6 +147,10 @@ export async function getEffectiveSettings(): Promise<EffectiveSocialSettings> {
     briefWeights,
     imageCooldownDays:
       blob?.postingTimes?.imageCooldownDays ?? DEFAULT_IMAGE_COOLDOWN_DAYS,
+    // AI-MODELS-V1: never hand an unrecognised id to the caption path.
+    captionModel: isKnownCaptionModel(blob?.captionModel)
+      ? blob!.captionModel!
+      : DEFAULT_CAPTION_MODEL,
   };
 }
 

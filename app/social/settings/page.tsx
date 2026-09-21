@@ -33,6 +33,8 @@ import {
   type EffectiveSocialSettings,
   type PostingTimeSlot,
 } from '@/lib/social-settings-types';
+import { CAPTION_MODELS, DEFAULT_CAPTION_MODEL } from '@/lib/ai-models';
+import { DEFAULT_IMAGE_COOLDOWN_DAYS } from '@/lib/image-usage';
 import { fetchBriefs, type Brief } from '@/lib/briefs';
 
 // ---------- style tokens (kept consistent with app/social/page.tsx) ----------
@@ -233,6 +235,9 @@ export default function SocialSettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [postingTimes, setPostingTimes] = useState<PostingTimes | null>(null);
   const [themes, setThemes] = useState<Theme[]>([]);
+  // AI-MODELS-V1: which model writes captions. Resolved server-side, so this
+  // is always a known id by the time it gets here.
+  const [captionModel, setCaptionModel] = useState<string>(DEFAULT_CAPTION_MODEL);
 
   // Edit modal state
   const [editing, setEditing] = useState<Theme | null>(null);
@@ -255,6 +260,7 @@ export default function SocialSettingsPage() {
       if (!json.ok) throw new Error('GET returned ok:false');
       setPostingTimes(json.settings.postingTimes);
       setThemes(json.settings.themes);
+      setCaptionModel(json.settings.captionModel || DEFAULT_CAPTION_MODEL);
     } catch (e: any) {
       setError(e?.message || 'Failed to load settings');
     } finally {
@@ -266,7 +272,11 @@ export default function SocialSettingsPage() {
 
   // ---------- save helpers ----------
 
-  async function putPartial(body: { postingTimes?: PostingTimes; themeOverrides?: ThemeOverrides }) {
+  async function putPartial(body: {
+    postingTimes?: PostingTimes;
+    themeOverrides?: ThemeOverrides;
+    captionModel?: string;
+  }) {
     setSaving(true);
     setError(null);
     try {
@@ -280,6 +290,7 @@ export default function SocialSettingsPage() {
       if (!json.ok) throw new Error('PUT returned ok:false');
       setPostingTimes(json.settings.postingTimes);
       setThemes(json.settings.themes);
+      setCaptionModel(json.settings.captionModel || DEFAULT_CAPTION_MODEL);
     } catch (e: any) {
       setError(e?.message || 'Save failed');
     } finally {
@@ -527,7 +538,10 @@ export default function SocialSettingsPage() {
           <div>
             <h2 style={sectionTitle}>Posting times</h2>
             <p style={sectionSub}>Click a cell to toggle a slot. Auto-generated posts use these windows.</p>
-        {/* CRON-AUTOGEN-V1 lookahead control */}
+        {/* CRON-AUTOGEN-V1 lookahead control.
+            Persists on blur rather than on every keystroke: the old version
+            only called setPostingTimes, so the number moved on screen and
+            was never written — reloading the page silently restored 14. */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, marginBottom: 4 }}>
           <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink-700)' }}>
             Auto-fill calendar
@@ -542,11 +556,60 @@ export default function SocialSettingsPage() {
               if (isNaN(n) || n < 1 || n > 60) return;
               setPostingTimes({ ...postingTimes, lookaheadDays: n } as any);
             }}
+            onBlur={() => putPartial({ postingTimes })}
             style={{ width: 64, padding: '4px 6px', border: '1px solid var(--ink-200)', borderRadius: 4, fontSize: 13 }}
           />
           <span style={{ fontSize: 12, color: 'var(--ink-500)' }}>
             days ahead. Daily cron fills drafts for this window.
           </span>
+        </div>
+
+        {/* IMAGE-COOLDOWN-V1 window */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+          <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink-700)' }}>
+            Don't reuse an image for
+          </label>
+          <input
+            type="number"
+            min={0}
+            max={365}
+            value={(postingTimes as any).imageCooldownDays ?? DEFAULT_IMAGE_COOLDOWN_DAYS}
+            onChange={e => {
+              const n = parseInt(e.target.value, 10);
+              if (isNaN(n) || n < 0 || n > 365) return;
+              setPostingTimes({ ...postingTimes, imageCooldownDays: n } as any);
+            }}
+            onBlur={() => putPartial({ postingTimes })}
+            style={{ width: 64, padding: '4px 6px', border: '1px solid var(--ink-200)', borderRadius: 4, fontSize: 13 }}
+          />
+          <span style={{ fontSize: 12, color: 'var(--ink-500)' }}>
+            days. A photo inside its window is skipped; if every candidate is,
+            the least-recently-used one wins rather than a random repeat.
+          </span>
+        </div>
+
+        {/* AI-MODELS-V1 caption model */}
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 4 }}>
+          <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink-700)', paddingTop: 5 }}>
+            Caption writer
+          </label>
+          <div>
+            <select
+              value={captionModel}
+              onChange={e => {
+                setCaptionModel(e.target.value);
+                putPartial({ captionModel: e.target.value });
+              }}
+              style={{ padding: '4px 6px', border: '1px solid var(--ink-200)', borderRadius: 4, fontSize: 13, background: 'var(--paper)' }}
+            >
+              {CAPTION_MODELS.map(m => (
+                <option key={m.id} value={m.id}>{m.label}</option>
+              ))}
+            </select>
+            <div style={{ fontSize: 12, color: 'var(--ink-500)', marginTop: 4, maxWidth: 520 }}>
+              {(CAPTION_MODELS.find(m => m.id === captionModel) || CAPTION_MODELS[0]).blurb}
+            </div>
+          </div>
         </div>
 
           </div>

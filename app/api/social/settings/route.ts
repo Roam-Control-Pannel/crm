@@ -16,6 +16,7 @@ import {
   type PostingTimes,
   type ThemeOverrides,
 } from '@/lib/social-settings-types';
+import { isKnownCaptionModel } from '@/lib/ai-models';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -30,7 +31,7 @@ export const runtime = 'nodejs';
  *     Returns merged seed + overrides + defaults (the cron-ready view).
  *
  *   PUT /api/social/settings
- *     body: { postingTimes?: PostingTimes, themeOverrides?: ThemeOverrides }
+ *     body: { postingTimes?, themeOverrides?, briefWeights?, captionModel? }
  *     -> { ok: true, settings: EffectiveSocialSettings }
  *     Either field may be omitted; missing fields keep their existing values.
  *
@@ -67,10 +68,22 @@ export async function PUT(req: NextRequest) {
     const incomingOverrides: ThemeOverrides | undefined = body.themeOverrides;
     // MULTI-BRIEF-V1: optional weights map.
     const incomingWeights: Record<string, number> | undefined = body.briefWeights;
+    // AI-MODELS-V1: optional caption model id.
+    const incomingModel: unknown = body.captionModel;
 
-    if (!incomingTimes && !incomingOverrides && !incomingWeights) {
+    if (!incomingTimes && !incomingOverrides && !incomingWeights && incomingModel === undefined) {
       return NextResponse.json(
-        { error: 'Provide postingTimes, themeOverrides, or briefWeights in body' },
+        { error: 'Provide postingTimes, themeOverrides, briefWeights, or captionModel in body' },
+        { status: 400 }
+      );
+    }
+
+    // Reject an unknown model outright rather than storing it. getEffectiveSettings
+    // would fall back to the default on read, so a typo would silently "save"
+    // and then appear to have done nothing — worse than an error.
+    if (incomingModel !== undefined && !isKnownCaptionModel(incomingModel)) {
+      return NextResponse.json(
+        { error: 'Unknown captionModel' },
         { status: 400 }
       );
     }
@@ -95,6 +108,8 @@ export async function PUT(req: NextRequest) {
       postingTimes: incomingTimes || existing?.postingTimes || DEFAULT_POSTING_TIMES,
       themeOverrides: incomingOverrides || existing?.themeOverrides || EMPTY_OVERRIDES,
       briefWeights: validWeights || existing?.briefWeights || {},
+      captionModel:
+        incomingModel === undefined ? existing?.captionModel : (incomingModel as string),
       updatedAt: new Date().toISOString(),
     };
 
