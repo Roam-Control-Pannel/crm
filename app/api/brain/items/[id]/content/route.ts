@@ -1,18 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getStore } from '@netlify/blobs';
+// BRAIN-STORE-V1: shared, fail-closed index accessors. Read-only here, but
+// "item not found" and "index unreadable" must not look the same to the
+// caller — Roam-io reads item bodies through this route.
+import { getItems } from '@/lib/brain-store';
+import { readErrorResponse } from '@/lib/store-read';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-const META_STORE = 'roam-brain';
 const BLOB_STORE = 'roam-uploads';
-const ITEMS_KEY = 'items';
-
-interface Item {
-  id: string; blobId: string; folderId: string | null;
-  tags: string[]; description: string; mime: string; size: number; uploadedAt: string;
-  sourceUrl?: string;
-}
 
 interface RouteParams { params: { id: string } }
 
@@ -56,13 +53,8 @@ export async function GET(_req: NextRequest, { params }: RouteParams) {
     return NextResponse.json({ ok: true, item: meta, content: content || '' });
   } catch (err: any) {
     console.error('brain content fetch error:', err);
-    return NextResponse.json({ ok: false, error: err?.message || 'Fetch failed' }, { status: 500 });
+    const { body, status } = readErrorResponse(err);
+    return NextResponse.json(body, { status });
   }
 }
 
-async function getItems(): Promise<Item[]> {
-  try {
-    const store = getStore(META_STORE);
-    return ((await store.get(ITEMS_KEY, { type: 'json' })) as Item[]) || [];
-  } catch { return []; }
-}

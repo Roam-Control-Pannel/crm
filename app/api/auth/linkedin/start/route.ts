@@ -10,7 +10,7 @@ const REDIRECT_URI =
   'https://roam-crm-platform.netlify.app/api/auth/linkedin/callback';
 const SCOPE = 'openid profile email w_member_social';
 
-export async function GET(req: NextRequest) {
+export async function GET(_req: NextRequest) {
   const clientId = process.env.LINKEDIN_CLIENT_ID;
   if (!clientId) {
     return NextResponse.json({ error: 'LINKEDIN_CLIENT_ID not set' }, { status: 500 });

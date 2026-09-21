@@ -1,0 +1,54 @@
+# LINT-V1 / CI-V1
+#
+# Until now this repository had no CI at all: the only workflows were the two
+# cron backups. Nothing ran `tsc`, nothing ran a build, and `npm run lint`
+# could not run because there was no ESLint config — so the whole class of
+# hook-dependency and unused-binding problems had to be found by reading the
+# code, once a week, by hand.
+#
+# This runs the same three checks a contributor runs locally, on every PR and
+# every push to main. Kept deliberately cheap so it stays fast enough that
+# nobody is tempted to skip it.
+
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# A newer push to the same branch makes the in-flight run irrelevant.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Matches NODE_VERSION in netlify.toml — CI should fail for the same
+          # reasons production would, not for version drift.
+          node-version: '20'
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # --max-warnings is a ratchet, not a target. Errors always fail. The
+      # allowance is the number of warnings that existed when ESLint was
+      # introduced, each one a real open question rather than noise (see the
+      # Phase 7 notes in the commit that added this). Fixing them keeps CI
+      # green; adding new ones does not. Lower this number as they are cleared.
+      - name: Lint
+        run: npx next lint --max-warnings 5
+
+      - name: Build
+        run: npm run build

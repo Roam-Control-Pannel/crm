@@ -1,5 +1,6 @@
 'use client';
 import { useState, useEffect, useMemo } from 'react';
+import LoadErrorBanner from '@/components/LoadErrorBanner';
 import {
   CheckCircle2, AlertCircle, ExternalLink, RefreshCw, Plug,
   Mail, Sparkles, Clock, Wifi,
@@ -130,6 +131,7 @@ export default function ChannelsPage() {
   const [posts, setPosts] = useState<SocialPostLite[]>([]);
   const [brevoOk, setBrevoOk] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
+  const [postsUnavailable, setPostsUnavailable] = useState(false);
   const [errors, setErrors] = useState<{ meta?: string; linkedin?: string }>({});
 
   useEffect(() => {
@@ -165,8 +167,18 @@ export default function ChannelsPage() {
         } else {
           setBrevoOk(false);
         }
-        if (postsData.status === 'fulfilled' && Array.isArray(postsData.value)) {
-          setPosts(postsData.value);
+        // FAIL-CLOSED-READS-V1: loadWithMigration now reports whether the
+        // read succeeded. This page is read-only, but showing "0 scheduled
+        // posts" because the store was briefly unreachable is a misleading
+        // dashboard, so distinguish the two.
+        if (postsData.status === 'fulfilled' && postsData.value.ok) {
+          setPosts(Array.isArray(postsData.value.data) ? postsData.value.data : []);
+        } else {
+          const why = postsData.status === 'fulfilled'
+            ? postsData.value.error
+            : String((postsData as PromiseRejectedResult).reason);
+          console.error('[channels] posts read failed:', why);
+          setPostsUnavailable(true);
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -215,6 +227,9 @@ export default function ChannelsPage() {
   // ==========================================================================
   return (
     <div className="chn-page" style={S.page}>
+      {postsUnavailable && (
+        <LoadErrorBanner message="Scheduled-post counts are unavailable right now, so the figures below exclude them." />
+      )}
       {/* Hero */}
       <header style={S.header}>
         <div>

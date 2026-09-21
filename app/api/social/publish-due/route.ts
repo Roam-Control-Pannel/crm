@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCollection, saveCollection, DEFAULT_USER_ID } from '@/lib/store';
-import { publishToAccount, PublishPlatform, parseAccountId } from '@/lib/social-publish';
+import { publishToAccount, PublishPlatform, parseAccountId, MAX_POST_MS } from '@/lib/social-publish';
 import { buildUnsplashCredit } from '@/lib/unsplash-credit';
 import { safeEqual } from '@/lib/safe-equal';
 
@@ -44,10 +44,18 @@ function platformFromAccountId(accountId: string): PublishPlatform | null {
 // re-attempted if its publishingStartedAt is older than STALE_PUBLISHING_MS.
 //
 // Per-run cap: MAX_POSTS_PER_RUN keeps each invocation under the function
-// timeout. The 1-minute cadence means up to MAX_POSTS_PER_RUN * 60 posts/hr.
+// timeout. The cadence is every 2 minutes (netlify.toml + the inline config
+// in netlify/functions/social-publish-due.mts — every-minute was tried and
+// Netlify silently declined to register it), so the ceiling is
+// MAX_POSTS_PER_RUN * 30 posts/hr. In practice the measured-cost gate in
+// PUBLISH-DUE-BUDGET-V2 stops the run well before the cap on slow posts.
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
+// maxDuration is the Next/Netlify function ceiling. FUNCTION_BUDGET_MS below
+// is the figure we actually plan against: Netlify hard-kills a standard
+// function at ~26s regardless of what maxDuration claims, so the budget is
+// deliberately the smaller of the two, not this number.
 export const maxDuration = 60;
 
 const MAX_POSTS_PER_RUN = 20;
@@ -70,6 +78,49 @@ interface SocialPostStored {
   publishingStartedAt?: string;
   publishedAt?: string;
   createdAt: string;
+}
+
+/**
+ * PUBLISH-PARTIAL-PERSIST-V1
+ *
+ * Write one post's per-account results back, merging into a FRESH read
+ * rather than into the snapshot this run started from.
+ *
+ * Two things this buys us:
+ *   - partial progress survives a mid-run kill, so a re-attempt 15 minutes
+ *     later skips the accounts that already went live instead of posting
+ *     the same caption again;
+ *   - the write no longer rewrites the whole collection from a pre-network
+ *     snapshot, so a post created or edited elsewhere during the seconds we
+ *     spent talking to LinkedIn/Meta is not reverted.
+ *
+ * Passing `finalStatus` closes the post out (clears publishingStartedAt and
+ * stamps publishedAt); omitting it leaves the post in 'publishing' so the
+ * stale-recovery path still owns it.
+ */
+async function persistResults(
+  postId: string,
+  results: SocialPostStored['results'],
+  finalStatus?: SocialPostStored['status']
+): Promise<SocialPostStored[]> {
+  const fresh = (await getCollection<SocialPostStored[]>(DEFAULT_USER_ID, 'social_posts')) || [];
+  const next = fresh.map(p =>
+    p.id === postId
+      ? {
+          ...p,
+          results,
+          ...(finalStatus
+            ? {
+                status: finalStatus,
+                publishingStartedAt: undefined,
+                publishedAt: new Date().toISOString(),
+              }
+            : {}),
+        }
+      : p
+  );
+  await saveCollection(DEFAULT_USER_ID, 'social_posts', next);
+  return next;
 }
 
 export async function GET(req: NextRequest) {
@@ -138,7 +189,10 @@ async function handle(req: NextRequest) {
   //     next one might not finish in time.
   const FUNCTION_BUDGET_MS = 26000; // Netlify standard-function hard limit
   const SAFETY_MS = 3000;           // headroom for persistence + teardown
-  const MAX_POST_MS = 15000;        // worst-case single post (IG container wait + API calls)
+  // MAX_POST_MS is imported from lib/social-publish, which now actually
+  // enforces it via AbortSignal on every call (PUBLISH-DEADLINE-V1). It used
+  // to be a local constant that nothing honoured, which made all the
+  // arithmetic below wishful thinking.
   const startTime = Date.now();
 
   let collection: SocialPostStored[] = posts.slice();
@@ -158,10 +212,22 @@ async function handle(req: NextRequest) {
   for (const post of duePosts) {
     // Hard cap regardless of timing.
     if (processed >= MAX_POSTS_PER_RUN) { stoppedEarly = true; break; }
-    // Time budget: always process the first post (it fits comfortably), but
-    // only start a subsequent one if it can plausibly finish before the kill.
-    // Whatever we don't start stays 'scheduled' for the next run.
-    if (processed > 0 && Date.now() - startTime > FUNCTION_BUDGET_MS - SAFETY_MS - MAX_POST_MS) {
+    // PUBLISH-DUE-BUDGET-V2
+    // Gate on MEASURED cost, not the fixed worst case. The old test reserved
+    // a full MAX_POST_MS for the next post, so after the first post the loop
+    // broke as soon as 26000-3000-15000 = 8s had elapsed — and since a real
+    // post usually takes longer than 8s, MAX_POSTS_PER_RUN = 20 could never
+    // be reached. The practical ceiling was one post per run, so a backlog
+    // after a scheduler outage drained at roughly one post every two minutes.
+    //
+    // Most posts target a single account and finish in a couple of seconds,
+    // so the running average is a far better predictor than the three-account
+    // worst case. The floor keeps us honest on the first estimate, and the
+    // per-post deadline below means a bad guess costs a clean timeout on one
+    // post rather than a killed function.
+    const elapsed = Date.now() - startTime;
+    const avgPostMs = processed > 0 ? Math.max(elapsed / processed, 1500) : 0;
+    if (processed > 0 && elapsed + avgPostMs > FUNCTION_BUDGET_MS - SAFETY_MS) {
       stoppedEarly = true;
       break;
     }
@@ -198,10 +264,31 @@ async function handle(req: NextRequest) {
         : p
     );
     await saveCollection(DEFAULT_USER_ID, 'social_posts', collection);
+
+    // PUBLISH-PARTIAL-PERSIST-V1
+    // Seed from whatever a previous (killed) attempt already managed to
+    // record. Without this, a stale re-attempt started from an empty
+    // results object and re-ran every account from scratch — so a run that
+    // died after LinkedIn and Facebook succeeded but during Instagram's
+    // container wait posted the same caption to LinkedIn and Facebook a
+    // second time 15 minutes later, and again every 15 minutes after that.
     const results: SocialPostStored['results'] = {};
     for (const accountId of post.accountIds) {
-      results[accountId] = { status: 'pending' };
+      const prior = live.results?.[accountId];
+      results[accountId] =
+        prior?.status === 'published'
+          ? prior
+          : { status: 'pending' };
     }
+
+    // PUBLISH-DEADLINE-V1: ONE deadline for the whole post, shared by every
+    // account, so MAX_POST_MS means what its name says and the reservation
+    // arithmetic above is honest. Clamped so we can never run past the
+    // function budget however many accounts the post targets.
+    const postDeadline = Math.min(
+      Date.now() + MAX_POST_MS,
+      startTime + FUNCTION_BUDGET_MS - SAFETY_MS
+    );
 
     // Deterministic order: linkedin -> facebook -> instagram. Mirrors the
     // ordering used by the client-side publishPost() so manual and auto
@@ -214,9 +301,18 @@ async function handle(req: NextRequest) {
     });
 
     for (const accountId of sorted) {
+      // PUBLISH-PARTIAL-PERSIST-V1: never re-post to an account a previous
+      // attempt already got onto the platform. publishToAccount has no
+      // idempotency key, so this persisted status is the only thing standing
+      // between a killed run and a duplicate live post.
+      if (results[accountId]?.status === 'published') {
+        continue;
+      }
+
       const platform = platformFromAccountId(accountId);
       if (!platform) {
         results[accountId] = { status: 'failed', error: `Unknown account id prefix: ${accountId}` };
+        await persistResults(post.id, results);
         continue;
       }
       const captionWithCredit = post.caption + buildUnsplashCredit(post, platform);
@@ -225,6 +321,7 @@ async function handle(req: NextRequest) {
         platform,
         caption: captionWithCredit,
         imageUrl: post.imageUrl,
+        deadline: postDeadline,
       });
       if (r.ok) {
         results[accountId] = { status: 'published', postId: r.postId ?? undefined, postUrl: r.postUrl ?? undefined };
@@ -238,6 +335,11 @@ async function handle(req: NextRequest) {
         // compatible — clients that don't know about it will ignore it.
         results[accountId] = { status: 'failed', error: r.error || 'Publish failed', details: r.details } as any;
       }
+
+      // PUBLISH-PARTIAL-PERSIST-V1: write the outcome of THIS account before
+      // starting the next one. The post stays 'publishing' so the stale path
+      // still recovers it, but the per-account record is now durable.
+      collection = await persistResults(post.id, results);
     }
 
     const allResults = Object.values(results);
@@ -245,14 +347,7 @@ async function handle(req: NextRequest) {
     const anyPublished = allResults.some(r => r.status === 'published');
     const finalStatus: SocialPostStored['status'] = allPublished ? 'published' : anyPublished ? 'partial' : 'failed';
 
-    collection = collection.map(p =>
-      p.id === post.id
-        ? { ...p, status: finalStatus, results, publishingStartedAt: undefined, publishedAt: new Date().toISOString() }
-        : p
-    );
-    // Persist after each post so a mid-run crash doesn't lose progress on
-    // earlier posts.
-    await saveCollection(DEFAULT_USER_ID, 'social_posts', collection);
+    collection = await persistResults(post.id, results, finalStatus);
 
     summary.push({
       id: post.id,
@@ -273,12 +368,34 @@ async function handle(req: NextRequest) {
     processed++;
   }
 
-  return NextResponse.json({
-    ok: true,
-    dueCount: duePosts.length,
-    processed,
-    skipped: Math.max(0, duePosts.length - processed),
-    stoppedEarly,
-    results: summary,
-  });
+  // CRON-REPORTING-V1
+  // This used to answer a flat 200 { ok: true } no matter what happened, so a
+  // run in which EVERY account failed — the shape a 60-day-expired LinkedIn
+  // refresh token or an invalidated Meta page token takes — was indis-
+  // tinguishable from a clean one. Both the GitHub Actions backup and the
+  // Netlify wrapper only checked the status code, so the failure could run
+  // silently for weeks. Compounding it: failed posts are excluded from the
+  // due filter, so they are never retried even once the token is fixed.
+  //
+  // 207 Multi-Status is the honest answer when some of the work inside a
+  // successful request did not succeed. `ok` stays true because the ROUTE
+  // ran correctly; the caller is expected to look at failedAccounts.
+  const failedAccounts = summary.reduce(
+    (n, p) => n + p.accountResults.filter(r => !r.ok).length,
+    0
+  );
+  const degraded = summary.some(p => p.status === 'partial' || p.status === 'failed');
+
+  return NextResponse.json(
+    {
+      ok: true,
+      dueCount: duePosts.length,
+      processed,
+      skipped: Math.max(0, duePosts.length - processed),
+      stoppedEarly,
+      failedAccounts,
+      results: summary,
+    },
+    { status: degraded ? 207 : 200 }
+  );
 }

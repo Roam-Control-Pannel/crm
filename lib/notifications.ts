@@ -1,4 +1,5 @@
 import { getStore } from '@netlify/blobs';
+import { readStored } from './store-read';
 
 /**
  * Persistent notification store.
@@ -29,14 +30,16 @@ function store() {
   return getStore({ name: STORE_NAME, consistency: 'strong' });
 }
 
+/**
+ * FAIL-CLOSED-READS-V1: throws on a read failure. addNotification() and
+ * markRead() both rewrite the whole list, so an empty result on a failed read
+ * meant one incoming webhook event wiped the notification history.
+ */
 export async function listNotifications(): Promise<Notification[]> {
-  try {
-    const data = (await store().get(KEY, { type: 'json' })) as Notification[] | null;
-    return data || [];
-  } catch (err) {
-    console.error('listNotifications failed:', err);
-    return [];
-  }
+  const data = await readStored<Notification[]>('the notification list', () =>
+    store().get(KEY, { type: 'json' })
+  );
+  return data ?? [];
 }
 
 export async function addNotification(

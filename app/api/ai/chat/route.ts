@@ -1,5 +1,56 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createHmac } from 'node:crypto';
 import { getToolSchemas, executeTool, REQUIRES_CONFIRM } from '@/lib/roamio-tools';
+import { safeEqual } from '@/lib/safe-equal';
+
+// sharp-free but Node-only (node:crypto for the confirm binding below).
+export const runtime = 'nodejs';
+
+/**
+ * TOOL-CONFIRM-BINDING-V1
+ *
+ * The confirm dialog is a client-side affordance; the server used to take
+ * `pendingConfirm` on trust and call executeTool(name, input) with whatever
+ * it was handed. One request could therefore run any tool in the registry —
+ * delete_post, delete_task, reschedule_post, bulk_fill_calendar,
+ * save_to_brain — regardless of which toolset was requested, whether the
+ * model ever proposed the call, or whether the tool is marked
+ * requiresConfirm.
+ *
+ * Now the server signs {name, input, tool_use_id} when it defers a call and
+ * verifies that signature before executing. The client cannot mint one, so
+ * a confirm can only ever replay a call this server actually proposed.
+ * NEXTAUTH_SECRET is reused as the signing key — it is already mandatory for
+ * the app to function, so there is no new env var to forget.
+ *
+ * Inputs are canonicalised (keys sorted, recursively) before signing so a
+ * JSON round-trip through the browser can't change the digest.
+ */
+function canonicalise(value: any): any {
+  if (Array.isArray(value)) return value.map(canonicalise);
+  if (value && typeof value === 'object') {
+    return Object.keys(value)
+      .sort()
+      .reduce((acc: Record<string, any>, k) => {
+        acc[k] = canonicalise(value[k]);
+        return acc;
+      }, {});
+  }
+  return value;
+}
+
+function signPendingTool(name: string, input: any, toolUseId: string): string {
+  const key = process.env.NEXTAUTH_SECRET;
+  if (!key) {
+    // Without a key we cannot bind the call. Returning '' makes verification
+    // fail closed below rather than silently accepting anything.
+    console.error('[ai/chat] NEXTAUTH_SECRET is not set — tool confirmations cannot be signed.');
+    return '';
+  }
+  return createHmac('sha256', key)
+    .update(JSON.stringify([name, canonicalise(input ?? null), toolUseId]))
+    .digest('hex');
+}
 
 // Allow this serverless function to run up to 60s (Netlify default is 10s,
 // which is too short for AI generations that need ~10-20s).
@@ -155,6 +206,9 @@ export async function POST(req: NextRequest) {
             name: pendingTool.name,
             input: pendingTool.input,
             tool_use_id: pendingTool.id,
+            // TOOL-CONFIRM-BINDING-V1: proof that the server itself proposed
+            // this exact call. The client echoes it back verbatim on confirm.
+            signature: signPendingTool(pendingTool.name, pendingTool.input, pendingTool.id),
           },
           assistantContent: blocks,  // client echoes this back on confirm
         });
@@ -234,7 +288,13 @@ function buildClientResponse(blocks: any[]) {
 }
 
 async function runConfirmedTool(opts: {
-  pendingConfirm: { name: string; input: any; tool_use_id: string; assistant_content: any[] };
+  pendingConfirm: {
+    name: string;
+    input: any;
+    tool_use_id: string;
+    assistant_content: any[];
+    signature?: string;
+  };
   messages: any[];
   systemPrompt: string;
   maxTokens?: number;
@@ -243,6 +303,44 @@ async function runConfirmedTool(opts: {
   deadline: number;
 }) {
   const { pendingConfirm, messages, systemPrompt, maxTokens, model, toolSchemas, deadline } = opts;
+
+  // TOOL-CONFIRM-BINDING-V1 — three checks before anything executes.
+  // They are ordered cheapest-first and all fail closed.
+
+  // 1. The tool must be one this request actually asked for. Stops a caller
+  //    requesting the 'tasks' toolset and confirming a social tool.
+  const requestedNames = new Set(toolSchemas.map((s: any) => s?.name));
+  if (!requestedNames.has(pendingConfirm.name)) {
+    return NextResponse.json(
+      { error: 'Unknown tool for this request.' },
+      { status: 400 }
+    );
+  }
+
+  // 2. Only tools that are actually deferred can arrive down the confirm
+  //    path. Anything else was never gated and has no business here.
+  if (!REQUIRES_CONFIRM[pendingConfirm.name]) {
+    return NextResponse.json(
+      { error: 'Tool does not require confirmation.' },
+      { status: 400 }
+    );
+  }
+
+  // 3. The call must carry this server's own signature over the exact
+  //    {name, input, tool_use_id} it proposed.
+  const expected = signPendingTool(
+    pendingConfirm.name,
+    pendingConfirm.input,
+    pendingConfirm.tool_use_id
+  );
+  const provided = typeof pendingConfirm.signature === 'string' ? pendingConfirm.signature : '';
+  if (!expected || !provided || !safeEqual(provided, expected)) {
+    console.error('[ai/chat] rejected unsigned or tampered tool confirmation:', pendingConfirm.name);
+    return NextResponse.json(
+      { error: 'Tool confirmation could not be verified. Please ask again.' },
+      { status: 400 }
+    );
+  }
 
   // Execute the previously-deferred tool now that the user has confirmed.
   const result = await executeTool(pendingConfirm.name, pendingConfirm.input);

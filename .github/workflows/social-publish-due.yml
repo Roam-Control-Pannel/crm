@@ -55,7 +55,11 @@ jobs:
 
           # Capture body and HTTP status in one request. The status is appended
           # on its own trailing line so we can split them apart afterwards.
+          # --max-time / --connect-timeout: without them curl waits forever on
+          # a stalled app and the job only dies at the 5-minute job timeout,
+          # logging nothing useful about what hung.
           response="$(curl -sS -X POST \
+            --connect-timeout 15 --max-time 120 \
             -H "x-internal-call: ${CRON_SECRET_V2}" \
             -H "Content-Type: application/json" \
             -w $'\n%{http_code}' \
@@ -67,7 +71,31 @@ jobs:
           echo "HTTP ${status}"
           echo "${body}"
 
-          if [ "${status}" != "200" ]; then
+          # CRON-REPORTING-V1
+          # Gate on CONTENT, not just transport. The route answers 200 with
+          # { ok: true } even when every account failed, so when a LinkedIn
+          # refresh token expires (60-day life) or a Meta page token is
+          # invalidated, every post lands in 'failed' and this job still went
+          # green. That could run silently for weeks — and failed posts are
+          # excluded from the due filter, so they are never retried even once
+          # the token is fixed.
+          #
+          # The route now answers 207 when any processed post is partial or
+          # failed, so accept 200 and 207 at the transport level and then
+          # inspect the per-account results.
+          if [ "${status}" != "200" ] && [ "${status}" != "207" ]; then
             echo "::error::publish-due returned HTTP ${status}"
+            exit 1
+          fi
+
+          if ! printf '%s' "$body" | jq -e '.ok == true' >/dev/null 2>&1; then
+            echo "::error::publish-due reported ok=false"
+            exit 1
+          fi
+
+          failed="$(printf '%s' "$body" | jq -r '[.results[]?.accountResults[]? | select(.ok == false)] | length')"
+          if [ "${failed}" != "0" ]; then
+            echo "::error::publish-due: ${failed} account publish(es) failed — see the body above. A 60-day LinkedIn refresh token or an invalidated Meta page token is the usual cause."
+            printf '%s' "$body" | jq -r '.results[]?.accountResults[]? | select(.ok == false) | "  \(.accountId): \(.error // "unknown error")"'
             exit 1
           fi

@@ -1,10 +1,11 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { AlertTriangle, Calendar, Check, ChevronLeft, ChevronRight, Clock, Copy, Edit3, Image, List, Plus, RefreshCw, Settings, Sparkles, Trash2, WrapText, X } from 'lucide-react';
+import { AlertTriangle, Calendar, Check, ChevronLeft, ChevronRight, Clock, Copy, Edit3, Image as ImageIcon, List, Plus, RefreshCw, Settings, Sparkles, Trash2, WrapText, X } from 'lucide-react';
 import { Brief, fetchBriefs } from '@/lib/briefs';
 import { GOAL_OPTIONS, getGoalLabel } from '@/lib/goals';
 import { SocialAccount, fetchRealAccounts, combineAccounts, fetchAccountMeta, AccountHandleCache, updateAccountHandleCache } from '@/lib/social-accounts';
 import { loadWithMigration, saveRemote } from '@/lib/client-store';
+import LoadErrorBanner from '@/components/LoadErrorBanner';
 import { buildUnsplashCredit } from '@/lib/unsplash-credit';
 import BrainPicker from '@/components/BrainPicker';
 import type { BrainItem } from '@/lib/brain';
@@ -88,9 +89,16 @@ interface Notification {
 // Posts persistence — wraps the server store. fetchPosts also runs the
 // one-time legacy localStorage migration so existing data isn't lost.
 // ============================================================================
+/**
+ * FAIL-CLOSED-READS-V1: throws on a read failure rather than reporting an
+ * empty calendar. savePosts() below replaces the whole collection, so an
+ * empty array from a failed read plus any subsequent save would wipe every
+ * scheduled post.
+ */
 async function fetchPosts(): Promise<SocialPost[]> {
-  const data = await loadWithMigration<SocialPost[]>('social_posts');
-  return Array.isArray(data) ? data : [];
+  const res = await loadWithMigration<SocialPost[]>('social_posts');
+  if (!res.ok) throw new Error(res.error || 'Could not load posts');
+  return Array.isArray(res.data) ? res.data : [];
 }
 
 async function savePosts(posts: SocialPost[]): Promise<void> {
@@ -169,6 +177,7 @@ export default function SocialPage() {
   const [briefs, setBriefs] = useState<Brief[]>([]);
   const [posts, setPosts] = useState<SocialPost[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const [tab, setTab] = useState<'calendar' | 'list'>('calendar');
   const [calM, setCalM] = useState(today.getMonth());
@@ -273,12 +282,24 @@ export default function SocialPage() {
   // Load accounts + briefs + posts on mount
   useEffect(() => {
     (async () => {
-      const [real, briefsData, postsData, accountMeta] = await Promise.all([
-        fetchRealAccounts(),
-        fetchBriefs(),
-        fetchPosts(),
-        fetchAccountMeta(),
-      ]);
+      let real, briefsData, postsData, accountMeta;
+      try {
+        [real, briefsData, postsData, accountMeta] = await Promise.all([
+          fetchRealAccounts(),
+          fetchBriefs(),
+          fetchPosts(),
+          fetchAccountMeta(),
+        ]);
+      } catch (err: any) {
+        // FAIL-CLOSED-READS-V1: one of these reads failed. Render the error
+        // instead of a plausible-looking empty calendar, and make sure
+        // loading actually ends — an unguarded rejection here used to leave
+        // the page spinning forever.
+        console.error('[social] initial load failed:', err);
+        setLoadError(err?.message || 'Could not load the social calendar.');
+        setLoading(false);
+        return;
+      }
       setBriefs(briefsData);
       setAccounts(combineAccounts(real, briefsData, accountMeta));
       setPosts(postsData);
@@ -307,7 +328,14 @@ export default function SocialPage() {
     const hasPending = posts.some(p => p.status === 'scheduled' || p.status === 'publishing');
     if (!hasPending) return;
     const interval = setInterval(async () => {
-      const fresh = await fetchPosts();
+      let fresh: SocialPost[];
+      try {
+        fresh = await fetchPosts();
+      } catch (err) {
+        // Background refresh — keep what's on screen and try again next tick.
+        console.error('[social] status poll failed:', err);
+        return;
+      }
       // Only update if a status actually changed — avoids re-render churn
       // when the cron has no work to do.
       setPosts(prev => {
@@ -1311,7 +1339,6 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"..."},{"caption":"...
   }
 
   function PostRow({ post }: { post: SocialPost }) {
-    const accs = post.accountIds.map(id => accounts.find(a => a.id === id)).filter(Boolean) as SocialAccount[];
     const brief = briefs.find(b => b.id === post.briefId);
     // PUBLISH-UI-V1: collect per-account result data once so the chips and
     // the failure banner stay consistent.
@@ -1427,6 +1454,17 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"..."},{"caption":"...
   // ============================================================================
   if (loading) {
     return <div style={{ padding: 60, textAlign: 'center', color: 'var(--ink-400)' }}>Loading…</div>;
+  }
+
+  // FAIL-CLOSED-READS-V1: the calendar could not be read. Show why rather
+  // than an empty month the user might start filling in — every edit from
+  // here would save over posts we simply failed to fetch.
+  if (loadError) {
+    return (
+      <div style={{ padding: 40, maxWidth: 680, margin: '0 auto' }}>
+        <LoadErrorBanner message={loadError} onRetry={() => window.location.reload()} />
+      </div>
+    );
   }
 
   const platforms = ['all', 'instagram', 'facebook', 'linkedin'];
@@ -1550,7 +1588,7 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"..."},{"caption":"...
                   pendingLeft = data.pendingCount || 0;
                   // Show progress as each batch lands.
                   const fresh0 = await loadWithMigration<SocialPost[]>('social_posts');
-                  if (fresh0) setPosts(fresh0);
+                  if (fresh0.ok && Array.isArray(fresh0.data)) setPosts(fresh0.data);
                   if (!data.stoppedEarly || !pendingLeft) { pendingLeft = 0; break; }
                   // A round that created nothing while slots remain means
                   // generation is failing (e.g. AI rate-limited) — stop
@@ -1574,7 +1612,7 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"..."},{"caption":"...
                 }
                 // Refresh either way — a partial run still saved drafts.
                 const fresh = await loadWithMigration<SocialPost[]>('social_posts');
-                if (fresh) setPosts(fresh);
+                if (fresh.ok && Array.isArray(fresh.data)) setPosts(fresh.data);
               } catch (err: any) {
                 alert('Fill calendar failed: ' + (err?.message || err));
               } finally {
@@ -2116,7 +2154,7 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"..."},{"caption":"...
                 </div>}
                 {!form.imageUrl && unsplash.length === 0 && (
                   <div style={{ background: 'var(--paper)', borderRadius: 'var(--r-md)', padding: 16, textAlign: 'center', border: '1.5px dashed var(--ink-200)' }}>
-                    <Image size={18} color="var(--ink-300)" style={{ margin: '0 auto 6px', display: 'block' }} />
+                    <ImageIcon size={18} color="var(--ink-300)" style={{ margin: '0 auto 6px', display: 'block' }} />
                     <div style={{ fontSize: 11, color: 'var(--ink-400)', marginBottom: 8 }}>Type a keyword above, or paste a URL</div>
                     <input value={form.imageUrl} onChange={e => setForm({ ...form, imageUrl: e.target.value })} placeholder="Paste image URL..." style={{ ...inp, fontSize: 11 }} />
                   </div>

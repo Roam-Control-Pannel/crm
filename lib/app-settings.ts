@@ -1,4 +1,5 @@
 import { getStore } from '@netlify/blobs';
+import { readStored } from './store-read';
 import {
   DEFAULT_SEQUENCE_TEMPLATES,
   sanitizeStepTemplate,
@@ -70,14 +71,18 @@ function store() {
   return getStore({ name: STORE_NAME, consistency: 'strong' });
 }
 
+/**
+ * FAIL-CLOSED-READS-V1: throws on a read failure rather than returning
+ * DEFAULT_APP_SETTINGS. updateAppSettings() spreads the caller's patch onto
+ * whatever this returns and writes the result, so defaults-on-failure meant
+ * editing one cadence number could reset the sender address and all three
+ * email templates to factory values.
+ */
 export async function getAppSettings(): Promise<AppSettings> {
-  try {
-    const data = (await store().get(KEY, { type: 'json' })) as Partial<AppSettings> | null;
-    return mergeWithDefaults(data);
-  } catch (err) {
-    console.error('[app-settings] read failed:', err);
-    return DEFAULT_APP_SETTINGS;
-  }
+  const data = await readStored<Partial<AppSettings>>('the app settings', () =>
+    store().get(KEY, { type: 'json' })
+  );
+  return mergeWithDefaults(data);
 }
 
 /** A settings patch — sections are optional, and templates may be partial. */

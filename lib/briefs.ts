@@ -71,12 +71,33 @@ export const DEFAULT_BRIEFS: Brief[] = [
  */
 export async function fetchBriefs(): Promise<Brief[]> {
   const remote = await loadWithMigration<Brief[]>('briefs');
-  if (remote && Array.isArray(remote) && remote.length > 0) {
-    return remote;
+  // FAIL-CLOSED-READS-V1
+  // The seed-and-persist below is only correct for a genuinely empty
+  // account. When a failed read also looked like "nothing stored", a single
+  // 500 from /api/store/briefs was enough to overwrite every real brief with
+  // the three defaults — permanently, since the write went straight to the
+  // server. Throwing keeps the user's data and lets the page say so.
+  if (!remote.ok) {
+    throw new BriefsUnavailableError(remote.error);
+  }
+  const data = remote.data;
+  if (data && Array.isArray(data) && data.length > 0) {
+    return data;
   }
   // First run on this account — seed with defaults and persist them.
   await saveRemote('briefs', DEFAULT_BRIEFS);
   return DEFAULT_BRIEFS;
+}
+
+/**
+ * Thrown when the briefs could not be read. Distinct from "there are no
+ * briefs" so callers never confuse the two — see FAIL-CLOSED-READS-V1.
+ */
+export class BriefsUnavailableError extends Error {
+  constructor(detail: string) {
+    super(detail || 'Could not load briefs');
+    this.name = 'BriefsUnavailableError';
+  }
 }
 
 /**

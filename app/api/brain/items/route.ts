@@ -1,29 +1,38 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getStore } from '@netlify/blobs';
+import sharp from 'sharp';
+import {
+  MAX_UPLOAD_BYTES,
+  JPEG_QUALITY,
+  classifyUpload,
+  storedContentTypeFor,
+  storedExtensionFor,
+} from '@/lib/uploads';
+// BRAIN-STORE-V1: shared, fail-closed index accessors. This route is the
+// worst case for the old swallow-as-[] behaviour: both branches of POST are
+// read-append-write, so one failed read during an upload replaced the entire
+// Brain index with the single item being added.
+import {
+  getItems,
+  setItems,
+  getFolders,
+  setFolders,
+  type Item,
+  type Folder,
+} from '@/lib/brain-store';
+import { readErrorResponse } from '@/lib/store-read';
+
+export type { Item };
 
 export const dynamic = 'force-dynamic';
+// sharp is a native module — pin this route to the Node runtime so the
+// transcode in handleFileUpload isn't bundled for Edge.
+export const runtime = 'nodejs';
 
-const META_STORE = 'roam-brain';
 const BLOB_STORE = 'roam-uploads';
-const ITEMS_KEY = 'items';
-const FOLDERS_KEY = 'folders';
 
 // Default folder name for Roam-io chat saves. Auto-created on first use.
 const ROAMIO_SAVES_FOLDER = 'Roam-io saves';
-
-export interface Item {
-  id: string;
-  blobId: string;          // key in roam-uploads store
-  folderId: string | null;
-  tags: string[];
-  description: string;
-  mime: string;
-  size: number;
-  uploadedAt: string;
-  /** Source URL for scraped web items. Lets the Brain UI surface the
-   *  original link and lets users re-scrape if the page changed. */
-  sourceUrl?: string;
-}
 
 function composeUrlMarkdown(url: string, title: string | undefined, body: string): string {
   // Stored body for URL items — keeps the link prominently in the doc so
@@ -33,15 +42,6 @@ function composeUrlMarkdown(url: string, title: string | undefined, body: string
   return `# ${heading}\n\n${meta}\n\n${body.trim()}`;
 }
 
-async function getItems(): Promise<Item[]> {
-  try {
-    const store = getStore(META_STORE);
-    return ((await store.get(ITEMS_KEY, { type: 'json' })) as Item[]) || [];
-  } catch { return []; }
-}
-async function setItems(items: Item[]) {
-  await getStore(META_STORE).set(ITEMS_KEY, JSON.stringify(items));
-}
 
 /**
  * Use Claude Sonnet vision to generate tags + description for an image.
@@ -111,20 +111,6 @@ Return ONLY the JSON, no markdown, no preamble.`,
 // Folder helpers — used by JSON save branch to land items in
 // "Roam-io saves" (auto-created on first save).
 // =================================================================
-interface Folder { id: string; name: string; parentId: string | null; createdAt: string; }
-
-async function getFolders(): Promise<Folder[]> {
-  try {
-    const store = getStore(META_STORE);
-    const data = await store.get(FOLDERS_KEY, { type: 'json' });
-    return (data as Folder[]) || [];
-  } catch { return []; }
-}
-
-async function setFolders(folders: Folder[]): Promise<void> {
-  const store = getStore(META_STORE);
-  await store.set(FOLDERS_KEY, JSON.stringify(folders));
-}
 
 /**
  * Find a folder by exact name (case-insensitive). If missing, create it
@@ -180,7 +166,8 @@ export async function GET(req: NextRequest) {
     }
     return NextResponse.json({ ok: true, items });
   } catch (err: any) {
-    return NextResponse.json({ ok: false, error: err?.message }, { status: 500 });
+    const { body, status } = readErrorResponse(err);
+    return NextResponse.json(body, { status });
   }
 }
 
@@ -220,32 +207,95 @@ async function handleFileUpload(req: NextRequest) {
       return NextResponse.json({ ok: false, error: 'No file' }, { status: 400 });
     }
 
+    // UPLOAD-POLICY-V1
+    // This route writes into the same roam-uploads store that the public
+    // /api/images/[id] reader serves from, so it enforces the same policy
+    // as the sibling uploader at /api/images/upload. Previously it took the
+    // extension from file.name and persisted `file.type` verbatim with no
+    // allowlist and no size cap, which meant an upload declared as
+    // text/html was served back as HTML on our own origin, cached for a
+    // year, on a path middleware serves without a session.
+    //
+    // Bounds are checked before the body is buffered: file.size comes from
+    // the multipart part header, so an oversized upload is rejected without
+    // us materialising it (and, for images, without base64-ing it for the
+    // vision call).
+    if (file.size === 0) {
+      return NextResponse.json({ ok: false, error: 'Empty file' }, { status: 400 });
+    }
+    if (file.size > MAX_UPLOAD_BYTES) {
+      return NextResponse.json(
+        { ok: false, error: `File too large (max ${MAX_UPLOAD_BYTES / 1024 / 1024} MB)` },
+        { status: 413 }
+      );
+    }
+
+    const kind = classifyUpload(file.name, file.type);
+    if (!kind) {
+      return NextResponse.json(
+        { ok: false, error: 'Unsupported file type — images, PDF, Markdown or plain text only' },
+        { status: 415 }
+      );
+    }
+
     // Resolve folderName → folderId if provided and no explicit folderId.
     if (!folderId && folderName) {
       const folder = await findOrCreateFolder(folderName);
       folderId = folder.id;
     }
 
-    // 1. Store binary
-    const ext = file.name.split('.').pop()?.toLowerCase() || 'jpg';
+    // 1. Store binary.
+    // IMAGE-NORMALISE-V1: images are transcoded to JPEG at the boundary so
+    // every downstream consumer (Instagram in particular, which rejects
+    // anything else) gets a format it accepts. Matches what
+    // /api/images/upload already does; Brain images feed the same social
+    // publish path via /api/social/draft and lib/social-cron.
+    const sourceBuffer = Buffer.from(await file.arrayBuffer());
+    let storedBuffer: Buffer = sourceBuffer;
+    if (kind === 'image') {
+      try {
+        storedBuffer = await sharp(sourceBuffer)
+          .rotate() // auto-orient via EXIF before sharp strips it
+          .flatten({ background: { r: 255, g: 255, b: 255 } })
+          .jpeg({ quality: JPEG_QUALITY, mozjpeg: true })
+          .toBuffer();
+      } catch (transcodeErr: any) {
+        console.error('[brain upload] transcode failed:', transcodeErr);
+        return NextResponse.json(
+          { ok: false, error: 'Image transcoding failed — file may be corrupt or an unsupported variant' },
+          { status: 422 }
+        );
+      }
+    }
+
+    // The persisted content type is always server-derived, never the
+    // caller's. /api/images/[id] clamps what it will serve to the same
+    // allowlist, so the two ends agree.
+    const mediaType = storedContentTypeFor(kind, file.name);
+    const ext = storedExtensionFor(kind, file.name);
     const blobId = `img_${Date.now()}_${Math.random().toString(36).slice(2, 9)}.${ext}`;
     const blobStore = getStore(BLOB_STORE);
-    const arrayBuffer = await file.arrayBuffer();
-    await blobStore.set(blobId, arrayBuffer, {
+    const storedArrayBuffer = storedBuffer.buffer.slice(
+      storedBuffer.byteOffset,
+      storedBuffer.byteOffset + storedBuffer.byteLength
+    ) as ArrayBuffer;
+    await blobStore.set(blobId, storedArrayBuffer, {
       metadata: {
         originalName: file.name,
-        contentType: file.type || 'image/jpeg',
-        size: file.size,
+        originalContentType: file.type || 'unknown',
+        originalSize: file.size,
+        contentType: mediaType,
+        size: storedBuffer.length,
         uploadedAt: new Date().toISOString(),
+        ...(kind === 'image' ? { normalised: 'jpeg-v1' } : {}),
       },
     });
 
     // 2. AI auto-tag (images only — Claude vision can't read PDFs as base64 image)
-    const mediaType = file.type || 'application/octet-stream';
     let tags: string[] = [];
     let description = '';
-    if (mediaType.startsWith('image/')) {
-      const base64 = Buffer.from(arrayBuffer).toString('base64');
+    if (kind === 'image') {
+      const base64 = storedBuffer.toString('base64');
       const result = await autoTagImage(base64, mediaType);
       tags = result.tags;
       description = result.description;
@@ -264,7 +314,7 @@ async function handleFileUpload(req: NextRequest) {
       tags,
       description,
       mime: mediaType,
-      size: file.size,
+      size: storedBuffer.length,
       uploadedAt: new Date().toISOString(),
     };
     const items = await getItems();
@@ -274,7 +324,8 @@ async function handleFileUpload(req: NextRequest) {
     return NextResponse.json({ ok: true, item, url: `/api/images/${blobId}` });
   } catch (err: any) {
     console.error('brain upload error:', err);
-    return NextResponse.json({ ok: false, error: err?.message || 'Upload failed' }, { status: 500 });
+    const { body, status } = readErrorResponse(err);
+    return NextResponse.json(body, { status });
   }
 }
 
@@ -378,6 +429,7 @@ async function handleJsonSave(req: NextRequest) {
     return NextResponse.json({ ok: true, item, url: `/api/images/${blobId}` });
   } catch (err: any) {
     console.error('brain JSON save error:', err);
-    return NextResponse.json({ ok: false, error: err?.message || 'Save failed' }, { status: 500 });
+    const { body, status } = readErrorResponse(err);
+    return NextResponse.json(body, { status });
   }
 }

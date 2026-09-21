@@ -1,7 +1,8 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { Plus, X, Edit3, Trash2, Check, Sparkles, Layers } from 'lucide-react';
-import { Brief, fetchBriefs, persistBriefs, DEFAULT_BRIEFS } from '@/lib/briefs';
+import LoadErrorBanner from '@/components/LoadErrorBanner';
+import { Plus, X, Edit3, Trash2, Check, Layers } from 'lucide-react';
+import { Brief, fetchBriefs, persistBriefs } from '@/lib/briefs';
 
 interface SocialAccount {
   id: string;
@@ -37,14 +38,23 @@ export default function BriefsPage() {
   const [briefs, setBriefs] = useState<Brief[]>([]);
   const [accounts, setAccounts] = useState<SocialAccount[]>([]);
   const [showEditor, setShowEditor] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [editing, setEditing] = useState<Brief | null>(null);
   const [form, setForm] = useState<Brief>(blankBrief());
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const data = await fetchBriefs();
-      if (!cancelled) setBriefs(data);
+      // FAIL-CLOSED-READS-V1: fetchBriefs throws rather than seeding the
+      // three DEFAULT_BRIEFS over real ones when the read fails.
+      try {
+        const data = await fetchBriefs();
+        if (!cancelled) setBriefs(data);
+      } catch (err: any) {
+        console.error('[briefs] load failed:', err);
+        if (!cancelled) setLoadError(err?.message || 'Could not load your briefs.');
+        return;
+      }
 
       // Real accounts come from the social-accounts API + per-account meta.
       try {
@@ -99,6 +109,7 @@ export default function BriefsPage() {
 
   return (
     <main className="page-wrap" style={{ maxWidth: 1100, margin: '0 auto' }}>
+      {loadError && <LoadErrorBanner message={loadError} onRetry={() => window.location.reload()} />}
       <div className="page-header" style={{ marginBottom: 24 }}>
         <div>
           <h1 className="page-title" style={{ fontWeight: 700, fontFamily: 'var(--font-serif)', color: 'var(--ink-900)' }}>Briefs</h1>

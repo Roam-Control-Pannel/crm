@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import { signOut, useSession } from 'next-auth/react';
-import { Mail, Clock, EyeOff, Activity, User, LogOut, Check, AlertCircle, RefreshCw, Eye } from 'lucide-react';
+import { Mail, Clock, EyeOff, Activity, LogOut, Check, AlertCircle, RefreshCw, Eye } from 'lucide-react';
 
 interface AppSettings {
   sender: { name: string; email: string; replyTo: string };

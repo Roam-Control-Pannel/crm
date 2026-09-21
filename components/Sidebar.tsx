@@ -3,7 +3,7 @@ import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import {
   LayoutDashboard, CheckSquare, Users, Search,
-  Mail, ArrowUp, Settings, Bell, X
+  Mail, ArrowUp, Settings
 } from 'lucide-react';
 import NotificationCentre from './NotificationCentre';
 

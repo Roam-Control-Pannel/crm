@@ -1,37 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getStore } from '@netlify/blobs';
+// BRAIN-STORE-V1: shared, fail-closed index accessors. Creating a folder is
+// read-append-write, so the old swallow-as-[] behaviour meant a failed read
+// replaced every existing folder with the one being created.
+import { getFolders, setFolders, type Folder } from '@/lib/brain-store';
+import { readErrorResponse } from '@/lib/store-read';
+
+export type { Folder };
 
 export const dynamic = 'force-dynamic';
-
-const STORE = 'roam-brain';
-const KEY = 'folders';
-
-export interface Folder {
-  id: string;
-  name: string;
-  parentId: string | null;
-  createdAt: string;
-}
-
-async function getFolders(): Promise<Folder[]> {
-  try {
-    const store = getStore(STORE);
-    const data = await store.get(KEY, { type: 'json' });
-    return (data as Folder[]) || [];
-  } catch { return []; }
-}
-
-async function setFolders(folders: Folder[]) {
-  const store = getStore(STORE);
-  await store.set(KEY, JSON.stringify(folders));
-}
 
 export async function GET() {
   try {
     const folders = await getFolders();
     return NextResponse.json({ ok: true, folders });
   } catch (err: any) {
-    return NextResponse.json({ ok: false, error: err?.message }, { status: 500 });
+    const { body, status } = readErrorResponse(err);
+    return NextResponse.json(body, { status });
   }
 }
 
@@ -52,6 +36,7 @@ export async function POST(req: NextRequest) {
     await setFolders(folders);
     return NextResponse.json({ ok: true, folder });
   } catch (err: any) {
-    return NextResponse.json({ ok: false, error: err?.message }, { status: 500 });
+    const { body, status } = readErrorResponse(err);
+    return NextResponse.json(body, { status });
   }
 }

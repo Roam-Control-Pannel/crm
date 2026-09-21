@@ -1,5 +1,6 @@
 'use client';
 import {useState,useEffect,useRef} from 'react';
+import LoadErrorBanner from '@/components/LoadErrorBanner';
 import {Plus,Send,Sparkles,X,Check,AlertTriangle,MessageSquare,Brain,Paperclip,Trash2,FileText,Bookmark,BookmarkCheck,Image as ImageIcon,Camera,Pencil,Pin,PinOff} from 'lucide-react';
 import {saveTextToBrain,uploadChatImage,fetchMemories,fetchMemoryContent,saveMemory,deleteItem,type BrainItem} from '@/lib/brain';
 import {loadWithMigration, saveRemote} from '@/lib/client-store';
@@ -14,7 +15,7 @@ interface Message {
   confirmAction?:{type:string;label:string;detail:string;};
   // New: structured tool call awaiting confirmation. Survives reload because
   // it's persisted alongside the message in hub_chats.
-  pendingTool?:{name:string;input:any;tool_use_id:string;assistantContent:any[];};
+  pendingTool?:{name:string;input:any;tool_use_id:string;assistantContent:any[];signature?:string;};
   // New: tools that already ran this turn (no confirm needed) — shown as
   // small "✓ Created task: …" chips beneath the message.
   executedTools?:{name:string;input:any}[];
@@ -77,10 +78,6 @@ async function fetchDocs():Promise<RoamDoc[]>{
     return [];
   }
 }
-async function persistDocs(_docs:RoamDoc[]):Promise<void>{
-  // No-op: docs are persisted in the Brain by the underlying upload/delete
-  // calls. Kept here so existing call sites don't need to change.
-}
 function fmtSize(b:number):string{if(b<1024)return b+"B";if(b<1048576)return Math.round(b/1024)+"KB";return Math.round(b/1048576)+"MB";}
 
 function groupChats(chats:Chat[]):{label:string;chats:Chat[]}[]{
@@ -103,7 +100,7 @@ function groupChats(chats:Chat[]):{label:string;chats:Chat[]}[]{
 
 interface RoamioResult{
   text:string;
-  pendingTool?:{name:string;input:any;tool_use_id:string;assistantContent:any[];};
+  pendingTool?:{name:string;input:any;tool_use_id:string;assistantContent:any[];signature?:string;};
   executedTools?:{name:string;input:any}[];
 }
 
@@ -229,6 +226,7 @@ export default function HubPage(){
   const [docs,setDocs]=useState<RoamDoc[]>([]);
   const [briefs,setBriefs]=useState<Brief[]>([]);
   const [chatsLoaded,setChatsLoaded]=useState(false);
+  const [chatsError,setChatsError]=useState<string|null>(null);
   const [savingMsgId,setSavingMsgId]=useState<string|null>(null);
   const [savingChat,setSavingChat]=useState(false);
   const [toast,setToast]=useState<string|null>(null);
@@ -496,17 +494,35 @@ export default function HubPage(){
     (async()=>{
       const [docsData,chatsData,memoryData,briefsData]=await Promise.all([
         fetchDocs(),
-        loadWithMigration<Chat[]>('hub_chats'),
+        loadWithMigration<Chat[]>('hub_chats'),  // FAIL-CLOSED-READS-V1: ReadResult
         fetchMemories().catch(()=>[] as BrainItem[]),
         fetchBriefs().catch(()=>[] as Brief[]),
       ]);
       if(cancelled)return;
       setDocs(docsData);
-      const hydrated=Array.isArray(chatsData)?chatsData.map((c:any)=>({...c,createdAt:new Date(c.createdAt),updatedAt:new Date(c.updatedAt),messages:(c.messages||[]).map((m:any)=>({...m,timestamp:new Date(m.timestamp)}))})):[];
-      setChats(hydrated);
+      // FAIL-CLOSED-READS-V1: chat history is read-modify-write via
+      // saveRemote('hub_chats', ...). Treating a failed read as "no chats"
+      // meant the next message wrote a single-chat history over everything.
+      if(!chatsData.ok){
+        console.error('[hub] chat history read failed:',chatsData.error);
+        setChatsError(chatsData.error||'Could not load chat history.');
+      } else {
+        const raw=chatsData.data;
+        const hydrated=Array.isArray(raw)?raw.map((c:any)=>({...c,createdAt:new Date(c.createdAt),updatedAt:new Date(c.updatedAt),messages:(c.messages||[]).map((m:any)=>({...m,timestamp:new Date(m.timestamp)}))})):[];
+        setChats(hydrated);
+      }
       setMemories(memoryData);
       setBriefs(briefsData);
-      setChatsLoaded(true);
+      // FAIL-CLOSED-READS-V1: chatsLoaded is what unlocks the save effect
+      // below. Only unlock it when the history was genuinely read — otherwise
+      // the first message would persist a one-chat history over the real one.
+      // Leaving it locked also means a failed load no longer silently stops
+      // saving with nothing on screen to say so; chatsError renders a banner.
+      if(!chatsData.ok){
+        setChatsLoaded(false);
+      } else {
+        setChatsLoaded(true);
+      }
     })();
     const check=()=>setIsMobile(window.innerWidth<640);
     check();window.addEventListener('resize',check);
@@ -590,8 +606,8 @@ export default function HubPage(){
     // Step 1: upload every image to Brain in parallel. Each gives us a
     // blobId we can reference in chat history. If any single upload fails
     // we still send the others and the text — partial success is OK.
-    let attachmentRefs:{blobId:string;mime:string;description?:string}[]=[];
-    let visionBlocks:any[]=[];
+    const attachmentRefs:{blobId:string;mime:string;description?:string}[]=[];
+    const visionBlocks:any[]=[];
     if(attachmentsToSend.length>0){
       setUploadingImage(true);
       try{
@@ -700,7 +716,7 @@ export default function HubPage(){
 
   // New structured tool-confirm flow. Server re-runs the tool with the
   // user's blessing and returns a fresh natural-language reply.
-  async function handleToolConfirm(chatId:string,msgId:string,pending:{name:string;input:any;tool_use_id:string;assistantContent:any[]}){
+  async function handleToolConfirm(chatId:string,msgId:string,pending:{name:string;input:any;tool_use_id:string;assistantContent:any[];signature?:string}){
     const chat=chats.find(c=>c.id===chatId)||activeChat;
     if(!chat)return;
     const updated=chat.messages.map(m=>m.id===msgId?{...m,confirmed:true,pendingTool:undefined}:m);
@@ -731,6 +747,9 @@ export default function HubPage(){
       input:pending.input,
       tool_use_id:pending.tool_use_id,
       assistant_content:pending.assistantContent,
+      // TOOL-CONFIRM-BINDING-V1: echo the server's signature back verbatim.
+      // Without it the server refuses to execute the confirmed tool.
+      signature:pending.signature,
     },memoryContext,briefs);
     const responseMsg:Message={
       id:Date.now().toString(),
@@ -908,6 +927,17 @@ export default function HubPage(){
     </div>
     );
   };
+
+  if(chatsError){
+    // FAIL-CLOSED-READS-V1: chat persistence is locked while this is set
+    // (chatsLoaded stays false), so the Hub must say so rather than look
+    // like a fresh account and silently drop everything typed into it.
+    return (
+      <div style={{padding:40,maxWidth:680,margin:'0 auto'}}>
+        <LoadErrorBanner message={chatsError} onRetry={()=>window.location.reload()} />
+      </div>
+    );
+  }
 
   return(
     <div style={{display:'flex',height:'100%',overflow:'hidden',background:'var(--paper)'}}>

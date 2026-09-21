@@ -1,4 +1,5 @@
 import { getStore } from '@netlify/blobs';
+import { readStored } from './store-read';
 import { SEED_THEMES, type Theme } from './social-themes';
 import {
   DEFAULT_POSTING_TIMES,
@@ -49,15 +50,16 @@ function store() {
 
 /**
  * Read the raw blob. Returns null if nothing's been saved yet.
+ *
+ * FAIL-CLOSED-READS-V1: throws on a read failure. The settings route merges
+ * the incoming patch onto whatever this returns and writes the result back,
+ * so null-on-failure meant a single unlucky save replaced the posting times,
+ * theme overrides and brief weights with just the section being edited.
  */
 export async function readSettingsBlob(): Promise<SocialSettingsBlob | null> {
-  try {
-    const data = (await store().get(KEY, { type: 'json' })) as SocialSettingsBlob | null;
-    return data || null;
-  } catch (err) {
-    console.error('[social-settings] readSettingsBlob failed:', err);
-    return null;
-  }
+  return readStored<SocialSettingsBlob>('the social settings', () =>
+    store().get(KEY, { type: 'json' })
+  );
 }
 
 /**

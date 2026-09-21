@@ -1,6 +1,6 @@
 'use client';
 import {useState,useEffect,useCallback} from "react";
-import {Send,Plus,Pencil,X,Mail,Clock,CheckCircle,AlertCircle,Info,Star,MessageSquare,UserPlus,Search,RotateCcw} from 'lucide-react';
+import {Send,Plus,Pencil,X,Mail,Clock,CheckCircle,Info,Star,MessageSquare,UserPlus,Search,RotateCcw} from 'lucide-react';
 import {BrevoListSelector} from '@/components/BrevoListSelector';
 import {addNotification} from "@/components/NotificationCentre";
 

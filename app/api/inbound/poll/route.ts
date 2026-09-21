@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { fetchPendingReplies, markProcessed } from '@/lib/imap';
 import { addNotification } from '@/lib/notifications';
 import { storeReply } from '@/lib/replies';
+import { recordInboundRun } from '@/lib/cron-status';
 import { safeEqual } from '@/lib/safe-equal';
 
 export const dynamic = 'force-dynamic';
@@ -139,6 +140,13 @@ export async function GET(req: NextRequest) {
       try {
         // Persist EVERY reply (including auto-responders) so the contact
         // timeline can show them. Auto-responders render greyed-out in the UI.
+        // REPLY-RESULT-V1: a write failure throws out of storeReply and is
+        // caught by this loop's catch below, which counts an error and —
+        // crucially — never pushes the UID into processedUids. The message
+        // therefore keeps its unprocessed state in Gmail and is retried on
+        // the next poll, instead of being labelled processed with its body
+        // lost. A duplicate is not an error: the reply is already stored, so
+        // we carry on and let the rest of the flow run idempotently.
         await storeReply({
           uid: reply.uid,
           fromEmail: reply.fromEmail,
@@ -220,8 +228,37 @@ export async function GET(req: NextRequest) {
 
     const message = `Processed ${stats.fetched} replies · matched ${stats.matched} · created ${stats.created} · auto-responders ${stats.autoResponders}${stats.errors ? ' · ' + stats.errors + ' errors' : ''}`;
     console.log(`[inbound] ${message}`);
-    return NextResponse.json({ ok: true, ...stats, message });
+
+    // INBOUND-HEALTH-V1: leave a trace of every run so a stale ranAt is
+    // visible in /api/settings/diagnostics. Never let a bookkeeping failure
+    // fail a run whose replies are already ingested.
+    await recordInboundRun({
+      ranAt: new Date().toISOString(),
+      ok: stats.errors === 0,
+      fetched: stats.fetched,
+      errors: stats.errors,
+      message,
+    }).catch(err => console.error('[inbound] recordInboundRun failed:', err?.message));
+
+    // CRON-REPORTING-V1: a run that ingested nothing because every reply
+    // errored used to answer a flat 200 { ok: true }, so the wrapper and the
+    // backup trigger both logged a clean run. 207 says "the request worked,
+    // some of the work inside it did not".
+    return NextResponse.json(
+      { ok: true, ...stats, message },
+      { status: stats.errors > 0 ? 207 : 200 }
+    );
   } catch (err: any) {
+    // INBOUND-HEALTH-V1: a run that threw is exactly the one worth recording
+    // — this is what makes "the poller has been dead since Tuesday" visible.
+    await recordInboundRun({
+      ranAt: new Date().toISOString(),
+      ok: false,
+      fetched: stats.fetched,
+      errors: stats.errors + 1,
+      message: err?.message || 'Inbound poll threw',
+    }).catch(e => console.error('[inbound] recordInboundRun failed:', e?.message));
+
     // imapflow wraps the real IMAP server response in a generic "Command failed".
     // Surface the underlying fields so we can see what Gmail actually said.
     const diagnostic = {

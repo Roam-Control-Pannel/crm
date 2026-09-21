@@ -1,4 +1,5 @@
 import { getStore } from '@netlify/blobs';
+import { readStored } from './store-read';
 
 /**
  * Persistent reply storage.
@@ -50,46 +51,66 @@ function keyFor(email: string): string {
  * Persist a reply for a contact. Idempotent on (email, uid) — re-storing
  * the same UID is a no-op so repeat polls don't duplicate the timeline.
  */
-export async function storeReply(reply: Omit<StoredReply, 'storedAt'>): Promise<StoredReply | null> {
+/**
+ * FAIL-CLOSED-READS-V1 + REPLY-RESULT-V1
+ *
+ * This used to return `null` for BOTH "we already have this UID" and "the
+ * write threw", and the poll route did not assign the return value at all.
+ * A Blobs 429 therefore produced: Brevo flipped to `responded`, a
+ * notification fired, the Gmail message labelled processed so the next poll
+ * skipped it, and `ok: true, errors: 0` in the response — while the reply
+ * body itself was gone for good, leaving a contact marked as replied with an
+ * empty timeline.
+ *
+ * The outcome is now explicit, and a failure is a failure: the caller must
+ * not mark the message processed.
+ */
+export type StoreReplyResult =
+  | { stored: true; reply: StoredReply }
+  | { stored: false; reason: 'duplicate' };
+
+export async function storeReply(
+  reply: Omit<StoredReply, 'storedAt'>
+): Promise<StoreReplyResult> {
   const fullReply: StoredReply = {
     ...reply,
     fromEmail: reply.fromEmail.toLowerCase(),
     storedAt: new Date().toISOString(),
   };
 
-  try {
-    const existing = await listRepliesForContact(fullReply.fromEmail);
-    // Idempotency: skip if we've already seen this UID for this contact
-    if (existing.some((r) => r.uid === fullReply.uid)) {
-      return null;
-    }
-    const next = [fullReply, ...existing].slice(0, PER_CONTACT_LIMIT);
-    await store().setJSON(keyFor(fullReply.fromEmail), next as any);
-
-    // Update the global recent index so the dashboard can find the latest
-    // replies without scanning every contact.
-    await updateRecentIndex({
-      email: fullReply.fromEmail,
-      uid: fullReply.uid,
-      storedAt: fullReply.storedAt,
-    });
-
-    return fullReply;
-  } catch (err) {
-    console.error('[replies] storeReply failed:', err);
-    return null;
+  // A read failure throws out of listRepliesForContact — deliberately not
+  // caught. Appending to an invented empty list would drop this contact's
+  // entire reply history on the write below.
+  const existing = await listRepliesForContact(fullReply.fromEmail);
+  // Idempotency: skip if we've already seen this UID for this contact.
+  if (existing.some((r) => r.uid === fullReply.uid)) {
+    return { stored: false, reason: 'duplicate' };
   }
+  const next = [fullReply, ...existing].slice(0, PER_CONTACT_LIMIT);
+  await store().setJSON(keyFor(fullReply.fromEmail), next as any);
+
+  // Update the global recent index so the dashboard can find the latest
+  // replies without scanning every contact.
+  await updateRecentIndex({
+    email: fullReply.fromEmail,
+    uid: fullReply.uid,
+    storedAt: fullReply.storedAt,
+  });
+
+  return { stored: true, reply: fullReply };
 }
 
 /** All stored replies for a contact, newest first. Empty array if none. */
+/**
+ * FAIL-CLOSED-READS-V1: throws on a read failure. storeReply() appends to
+ * this and writes the result back, so an empty list on failure erased the
+ * contact's whole reply timeline.
+ */
 export async function listRepliesForContact(email: string): Promise<StoredReply[]> {
-  try {
-    const data = (await store().get(keyFor(email), { type: 'json' })) as StoredReply[] | null;
-    return data || [];
-  } catch (err) {
-    console.error('[replies] listRepliesForContact failed:', err);
-    return [];
-  }
+  const data = await readStored<StoredReply[]>(`replies for ${email}`, () =>
+    store().get(keyFor(email), { type: 'json' })
+  );
+  return data ?? [];
 }
 
 /** Most recent stored reply for a contact, or null. Cheap accessor. */

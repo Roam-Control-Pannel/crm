@@ -1,5 +1,6 @@
 'use client';
 import {useState,useEffect} from 'react';
+import LoadErrorBanner from '@/components/LoadErrorBanner';
 import {Plus,CheckCircle2,Circle,AlertTriangle,Calendar,Brain,Trash2,ChevronDown,ChevronUp} from 'lucide-react';
 import {addNotification} from '@/components/NotificationCentre';
 import {loadWithMigration, saveRemote} from '@/lib/client-store';
@@ -29,9 +30,13 @@ const pColors:Record<string,{bg:string;color:string}>={
 };
 const cLabels:Record<string,string>={outreach:'Outreach',social:'Social',town_activation:'Town activation',admin:'Admin',ai_suggested:'AI suggested'};
 
+// FAIL-CLOSED-READS-V1: throws rather than reporting an empty task list.
+// persistTasks() replaces the whole collection, so "no tasks" from a failed
+// read plus one added task would wipe every existing task.
 async function fetchTasks():Promise<Task[]>{
-  const data=await loadWithMigration<Task[]>('tasks');
-  return Array.isArray(data)?data:[];
+  const res=await loadWithMigration<Task[]>('tasks');
+  if(!res.ok)throw new Error(res.error||'Could not load tasks');
+  return Array.isArray(res.data)?res.data:[];
 }
 async function persistTasks(tasks:Task[]):Promise<void>{
   await saveRemote('tasks',tasks);
@@ -67,11 +72,18 @@ function getAvatarColor(name:string):string{
 export default function TasksPage(){
   const [tasks,setTasks]=useState<Task[]>([]);
   const [showAdd,setShowAdd]=useState(false);
+  const [loadError,setLoadError]=useState<string|null>(null);
   const [filter,setFilter]=useState({assignee:'',priority:'',category:''});
   const [showCompleted,setShowCompleted]=useState(false);
   const [form,setForm]=useState({title:'',description:'',priority:'medium' as 'high'|'medium'|'low',category:'outreach' as Task['category'],assignee:'Andy',dueDate:new Date().toISOString().split('T')[0]});
 
-  useEffect(()=>{(async()=>{setTasks(await fetchTasks());})();},[]);
+  useEffect(()=>{(async()=>{
+    try{setTasks(await fetchTasks());}
+    catch(err:any){
+      console.error('[tasks] load failed:',err);
+      setLoadError(err?.message||'Could not load your tasks.');
+    }
+  })();},[]);
 
   function addTask(){
     if(!form.title.trim())return;
@@ -152,6 +164,7 @@ export default function TasksPage(){
 
   return(
     <div className="page-wrap">
+      {loadError && <LoadErrorBanner message={loadError} onRetry={()=>window.location.reload()} />}
       {/* Header */}
       <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',marginBottom:20}} className="page-header">
         <div>
