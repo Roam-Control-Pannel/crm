@@ -1,21 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getStore } from '@netlify/blobs';
+// BRAIN-STORE-V1: the index accessors are shared and fail closed. The local
+// copies this file used to carry returned [] on a read failure, so a PATCH
+// or DELETE landing during a Blobs blip rewrote the whole index.
+import { getItems, setItems, type Item } from '@/lib/brain-store';
+import { readErrorResponse } from '@/lib/store-read';
 
 export const dynamic = 'force-dynamic';
 
-const META_STORE = 'roam-brain';
 const BLOB_STORE = 'roam-uploads';
-const ITEMS_KEY = 'items';
-
-interface Item {
-  id: string; blobId: string; folderId: string | null;
-  tags: string[]; description: string; mime: string; size: number; uploadedAt: string;
-}
-
-async function getItems(): Promise<Item[]> {
-  try { const store = getStore(META_STORE); return ((await store.get(ITEMS_KEY, { type: 'json' })) as Item[]) || []; } catch { return []; }
-}
-async function setItems(items: Item[]) { await getStore(META_STORE).set(ITEMS_KEY, JSON.stringify(items)); }
 
 interface RouteParams { params: { id: string } }
 
@@ -31,7 +24,8 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
     await setItems(items);
     return NextResponse.json({ ok: true, item: items[idx] });
   } catch (err: any) {
-    return NextResponse.json({ ok: false, error: err?.message }, { status: 500 });
+    const { body, status } = readErrorResponse(err);
+    return NextResponse.json(body, { status });
   }
 }
 
@@ -48,6 +42,7 @@ export async function DELETE(_req: NextRequest, { params }: RouteParams) {
     await setItems(items.filter(i => i.id !== params.id));
     return NextResponse.json({ ok: true });
   } catch (err: any) {
-    return NextResponse.json({ ok: false, error: err?.message }, { status: 500 });
+    const { body, status } = readErrorResponse(err);
+    return NextResponse.json(body, { status });
   }
 }

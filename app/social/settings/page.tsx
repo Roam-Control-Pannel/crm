@@ -14,6 +14,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
+import LoadErrorBanner from '@/components/LoadErrorBanner';
 import Link from 'next/link';
 import {
   ArrowLeft, Plus, Trash2, Edit3, Check, X, RotateCcw, Save, AlertTriangle, Settings,
@@ -116,16 +117,26 @@ function BriefWeightsPanel() {
   const [briefs, setBriefs] = useState<Brief[]>([]);
   const [weights, setWeights] = useState<Record<string, number>>({});
   const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       // Load briefs + current weights from the settings GET
-      const [briefList, settingsRes] = await Promise.all([
-        fetchBriefs(),
-        fetch('/api/social/settings').then(r => r.json()).catch(() => null),
-      ]);
+      let briefList, settingsRes;
+      try {
+        [briefList, settingsRes] = await Promise.all([
+          fetchBriefs(),
+          fetch('/api/social/settings').then(r => r.json()).catch(() => null),
+        ]);
+      } catch (err: any) {
+        // FAIL-CLOSED-READS-V1: without briefs the weights editor would show
+        // every brief as removed, and saving would persist that.
+        console.error('[social/settings] brief load failed:', err);
+        if (!cancelled) { setLoadError(err?.message || 'Could not load briefs.'); setLoaded(true); }
+        return;
+      }
       if (cancelled) return;
       setBriefs(briefList);
       const w = settingsRes?.settings?.briefWeights || {};
@@ -170,6 +181,7 @@ function BriefWeightsPanel() {
 
   return (
     <div id="brief-weights" style={{ background: 'var(--white)', borderRadius: 'var(--r-lg)', boxShadow: 'var(--shadow-sm)', padding: 18, marginBottom: 14, scrollMarginTop: 80 }}>
+      {loadError && <LoadErrorBanner message={loadError} />}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
         <div>
           <div style={{ fontFamily: 'var(--font-display)', fontSize: 18, color: 'var(--ink-900)' }}>Brief Weights</div>

@@ -1,20 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getStore } from '@netlify/blobs';
+// BRAIN-STORE-V1: shared, fail-closed index accessors. This route is
+// read-only, but it feeds Roam-io's search_brain tool — reporting an empty
+// Brain because a read failed makes the assistant confidently answer "you
+// have nothing saved about that", which is worse than an error. The handler
+// surfaces a read failure as 503.
+import { getItems, getFolders, type Item, type Folder } from '@/lib/brain-store';
+import { readErrorResponse } from '@/lib/store-read';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
-
-const META_STORE = 'roam-brain';
-const ITEMS_KEY = 'items';
-const FOLDERS_KEY = 'folders';
-
-interface Item {
-  id: string; blobId: string; folderId: string | null;
-  tags: string[]; description: string; mime: string; size: number; uploadedAt: string;
-  sourceUrl?: string;
-}
-
-interface Folder { id: string; name: string }
 
 /**
  * Search Brain items by description and tags.
@@ -90,20 +84,10 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: true, count: matched.length, items: matched });
   } catch (err: any) {
     console.error('brain search error:', err);
-    return NextResponse.json({ ok: false, error: err?.message || 'Search failed' }, { status: 500 });
+    // A failed index read must not look like "no results" — Roam-io would
+    // answer "you have nothing saved about that" with total confidence.
+    const { body, status } = readErrorResponse(err);
+    return NextResponse.json(body, { status });
   }
 }
 
-async function getItems(): Promise<Item[]> {
-  try {
-    const store = getStore(META_STORE);
-    return ((await store.get(ITEMS_KEY, { type: 'json' })) as Item[]) || [];
-  } catch { return []; }
-}
-
-async function getFolders(): Promise<Folder[]> {
-  try {
-    const store = getStore(META_STORE);
-    return ((await store.get(FOLDERS_KEY, { type: 'json' })) as Folder[]) || [];
-  } catch { return []; }
-}

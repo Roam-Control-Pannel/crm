@@ -1,5 +1,6 @@
 'use client';
 import {useState,useEffect,useRef} from 'react';
+import LoadErrorBanner from '@/components/LoadErrorBanner';
 import {Plus,Send,Sparkles,X,Check,AlertTriangle,MessageSquare,Brain,Paperclip,Trash2,FileText,Bookmark,BookmarkCheck,Image as ImageIcon,Camera,Pencil,Pin,PinOff} from 'lucide-react';
 import {saveTextToBrain,uploadChatImage,fetchMemories,fetchMemoryContent,saveMemory,deleteItem,type BrainItem} from '@/lib/brain';
 import {loadWithMigration, saveRemote} from '@/lib/client-store';
@@ -229,6 +230,7 @@ export default function HubPage(){
   const [docs,setDocs]=useState<RoamDoc[]>([]);
   const [briefs,setBriefs]=useState<Brief[]>([]);
   const [chatsLoaded,setChatsLoaded]=useState(false);
+  const [chatsError,setChatsError]=useState<string|null>(null);
   const [savingMsgId,setSavingMsgId]=useState<string|null>(null);
   const [savingChat,setSavingChat]=useState(false);
   const [toast,setToast]=useState<string|null>(null);
@@ -496,17 +498,35 @@ export default function HubPage(){
     (async()=>{
       const [docsData,chatsData,memoryData,briefsData]=await Promise.all([
         fetchDocs(),
-        loadWithMigration<Chat[]>('hub_chats'),
+        loadWithMigration<Chat[]>('hub_chats'),  // FAIL-CLOSED-READS-V1: ReadResult
         fetchMemories().catch(()=>[] as BrainItem[]),
         fetchBriefs().catch(()=>[] as Brief[]),
       ]);
       if(cancelled)return;
       setDocs(docsData);
-      const hydrated=Array.isArray(chatsData)?chatsData.map((c:any)=>({...c,createdAt:new Date(c.createdAt),updatedAt:new Date(c.updatedAt),messages:(c.messages||[]).map((m:any)=>({...m,timestamp:new Date(m.timestamp)}))})):[];
-      setChats(hydrated);
+      // FAIL-CLOSED-READS-V1: chat history is read-modify-write via
+      // saveRemote('hub_chats', ...). Treating a failed read as "no chats"
+      // meant the next message wrote a single-chat history over everything.
+      if(!chatsData.ok){
+        console.error('[hub] chat history read failed:',chatsData.error);
+        setChatsError(chatsData.error||'Could not load chat history.');
+      } else {
+        const raw=chatsData.data;
+        const hydrated=Array.isArray(raw)?raw.map((c:any)=>({...c,createdAt:new Date(c.createdAt),updatedAt:new Date(c.updatedAt),messages:(c.messages||[]).map((m:any)=>({...m,timestamp:new Date(m.timestamp)}))})):[];
+        setChats(hydrated);
+      }
       setMemories(memoryData);
       setBriefs(briefsData);
-      setChatsLoaded(true);
+      // FAIL-CLOSED-READS-V1: chatsLoaded is what unlocks the save effect
+      // below. Only unlock it when the history was genuinely read — otherwise
+      // the first message would persist a one-chat history over the real one.
+      // Leaving it locked also means a failed load no longer silently stops
+      // saving with nothing on screen to say so; chatsError renders a banner.
+      if(!chatsData.ok){
+        setChatsLoaded(false);
+      } else {
+        setChatsLoaded(true);
+      }
     })();
     const check=()=>setIsMobile(window.innerWidth<640);
     check();window.addEventListener('resize',check);
@@ -911,6 +931,17 @@ export default function HubPage(){
     </div>
     );
   };
+
+  if(chatsError){
+    // FAIL-CLOSED-READS-V1: chat persistence is locked while this is set
+    // (chatsLoaded stays false), so the Hub must say so rather than look
+    // like a fresh account and silently drop everything typed into it.
+    return (
+      <div style={{padding:40,maxWidth:680,margin:'0 auto'}}>
+        <LoadErrorBanner message={chatsError} onRetry={()=>window.location.reload()} />
+      </div>
+    );
+  }
 
   return(
     <div style={{display:'flex',height:'100%',overflow:'hidden',background:'var(--paper)'}}>

@@ -1,5 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
+import LoadErrorBanner from '@/components/LoadErrorBanner';
 import { Edit3, Pause, Play, RefreshCw, AlertTriangle, Check, X } from 'lucide-react';
 import { Brief, fetchBriefs } from '@/lib/briefs';
 import { RealAccount, SocialAccount, AccountMeta, fetchRealAccounts, combineAccounts, upsertAccountMeta, fetchAccountMeta } from '@/lib/social-accounts';
@@ -83,6 +84,7 @@ export default function AccountsPage() {
   const [accounts, setAccounts] = useState<SocialAccount[]>([]);
   const [accountMeta, setAccountMeta] = useState<AccountMeta[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [editing, setEditing] = useState<SocialAccount | null>(null);
   // MULTI-BRIEF-V1: editForm tracks multiple briefIds + per-brief overrides.
   // Legacy flat tone/hashtags/content fields are still here so a single-brief
@@ -99,16 +101,29 @@ export default function AccountsPage() {
 
   async function load() {
     setLoading(true);
-    const [real, briefsData, metas] = await Promise.all([
-      fetchRealAccounts(),
-      fetchBriefs(),
-      fetchAccountMeta(),
-    ]);
-    setRealAccounts(real);
-    setBriefs(briefsData);
-    setAccountMeta(metas);
-    setAccounts(combineAccounts(real, briefsData, metas));
-    setLoading(false);
+    setLoadError(null);
+    try {
+      const [real, briefsData, metas] = await Promise.all([
+        fetchRealAccounts(),
+        fetchBriefs(),
+        fetchAccountMeta(),
+      ]);
+      setRealAccounts(real);
+      setBriefs(briefsData);
+      setAccountMeta(metas);
+      setAccounts(combineAccounts(real, briefsData, metas));
+    } catch (err: any) {
+      // FAIL-CLOSED-READS-V1: upsertAccountMeta is a read-modify-write over
+      // the whole metadata array, so a half-loaded page that then saves would
+      // drop every pause state and brief assignment. Refuse to render the
+      // editable view at all.
+      console.error('[accounts] load failed:', err);
+      setLoadError(err?.message || 'Could not load your accounts.');
+    } finally {
+      // Always clear loading — an unguarded rejection here used to leave the
+      // page spinning indefinitely.
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -202,6 +217,7 @@ export default function AccountsPage() {
 
   return (
     <div className="page-wrap">
+      {loadError && <LoadErrorBanner message={loadError} onRetry={load} />}
       <div className="page-header" style={{ marginBottom: 20 }}>
         <div>
           <h1 className="page-title" style={{ fontFamily: 'var(--font-display)', fontWeight: 700, color: 'var(--ink-900)', lineHeight: 1 }}>Social Accounts</h1>

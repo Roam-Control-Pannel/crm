@@ -8,33 +8,31 @@ import {
   storedContentTypeFor,
   storedExtensionFor,
 } from '@/lib/uploads';
+// BRAIN-STORE-V1: shared, fail-closed index accessors. This route is the
+// worst case for the old swallow-as-[] behaviour: both branches of POST are
+// read-append-write, so one failed read during an upload replaced the entire
+// Brain index with the single item being added.
+import {
+  getItems,
+  setItems,
+  getFolders,
+  setFolders,
+  type Item,
+  type Folder,
+} from '@/lib/brain-store';
+import { readErrorResponse } from '@/lib/store-read';
+
+export type { Item };
 
 export const dynamic = 'force-dynamic';
 // sharp is a native module — pin this route to the Node runtime so the
 // transcode in handleFileUpload isn't bundled for Edge.
 export const runtime = 'nodejs';
 
-const META_STORE = 'roam-brain';
 const BLOB_STORE = 'roam-uploads';
-const ITEMS_KEY = 'items';
-const FOLDERS_KEY = 'folders';
 
 // Default folder name for Roam-io chat saves. Auto-created on first use.
 const ROAMIO_SAVES_FOLDER = 'Roam-io saves';
-
-export interface Item {
-  id: string;
-  blobId: string;          // key in roam-uploads store
-  folderId: string | null;
-  tags: string[];
-  description: string;
-  mime: string;
-  size: number;
-  uploadedAt: string;
-  /** Source URL for scraped web items. Lets the Brain UI surface the
-   *  original link and lets users re-scrape if the page changed. */
-  sourceUrl?: string;
-}
 
 function composeUrlMarkdown(url: string, title: string | undefined, body: string): string {
   // Stored body for URL items — keeps the link prominently in the doc so
@@ -44,15 +42,6 @@ function composeUrlMarkdown(url: string, title: string | undefined, body: string
   return `# ${heading}\n\n${meta}\n\n${body.trim()}`;
 }
 
-async function getItems(): Promise<Item[]> {
-  try {
-    const store = getStore(META_STORE);
-    return ((await store.get(ITEMS_KEY, { type: 'json' })) as Item[]) || [];
-  } catch { return []; }
-}
-async function setItems(items: Item[]) {
-  await getStore(META_STORE).set(ITEMS_KEY, JSON.stringify(items));
-}
 
 /**
  * Use Claude Sonnet vision to generate tags + description for an image.
@@ -122,20 +111,6 @@ Return ONLY the JSON, no markdown, no preamble.`,
 // Folder helpers — used by JSON save branch to land items in
 // "Roam-io saves" (auto-created on first save).
 // =================================================================
-interface Folder { id: string; name: string; parentId: string | null; createdAt: string; }
-
-async function getFolders(): Promise<Folder[]> {
-  try {
-    const store = getStore(META_STORE);
-    const data = await store.get(FOLDERS_KEY, { type: 'json' });
-    return (data as Folder[]) || [];
-  } catch { return []; }
-}
-
-async function setFolders(folders: Folder[]): Promise<void> {
-  const store = getStore(META_STORE);
-  await store.set(FOLDERS_KEY, JSON.stringify(folders));
-}
 
 /**
  * Find a folder by exact name (case-insensitive). If missing, create it
@@ -191,7 +166,8 @@ export async function GET(req: NextRequest) {
     }
     return NextResponse.json({ ok: true, items });
   } catch (err: any) {
-    return NextResponse.json({ ok: false, error: err?.message }, { status: 500 });
+    const { body, status } = readErrorResponse(err);
+    return NextResponse.json(body, { status });
   }
 }
 
@@ -348,7 +324,8 @@ async function handleFileUpload(req: NextRequest) {
     return NextResponse.json({ ok: true, item, url: `/api/images/${blobId}` });
   } catch (err: any) {
     console.error('brain upload error:', err);
-    return NextResponse.json({ ok: false, error: err?.message || 'Upload failed' }, { status: 500 });
+    const { body, status } = readErrorResponse(err);
+    return NextResponse.json(body, { status });
   }
 }
 
@@ -452,6 +429,7 @@ async function handleJsonSave(req: NextRequest) {
     return NextResponse.json({ ok: true, item, url: `/api/images/${blobId}` });
   } catch (err: any) {
     console.error('brain JSON save error:', err);
-    return NextResponse.json({ ok: false, error: err?.message || 'Save failed' }, { status: 500 });
+    const { body, status } = readErrorResponse(err);
+    return NextResponse.json(body, { status });
   }
 }

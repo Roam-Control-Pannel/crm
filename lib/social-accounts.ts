@@ -122,9 +122,24 @@ const PLATFORM_DEFAULT_COLORS: Record<string, string> = {
  * Fetch account metadata from the server store. Migrates legacy localStorage
  * data on first call.
  */
+/**
+ * FAIL-CLOSED-READS-V1
+ * Throws on a read failure instead of reporting "no metadata". upsertAccountMeta
+ * below is a read-modify-write over the WHOLE array, so an empty result on a
+ * failed read meant one Pause click could erase every account's pause state
+ * and brief assignment.
+ */
 export async function fetchAccountMeta(): Promise<AccountMeta[]> {
-  const data = await loadWithMigration<AccountMeta[]>('account_meta');
-  return Array.isArray(data) ? data : [];
+  const res = await loadWithMigration<AccountMeta[]>('account_meta');
+  if (!res.ok) throw new AccountMetaUnavailableError(res.error);
+  return Array.isArray(res.data) ? res.data : [];
+}
+
+export class AccountMetaUnavailableError extends Error {
+  constructor(detail: string) {
+    super(detail || 'Could not load account settings');
+    this.name = 'AccountMetaUnavailableError';
+  }
 }
 
 export async function saveAccountMeta(metas: AccountMeta[]): Promise<void> {
@@ -189,7 +204,12 @@ export function combineAccounts(
 export type AccountHandleCache = Record<string, { handle: string; platform: string }>;
 
 export async function fetchAccountHandleCache(): Promise<AccountHandleCache> {
-  const data = await loadWithMigration<AccountHandleCache>('account_handle_cache');
+  const res = await loadWithMigration<AccountHandleCache>('account_handle_cache');
+  // The handle cache is a display nicety (last-known account names), and
+  // updateAccountHandleCache below only writes when something changed. A
+  // failed read must still not reach that write, so surface it.
+  if (!res.ok) throw new AccountMetaUnavailableError(res.error);
+  const data = res.data;
   return data && typeof data === 'object' && !Array.isArray(data) ? data : {};
 }
 

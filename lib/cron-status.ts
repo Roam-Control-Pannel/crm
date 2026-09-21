@@ -1,4 +1,5 @@
 import { getStore } from '@netlify/blobs';
+import { readStored, isStoreReadError } from './store-read';
 
 /**
  * System-level state for the daily outreach sequences cron.
@@ -33,20 +34,45 @@ function statusStore() {
   return getStore({ name: STORE_NAME, consistency: 'strong' });
 }
 
+/**
+ * FAIL-CLOSED-READS-V1
+ * Returns `{ history: [] }` only when nothing has ever been recorded;
+ * THROWS StoreReadError if the read itself failed. It used to swallow the
+ * failure and return an empty history, which had two consequences: the next
+ * recordCronRun() wrote that empty history back over fourteen days of run
+ * records, and sendsToday() counted zero — silently resetting the 50/day
+ * send cap mid-day and letting the cron send a second full batch.
+ */
 export async function getCronStatus(): Promise<CronStatus> {
-  try {
-    const store = statusStore();
-    const data = (await store.get(KEY, { type: 'json' })) as CronStatus | null;
-    return data || { history: [] };
-  } catch (err) {
-    console.error('getCronStatus failed:', err);
-    return { history: [] };
-  }
+  const data = await readStored<CronStatus>('the cron run history', () =>
+    statusStore().get(KEY, { type: 'json' })
+  );
+  return data ?? { history: [] };
 }
 
 export async function recordCronRun(record: CronRunRecord): Promise<void> {
   const store = statusStore();
-  const current = await getCronStatus();
+  let current: CronStatus;
+  try {
+    current = await getCronStatus();
+  } catch (err) {
+    // Deliberately the one place that swallows: this is called at the very
+    // end of a run, including from the sequences route's error path, and
+    // throwing here would mask the real outcome (or the real error) of a run
+    // whose emails have already gone out. Losing ONE run record is strictly
+    // better than writing a single-entry history over the other thirteen —
+    // and better than this throw propagating in place of the 500 the caller
+    // is trying to return.
+    if (isStoreReadError(err)) {
+      console.error(
+        '[cron-status] history unreadable — skipping the run record rather than ' +
+          'overwriting existing history. Run outcome was:',
+        JSON.stringify(record)
+      );
+      return;
+    }
+    throw err;
+  }
   const next: CronStatus = {
     lastRun: record,
     history: [record, ...current.history].slice(0, HISTORY_LIMIT),
@@ -80,6 +106,11 @@ export async function claimDailyRun(dateStr: string): Promise<boolean> {
 /**
  * Counts how many sends have happened so far today. Used by the cron to
  * enforce the 50/day send cap.
+ *
+ * FAIL-CLOSED-READS-V1: propagates a StoreReadError rather than reporting 0.
+ * A zero here reads as "nothing sent today" and re-opens the full daily cap,
+ * so the honest outcome of an unreadable history is that the run refuses to
+ * send at all — no emails is recoverable, a second batch of 50 is not.
  */
 export async function sendsToday(): Promise<number> {
   const status = await getCronStatus();

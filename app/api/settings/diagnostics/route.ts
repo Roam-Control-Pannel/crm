@@ -12,24 +12,32 @@ export const runtime = 'nodejs';
  * one slow or failing call doesn't take the whole panel down.
  */
 export async function GET() {
+  // FAIL-CLOSED-READS-V1: these catches are deliberate — this is a
+  // read-only ops panel and one failing probe shouldn't blank the rest. But
+  // a failed read is reported AS a failure rather than as a plausible zero:
+  // "0 of 50 sent today" when the history is simply unreadable is exactly
+  // the misreading that let the send cap reset unnoticed.
+  const FAILED = Symbol('failed');
   const [brevo, cron, settings, hiddenIds] = await Promise.all([
     probeBrevo().catch(err => ({ ok: false as const, error: err?.message || String(err) })),
-    getCronStatus().catch(() => ({ history: [] as any[] })),
+    getCronStatus().catch(() => FAILED as any),
     getAppSettings().catch(() => null),
-    getHiddenListIds().catch(() => [] as number[]),
+    getHiddenListIds().catch(() => FAILED as any),
   ]);
 
-  const sends = await sendsToday().catch(() => 0);
+  const sends = await sendsToday().catch(() => FAILED as any);
   const dailyCap = settings?.cadence.dailySendCap ?? 50;
+  const cronUnavailable = cron === FAILED;
 
   return NextResponse.json({
     brevo,
     cron: {
-      lastRun: (cron as any).lastRun || null,
-      sendsToday: sends,
+      unavailable: cronUnavailable,
+      lastRun: cronUnavailable ? null : ((cron as any).lastRun || null),
+      sendsToday: sends === FAILED ? null : sends,
       dailyCap,
     },
-    hiddenLists: hiddenIds.length,
+    hiddenLists: hiddenIds === FAILED ? null : (hiddenIds as number[]).length,
   });
 }
 

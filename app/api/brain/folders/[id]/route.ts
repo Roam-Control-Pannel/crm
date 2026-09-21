@@ -1,23 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getStore } from '@netlify/blobs';
+// BRAIN-STORE-V1: shared, fail-closed index accessors. Folder delete reads
+// BOTH the folder list and the item index before writing both back, so the
+// old swallow-as-[] behaviour could wipe either one.
+import { getFolders, setFolders, getItems, setItems, type Folder, type Item } from '@/lib/brain-store';
+import { readErrorResponse } from '@/lib/store-read';
 
 export const dynamic = 'force-dynamic';
-
-const STORE = 'roam-brain';
-const KEY = 'folders';
-const ITEMS_KEY = 'items';
-
-interface Folder { id: string; name: string; parentId: string | null; createdAt: string; }
-interface Item { id: string; blobId: string; folderId: string | null; tags: string[]; description: string; mime: string; uploadedAt: string; }
-
-async function getFolders(): Promise<Folder[]> {
-  try { const store = getStore(STORE); return ((await store.get(KEY, { type: 'json' })) as Folder[]) || []; } catch { return []; }
-}
-async function setFolders(folders: Folder[]) { await getStore(STORE).set(KEY, JSON.stringify(folders)); }
-async function getItems(): Promise<Item[]> {
-  try { const store = getStore(STORE); return ((await store.get(ITEMS_KEY, { type: 'json' })) as Item[]) || []; } catch { return []; }
-}
-async function setItems(items: Item[]) { await getStore(STORE).set(ITEMS_KEY, JSON.stringify(items)); }
 
 interface RouteParams { params: { id: string } }
 
@@ -44,7 +32,8 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
     await setFolders(folders);
     return NextResponse.json({ ok: true, folder: folders[idx] });
   } catch (err: any) {
-    return NextResponse.json({ ok: false, error: err?.message }, { status: 500 });
+    const { body, status } = readErrorResponse(err);
+    return NextResponse.json(body, { status });
   }
 }
 
@@ -69,6 +58,7 @@ export async function DELETE(_req: NextRequest, { params }: RouteParams) {
 
     return NextResponse.json({ ok: true, deletedFolders: toDelete.size, deletedItems: items.length - survivingItems.length });
   } catch (err: any) {
-    return NextResponse.json({ ok: false, error: err?.message }, { status: 500 });
+    const { body, status } = readErrorResponse(err);
+    return NextResponse.json(body, { status });
   }
 }

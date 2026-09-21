@@ -139,6 +139,13 @@ export async function GET(req: NextRequest) {
       try {
         // Persist EVERY reply (including auto-responders) so the contact
         // timeline can show them. Auto-responders render greyed-out in the UI.
+        // REPLY-RESULT-V1: a write failure throws out of storeReply and is
+        // caught by this loop's catch below, which counts an error and —
+        // crucially — never pushes the UID into processedUids. The message
+        // therefore keeps its unprocessed state in Gmail and is retried on
+        // the next poll, instead of being labelled processed with its body
+        // lost. A duplicate is not an error: the reply is already stored, so
+        // we carry on and let the rest of the flow run idempotently.
         await storeReply({
           uid: reply.uid,
           fromEmail: reply.fromEmail,
