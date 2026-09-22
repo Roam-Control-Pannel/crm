@@ -1785,11 +1785,18 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"..."},{"caption":"...
                     // different things from the user, and calling a starved
                     // run "stalled, try again in a few minutes" sent people
                     // back to a wall that waiting could not move.
+                    // CAPTION-ERRORS-V1: when the server knows why the
+                    // captions failed, say that instead of guessing. "Try
+                    // again in a few minutes" is right for a rate limit and
+                    // useless for a bad model id or a missing key.
+                    const why: string[] = Array.isArray(data.captionErrors) ? data.captionErrors : [];
                     loopError = data.noRoomForBatch
                       ? 'the server ran out of time before it could start writing. '
                         + 'This usually means a slow read of the calendar or the Brain — '
                         + 'try again, and if it keeps happening the lookahead window is too large.'
-                      : 'generation stalled — try again in a few minutes.';
+                      : why.length > 0
+                        ? `the AI could not write them.\n\n${why.map(e => '• ' + e).join('\n')}`
+                        : 'generation stalled, and the server reported no reason — check the function logs.';
                     break;
                   }
                   setFillStatus(`Filling… ${pendingLeft} left`);

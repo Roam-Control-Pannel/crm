@@ -528,11 +528,25 @@ export function buildCaptionRequest(
 }
 
 /**
- * Build a caption request and run it through /api/ai/chat.
+ * CAPTION-ERRORS-V1
  *
- * Returns empty string on failure — the slot still gets a post with an
- * empty caption so the user can spot it and fill it in manually. Better
- * than silent skip.
+ * The outcome of one caption attempt, with the reason when there isn't one.
+ *
+ * This used to be a bare string, empty on any failure, with the cause going
+ * only to console.error. A run where every caption failed therefore reported
+ * "generation stalled — try again in a few minutes" and nothing else, which
+ * is a guess dressed as advice: waiting fixes a rate limit and does nothing
+ * at all for a bad model id, a missing key or an auth redirect, and there was
+ * no way to tell which had happened without server logs.
+ */
+export interface CaptionOutcome {
+  text: string;
+  /** Human-readable cause, present exactly when text is empty. */
+  error?: string;
+}
+
+/**
+ * Build a caption request and run it through /api/ai/chat.
  */
 export async function generateCaption(
   origin: string,
@@ -544,7 +558,7 @@ export async function generateCaption(
   scheduledFor?: string,
   image?: { description?: string; tags?: string[]; location?: string },
   options?: CaptionOptions
-): Promise<string> {
+): Promise<CaptionOutcome> {
   const req = buildCaptionRequest(brief, theme, meta, account, scheduledFor, image, options);
 
   // This runs server-side with no user session, so the call to our own
@@ -554,7 +568,7 @@ export async function generateCaption(
   //
   // Bound each call so one slow generation can't push a batch past the
   // platform's ~26s synchronous-function limit. On timeout the fetch
-  // aborts, we return '' and the caller leaves the slot for the next run.
+  // aborts and the caller leaves the slot for the next run.
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), req.timeoutMs);
   try {
@@ -570,14 +584,27 @@ export async function generateCaption(
       signal: controller.signal,
     });
     if (!res.ok) {
-      console.error('[social-cron] AI chat failed:', res.status);
-      return '';
+      // CAPTION-ERRORS-V1: read the body. The upstream message is the whole
+      // difference between "rate limited, wait a minute" and "that model id
+      // is not available on this key", and the old code discarded it.
+      const raw = await res.text().catch(() => '');
+      let detail = '';
+      try { detail = JSON.parse(raw)?.error || ''; } catch { detail = raw.slice(0, 200); }
+      const error = `HTTP ${res.status}${detail ? ': ' + detail : ''}`;
+      console.error('[social-cron] AI chat failed:', error);
+      return { text: '', error };
     }
     const data: any = await res.json();
-    return (data?.content || '').trim();
-  } catch (err) {
-    console.error('[social-cron] AI chat threw:', err);
-    return '';
+    const text = (data?.content || '').trim();
+    // A 200 with nothing in it is its own failure, and a distinct one: the
+    // request was accepted and the model still produced no post.
+    return text ? { text } : { text: '', error: 'the model returned an empty response' };
+  } catch (err: any) {
+    const error = err?.name === 'AbortError'
+      ? `timed out after ${Math.round(req.timeoutMs / 1000)}s`
+      : (err?.message || 'network error');
+    console.error('[social-cron] AI chat threw:', error);
+    return { text: '', error };
   } finally {
     clearTimeout(timer);
   }
@@ -1034,6 +1061,16 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
       input, brainItems, settings, plan.shortlists, plan.brainFingerprint
     );
 
+    // CAPTION-ERRORS-V1: distinct failure reasons, in first-seen order.
+    // Deduplicated because 40 identical rate-limit messages say no more than
+    // one, and capped so a pathological run cannot balloon the response.
+    const captionErrors: string[] = [];
+    const noteCaptionError = (message: string) => {
+      if (captionErrors.length < 3 && !captionErrors.includes(message)) {
+        captionErrors.push(message);
+      }
+    };
+
     const newPosts: SocialPostDraft[] = [];
     // Track every image used in this run so the pickers can avoid handing
     // the same photo to multiple posts (the "same image all month" bug).
@@ -1076,6 +1113,8 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
     const roomForAnotherBatch = () =>
       Date.now() + captionModel.captionTimeoutMs + PERSIST_RESERVE_MS <= deadline;
     const CONCURRENCY = 4;
+    /** SHORTLIST-BURST-V1: how many rankings may be in flight at once. */
+    const WARM_CONCURRENCY = 4;
 
     // FILL-BUDGET-V2 — ranking happens HERE, never inside the loop.
     //
@@ -1097,11 +1136,27 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
     if (settings.semanticImageMatch && roomToWarm) {
       const pairs = new Map<string, SlotSpec>();
       for (const spec of specs) pairs.set(pairKey(spec), spec);
-      await Promise.all(
-        [...pairs.entries()].map(async ([key, spec]) => {
-          warmed.set(key, await ranker.get(spec.theme, spec.slotBrief));
-        })
-      );
+      // SHORTLIST-BURST-V1
+      //
+      // Warm in bounded waves, not all at once. Each ranking sends the whole
+      // photo catalogue — roughly 8,000 tokens for a 324-image Brain — so
+      // firing every distinct pair concurrently puts a six-figure token
+      // burst on the account in one second, immediately before the caption
+      // calls need the same quota. A rate limit there fails every caption in
+      // the run, and the run had no way to say so.
+      //
+      // Four at a time matches the batch width the captions themselves use.
+      const entries = [...pairs.entries()];
+      for (let i = 0; i < entries.length; i += WARM_CONCURRENCY) {
+        // Stop warming rather than eat the budget the captions need; an
+        // unwarmed pair just falls back to the lexical ranking.
+        if (Date.now() + captionModel.captionTimeoutMs + PERSIST_RESERVE_MS > deadline) break;
+        await Promise.all(
+          entries.slice(i, i + WARM_CONCURRENCY).map(async ([key, spec]) => {
+            warmed.set(key, await ranker.get(spec.theme, spec.slotBrief));
+          })
+        );
+      }
       // Persist before generating, so a run that ends up with no time to
       // write a post still moves the fill forward.
       await ranker.flush();
@@ -1197,17 +1252,20 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
           const history = buildCaptionHistory(
             captionSource, spec.account.id, slotTime
           );
-          const caption = await generateCaption(
+          const outcome = await generateCaption(
             input.origin, spec.slotBrief, spec.theme, spec.metaForCaption,
             spec.account, input.internalSecret, spec.iso,
             imageForCaption,
             { history, model: captionModel.id },
           );
-          // generateCaption returns '' on failure (e.g. an AI rate-limit
-          // under concurrency). Don't persist a body-less draft — leave the
-          // slot empty so the next Fill calendar run retries it.
-          if (!caption || !caption.trim()) {
-            console.warn('[social-cron] empty caption — skipping slot', spec.iso);
+          const caption = outcome.text;
+          // Don't persist a body-less draft — leave the slot empty so the
+          // next Fill calendar run retries it. CAPTION-ERRORS-V1: keep the
+          // reason, so a run where every caption failed can say why instead
+          // of advising the user to wait.
+          if (!caption) {
+            console.warn('[social-cron] empty caption — skipping slot', spec.iso, outcome.error);
+            if (outcome.error) noteCaptionError(outcome.error);
             return null;
           }
 
@@ -1303,6 +1361,7 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
       });
     }
 
+    if (captionErrors.length > 0) result.captionErrors = captionErrors;
     result.ok = true;
   } catch (err: any) {
     console.error('[social-cron] runAutoGenerate failed:', err);
