@@ -26,6 +26,11 @@ export interface AutoGenerateRunResult {
    * full; the others are setup problems the reader can act on.
    */
   emptyReason?: string;
+  /**
+   * CAPTION-ERRORS-V1: why captions failed, when they did. Distinct reasons
+   * only, first three. Empty/absent when every caption succeeded.
+   */
+  captionErrors?: string[];
   ok: boolean;
   createdCount: number;
   skippedCount: number;       // slots that already had posts

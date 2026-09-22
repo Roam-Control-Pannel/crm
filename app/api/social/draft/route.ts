@@ -229,12 +229,18 @@ export async function POST(req: NextRequest) {
       const history = buildCaptionHistory(
         existingForHistory, accountId, new Date(scheduledAt).getTime() || Date.now()
       );
-      caption = await generateCaption(
+      const outcome = await generateCaption(
         origin, brief, theme, meta, account, secret, scheduledAt, imageForCaption,
         { history, model: settings.captionModel }
       );
+      caption = outcome.text;
       if (!caption) {
-        return NextResponse.json({ ok: false, error: 'Caption generation failed' }, { status: 502 });
+        // CAPTION-ERRORS-V1: pass the upstream reason through. "Caption
+        // generation failed" told the caller nothing they could act on.
+        return NextResponse.json(
+          { ok: false, error: `Caption generation failed — ${outcome.error || 'unknown error'}` },
+          { status: 502 }
+        );
       }
     }
 
