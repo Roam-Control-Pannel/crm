@@ -1110,8 +1110,31 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
     // cache can ever pay for one — reserving it on every batch was reserving
     // time that in practice is never spent.
     const deadline = startedAt + SYNC_CEILING_MS;
-    const roomForAnotherBatch = () =>
-      Date.now() + captionModel.captionTimeoutMs + PERSIST_RESERVE_MS <= deadline;
+
+    // FILL-BUDGET-V3 — express the window as the LAST MOMENT a batch can
+    // still start, and make every other phase fit inside that.
+    //
+    // The previous version compared each phase against the deadline with its
+    // own arithmetic, and the warm loop's guard came out algebraically
+    // IDENTICAL to the batch guard:
+    //
+    //   warm wave:  now + caption + persist  >  deadline  -> stop warming
+    //   batch:      now + caption + persist <=  deadline  -> run a batch
+    //
+    // So warming ran waves until the exact instant the batch guard would
+    // fail, then stopped — leaving it failing. By construction, any run that
+    // warmed to its limit could never write a post. That is the "server ran
+    // out of time before it could start writing" report, and it is why the
+    // symptom flipped back from "generation stalled" the moment waves were
+    // introduced. Reproduced at 2,500ms per ranking over 19 pairs: 16
+    // rankings, 0 posts.
+    //
+    // One anchor removes the whole class of mistake: warming may consume the
+    // window only up to the point where a batch still fits after it.
+    const lastBatchStart = deadline - captionModel.captionTimeoutMs - PERSIST_RESERVE_MS;
+    const roomForAnotherBatch = () => Date.now() <= lastBatchStart;
+    /** A warm wave may start only if it can finish AND leave a batch room. */
+    const roomToWarm = () => Date.now() + SHORTLIST_TIMEOUT_MS <= lastBatchStart;
     const CONCURRENCY = 4;
     /** SHORTLIST-BURST-V1: how many rankings may be in flight at once. */
     const WARM_CONCURRENCY = 4;
@@ -1131,9 +1154,7 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
     // one faster. The loop then reserves only the caption timeout.
     const warmed = new Map<string, SemanticRank | null>();
     const pairKey = (spec: SlotSpec) => spec.theme.id + '|' + spec.slotBriefId;
-    const roomToWarm =
-      Date.now() + SHORTLIST_TIMEOUT_MS + captionModel.captionTimeoutMs + PERSIST_RESERVE_MS <= deadline;
-    if (settings.semanticImageMatch && roomToWarm) {
+    if (settings.semanticImageMatch && roomToWarm()) {
       const pairs = new Map<string, SlotSpec>();
       for (const spec of specs) pairs.set(pairKey(spec), spec);
       // SHORTLIST-BURST-V1
@@ -1149,8 +1170,9 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
       const entries = [...pairs.entries()];
       for (let i = 0; i < entries.length; i += WARM_CONCURRENCY) {
         // Stop warming rather than eat the budget the captions need; an
-        // unwarmed pair just falls back to the lexical ranking.
-        if (Date.now() + captionModel.captionTimeoutMs + PERSIST_RESERVE_MS > deadline) break;
+        // unwarmed pair just falls back to the lexical ranking and is warmed
+        // by a later invocation, since the results persist.
+        if (!roomToWarm()) break;
         await Promise.all(
           entries.slice(i, i + WARM_CONCURRENCY).map(async ([key, spec]) => {
             warmed.set(key, await ranker.get(spec.theme, spec.slotBrief));
