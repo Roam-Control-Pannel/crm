@@ -1742,6 +1742,7 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"..."},{"caption":"...
               let totalSkipped = 0;
               let pendingLeft = 0;
               let loopError: string | null = null;
+              let lastEmptyReason: string | null = null;
               const MAX_ROUNDS = 20;   // hard cap: 20 rounds ≈ 80 drafts
               const MAX_RETRIES = 2;   // per-round retries on gateway timeouts
               try {
@@ -1771,6 +1772,7 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"..."},{"caption":"...
                   // keep the latest figure rather than summing.
                   totalSkipped = data.skippedCount || 0;
                   pendingLeft = data.pendingCount || 0;
+                  lastEmptyReason = data.emptyReason || null;
                   // Show progress as each batch lands.
                   const fresh0 = await loadWithMigration<SocialPost[]>('social_posts');
                   if (fresh0.ok && Array.isArray(fresh0.data)) setPosts(fresh0.data);
@@ -1801,7 +1803,17 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"..."},{"caption":"...
                   // claim the calendar is full when it isn't.
                   alert(`${summary} ${pendingLeft} slot${pendingLeft === 1 ? '' : 's'} left — click Fill calendar again to continue.`);
                 } else {
-                  alert(`${summary} Calendar is full.`);
+                  // FILL-DIAGNOSIS-V1: "Calendar is full" was said for every
+                  // empty plan, including the ones caused by an account or
+                  // brief the engine could not see. Say which it was.
+                  const reasons: Record<string, string> = {
+                    'no-accounts': 'No connected account can publish right now — check Channels.',
+                    'no-briefs': 'No account has an active brief assigned — check Social Accounts.',
+                    'no-posting-times': 'No posting times fall inside the window — check Settings.',
+                    'no-themes': 'No enabled theme matches the assigned briefs — check Settings.',
+                    'calendar-full': 'Calendar is full.',
+                  };
+                  alert(`${summary} ${reasons[lastEmptyReason || 'calendar-full'] || 'Calendar is full.'}`);
                 }
                 // Refresh either way — a partial run still saved drafts.
                 const fresh = await loadWithMigration<SocialPost[]>('social_posts');
