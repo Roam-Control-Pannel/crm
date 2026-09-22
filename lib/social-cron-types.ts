@@ -20,6 +20,12 @@ export interface AutoGenerateRunResult {
    * part-way, which is the normal shape of a multi-click fill.
    */
   noRoomForBatch?: boolean;
+  /**
+   * FILL-DIAGNOSIS-V1: when nothing was planned, which of the several very
+   * different reasons it was. Only 'calendar-full' means the calendar is
+   * full; the others are setup problems the reader can act on.
+   */
+  emptyReason?: string;
   ok: boolean;
   createdCount: number;
   skippedCount: number;       // slots that already had posts

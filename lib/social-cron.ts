@@ -29,6 +29,8 @@ import type { Theme } from '@/lib/social-themes';
 import type { PostingTimeSlot } from '@/lib/social-settings-types';
 import type { AutoGenerateRunResult, AutoGenerateAccountResult } from '@/lib/social-cron-types';
 import { getEffectiveSettings } from '@/lib/social-settings';
+import { getCollection, saveCollection, DEFAULT_USER_ID } from '@/lib/store';
+import { getItems as getBrainItems, getFolders as getBrainFolders } from '@/lib/brain-store';
 import {
   DEFAULT_LOOKAHEAD_DAYS,
   type EffectiveSocialSettings,
@@ -638,6 +640,17 @@ export interface SlotSpec {
   acctResult: AutoGenerateAccountResult;
 }
 
+/**
+ * FILL-DIAGNOSIS-V1: the distinct reasons a fill plans nothing. Only
+ * 'calendar-full' actually means what the old message said.
+ */
+export type EmptyPlanReason =
+  | 'no-accounts'        // nothing connected that can publish
+  | 'no-briefs'          // connected, but no account has an active brief
+  | 'no-posting-times'   // briefed, but no posting slots in the window
+  | 'no-themes'          // slots exist, but no enabled theme matches the brief
+  | 'calendar-full';     // every slot in the window already holds a post
+
 export interface FillPlan {
   settings: EffectiveSocialSettings;
   lookaheadDays: number;
@@ -651,6 +664,8 @@ export interface FillPlan {
   captionSource: CaptionSourcePost[];
   captionModel: ReturnType<typeof captionModelSpec>;
   specs: SlotSpec[];
+  /** FILL-DIAGNOSIS-V1: why the plan is empty, when it is. */
+  emptyReason?: EmptyPlanReason;
   /** SHORTLIST-CACHE-V1: shortlists already computed for this library. */
   shortlists: ShortlistCache;
   /** Fingerprint the shortlists were computed against. */
@@ -665,33 +680,49 @@ export async function planFill(input: RunInput, now: Date): Promise<FillPlan> {
   let skippedCount = 0;
   let skippedNoThemes = 0;
   const details: AutoGenerateAccountResult[] = [];
+  // FILL-DIAGNOSIS-V1 — why a plan came back empty.
+  //
+  // "Calendar is full" used to be said whenever no slots were planned, which
+  // is the same outcome whether every slot really is taken or the engine
+  // could not see an account. Those need opposite things from the reader,
+  // and the confident version of the wrong one wastes their time.
+  let accountsCanPost = 0;
+  let accountsWithBriefs = 0;
+  let slotsInWindow = 0;
     // 1-4. Settings, accounts, briefs, the calendar and the Brain.
     //
-    // FILL-SETUP-PARALLEL-V1
-    // These were seven sequential round-trips, and on a real account that is
-    // where the fill was dying: the generation loop's budget is measured from
-    // the top of this function, so every second spent here is a second the
-    // loop does not get. With 151 posts and 324 Brain items the setup crossed
-    // the budget on its own and the run created NOTHING, which the UI
-    // reported as "generation stalled". Reproduced at 500ms per call.
+    // FILL-SETUP-DIRECT-V1
     //
-    // None of them depend on each other, so they go together and setup costs
-    // one round-trip of latency instead of seven. Each optional read keeps
-    // its own catch: a missing Brain must degrade to "no Brain images", not
-    // fail the whole plan.
-    const settingsPromise = getEffectiveSettings();
-    const get = (path: string) => fetchJsonInternal(input.origin, path, input.internalSecret);
-    const optional = (path: string) => get(path).catch(() => null);
-
-    const [settings, accountsJson, metaRes, briefsRes, postsRes, foldersRes, brainRes] =
+    // This is server code, and almost everything it needs is a Netlify Blobs
+    // document it can read itself. It was instead calling its OWN HTTP API
+    // for each one: six requests out through the CDN and back into the
+    // function runtime, each able to cold-start its own instance, for data
+    // sitting one `getCollection` away.
+    //
+    // That cost is what the generation loop was paying for. The budget is
+    // measured from the top of this function, so every second here is a
+    // second the loop does not get, and on a real account (151 posts, 324
+    // Brain images) setup consumed the entire window: the run created
+    // NOTHING and reported "the server ran out of time before it could
+    // start writing". Making the six calls concurrent helped and was not
+    // enough — the fix is not to make them.
+    //
+    // /api/accounts/status stays an HTTP call: it derives publishing
+    // capability from the OAuth token store rather than just reading a
+    // document, and duplicating that logic here is how the two would drift.
+    // One request is affordable; six were not.
+    const [settings, accountsJson, accountMetasRaw, briefsRaw, postsRaw, brain] =
       await Promise.all([
-        settingsPromise,
-        get('/api/accounts/status'),
-        get('/api/store/account_meta'),
-        get('/api/store/briefs'),
-        get('/api/store/social_posts'),
-        optional('/api/brain/folders'),
-        optional('/api/brain/items'),
+        getEffectiveSettings(),
+        fetchJsonInternal(input.origin, '/api/accounts/status', input.internalSecret),
+        getCollection<AccountMetaLite[]>(DEFAULT_USER_ID, 'account_meta'),
+        getCollection<Brief[]>(DEFAULT_USER_ID, 'briefs'),
+        getCollection<SocialPostDraft[]>(DEFAULT_USER_ID, 'social_posts'),
+        // The Brain is optional: without it every picker falls through to
+        // Unsplash, which is worse imagery but still a working fill.
+        Promise.all([getBrainItems(), getBrainFolders()])
+          .then(([items, folders]) => ({ items, folders }))
+          .catch(() => ({ items: [] as any[], folders: [] as any[] })),
       ]);
 
     const lookaheadDays = input.lookaheadDaysOverride
@@ -702,9 +733,9 @@ export async function planFill(input: RunInput, now: Date): Promise<FillPlan> {
     rangeEnd.setDate(rangeEnd.getDate() + lookaheadDays);
 
     const realAccounts: RealAccountLite[] = accountsJson?.realAccounts || [];
-    const accountMetas: AccountMetaLite[] = metaRes?.data || [];
-    const briefs: Brief[] = briefsRes?.data || [];
-    const existingPosts: SocialPostDraft[] = postsRes?.data || [];
+    const accountMetas: AccountMetaLite[] = Array.isArray(accountMetasRaw) ? accountMetasRaw : [];
+    const briefs: Brief[] = Array.isArray(briefsRaw) ? briefsRaw : [];
+    const existingPosts: SocialPostDraft[] = Array.isArray(postsRaw) ? postsRaw : [];
 
     // IMAGE-COOLDOWN-V1 / THEME-ROTATION-V1
     // Derive what's been used, and when, from the calendar itself. This is
@@ -736,40 +767,26 @@ export async function planFill(input: RunInput, now: Date): Promise<FillPlan> {
     // back to the default rather than reaching the API.
     const captionModel = captionModelSpec(settings.captionModel);
 
-    // 5. Brain items (optional). The /api/brain/items payload is raw stored
-    // items (blobId + mime + tags, with NO url field), so the old
-    // `.filter(b => b.url)` dropped every item and Brain images were never
-    // used here. Build the absolute image URL ourselves — same shape the
-    // social composer and /api/social/draft use. Absolute because the URL
-    // is stored on the post and fetched by Meta at publish time, which
-    // can't resolve a relative path. Image MIME only: text/markdown Brain
-    // items aren't postable.
-    //
-    // Both reads happened in the parallel block above; this is the shaping.
-    const brainItems: BrainItemLite[] = [];
-    try {
-      // Folder names (id -> name) give each image its curated location label
-      // (e.g. "Manchester"). Best-effort — without them items degrade to
-      // tags only, which is worse matching but still a working fill.
-      const folderNameById = new Map<string, string>();
-      for (const f of (foldersRes?.folders || [])) {
-        if (f?.id && f?.name) folderNameById.set(f.id, f.name);
-      }
-      const rawItems: any[] = brainRes?.items || brainRes?.data || [];
-      brainItems.push(...rawItems
-        .filter(i => typeof i?.mime === 'string' && i.mime.startsWith('image/') && i.blobId)
-        .map(i => ({
-          id: i.id,
-          url: `${input.origin}/api/images/${i.blobId}`,
-          description: i.description,
-          credit: i.description,
-          tags: i.tags,
-          folder: i.folderId ? folderNameById.get(i.folderId) : undefined,
-        })));
-    } catch {
-      // A malformed payload degrades to no Brain images rather than failing
-      // the plan; every picker falls through to Unsplash.
+    // 5. Brain items. The stored items are raw (blobId + mime + tags, with NO
+    // url field), so the old `.filter(b => b.url)` dropped every one and
+    // Brain images were never used here. Build the absolute image URL
+    // ourselves — absolute because it is stored on the post and fetched by
+    // Meta at publish time, which cannot resolve a relative path. Image MIME
+    // only: text/markdown Brain items aren't postable.
+    const folderNameById = new Map<string, string>();
+    for (const f of brain.folders) {
+      if (f?.id && f?.name) folderNameById.set(f.id, f.name);
     }
+    const brainItems: BrainItemLite[] = brain.items
+      .filter((i: any) => typeof i?.mime === 'string' && i.mime.startsWith('image/') && i.blobId)
+      .map((i: any) => ({
+        id: i.id,
+        url: `${input.origin}/api/images/${i.blobId}`,
+        description: i.description,
+        credit: i.description,
+        tags: i.tags,
+        folder: i.folderId ? folderNameById.get(i.folderId) : undefined,
+      }));
 
     // SHORTLIST-CACHE-V1: keyed by the library, so it can only be loaded
     // once the Brain is known. One small blob read.
@@ -783,6 +800,7 @@ export async function planFill(input: RunInput, now: Date): Promise<FillPlan> {
 
     for (const account of realAccounts) {
       if (!account.capabilities?.canPost) continue;
+      accountsCanPost += 1;
       const meta = accountMetas.find(m => m.accountId === account.id);
       // MULTI-BRIEF-V1: resolve effective brief list (new shape with
       // legacy fallback). Skip account if it has no briefs assigned.
@@ -798,9 +816,11 @@ export async function planFill(input: RunInput, now: Date): Promise<FillPlan> {
         return b && b.active;
       });
       if (activeBriefIds.length === 0) continue;
+      accountsWithBriefs += 1;
 
       const slots = settings.postingTimes[account.platform] || [];
       const datetimes = expandSlots(slots, now, lookaheadDays);
+      slotsInWindow += datetimes.length;
 
       const acctResult: AutoGenerateAccountResult = {
         accountId: account.id,
@@ -897,6 +917,18 @@ export async function planFill(input: RunInput, now: Date): Promise<FillPlan> {
     captionSource,
     captionModel,
     specs,
+    emptyReason:
+      specs.length > 0
+        ? undefined
+        : accountsCanPost === 0
+          ? 'no-accounts'
+          : accountsWithBriefs === 0
+            ? 'no-briefs'
+            : slotsInWindow === 0
+              ? 'no-posting-times'
+              : skippedNoThemes > 0 && skippedCount === 0
+                ? 'no-themes'
+                : 'calendar-full',
     shortlists,
     brainFingerprint: fingerprint,
     skippedCount,
@@ -996,6 +1028,7 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
     result.skippedCount = plan.skippedCount;
     result.skippedNoThemes = plan.skippedNoThemes;
     result.details = plan.details;
+    result.emptyReason = plan.emptyReason;
 
     const ranker = makeRankCache(
       input, brainItems, settings, plan.shortlists, plan.brainFingerprint
@@ -1237,10 +1270,14 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
       //
       // Re-read immediately before the write and merge: the fresh array is
       // the base, and we append only posts that aren't already in it.
-      let base = existingPosts;
+      // FILL-SETUP-DIRECT-V1: read and write the blob directly, like the
+      // rest of setup. These two sat inside PERSIST_RESERVE_MS (2.5s) and
+      // were two more HTTP round-trips into our own runtime for a document
+      // this process can open itself.
+      let base: SocialPostDraft[];
       try {
-        const freshRes = await fetchJsonInternal(input.origin, '/api/store/social_posts', input.internalSecret);
-        if (Array.isArray(freshRes?.data)) base = freshRes.data;
+        const fresh = await getCollection<SocialPostDraft[]>(DEFAULT_USER_ID, 'social_posts');
+        base = Array.isArray(fresh) ? fresh : existingPosts;
       } catch (err) {
         // A failed re-read must not silently fall back to the stale
         // snapshot — that is the exact overwrite this guard exists to
@@ -1251,17 +1288,7 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
       }
       const existingIds = new Set(base.map((p: SocialPostDraft) => p.id));
       const all = [...base, ...newPosts.filter(p => !existingIds.has(p.id))];
-      const saveRes = await fetch(`${input.origin}/api/store/social_posts`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...internalHeaders(input.internalSecret),
-        },
-        body: JSON.stringify({ data: all }),
-      });
-      if (!saveRes.ok) {
-        throw new Error(`Save failed: ${saveRes.status}`);
-      }
+      await saveCollection(DEFAULT_USER_ID, 'social_posts', all);
     }
 
     // 8. Notification (de-duped within 24h)
