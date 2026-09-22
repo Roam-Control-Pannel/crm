@@ -222,6 +222,11 @@ export default function SocialPage() {
   const [graphicLogo, setGraphicLogo] = useState(true);
   const [graphicBusy, setGraphicBusy] = useState(false);
 
+  // FILL-BATCH-V1 — the background fill. One Anthropic Message Batch for the
+  // whole window instead of ~21 synchronous round-trips with the tab open.
+  const [fillJob, setFillJob] = useState<any | null>(null);
+  const [submittingJob, setSubmittingJob] = useState(false);
+
   const [showGen, setShowGen] = useState(false);
   // CRON-AUTOGEN-V1
   const [fillingCalendar, setFillingCalendar] = useState(false);
@@ -278,6 +283,24 @@ export default function SocialPage() {
     mq.addEventListener('change', sync);
     return () => mq.removeEventListener('change', sync);
   }, []);
+
+  // FILL-BATCH-V1
+  // Load the latest fill job once, then poll only while one is in flight.
+  // A finished job needs no polling, and an idle page should not be hitting
+  // the server every minute for a blob that is not changing.
+  useEffect(() => { refreshFillJob(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  useEffect(() => {
+    if (!fillJob || fillJob.status !== 'submitted') return;
+    const tick = setInterval(async () => {
+      await refreshFillJob();
+      // A finished job means new drafts exist — pull them in so the calendar
+      // fills in front of the user rather than on next reload.
+      const fresh = await loadWithMigration<SocialPost[]>('social_posts');
+      if (fresh.ok && Array.isArray(fresh.data)) setPosts(fresh.data);
+    }, 30_000);
+    return () => clearInterval(tick);
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, [fillJob?.id, fillJob?.status]);
 
   // Click-outside to close the mobile header overflow menu.
   useEffect(() => {
@@ -724,6 +747,48 @@ export default function SocialPage() {
     } finally {
       setGraphicBusy(false);
     }
+  }
+
+  /**
+   * FILL-BATCH-V1: submit the whole window as one batch and poll our own job
+   * record for the outcome. Deliberately NOT the same shape as Fill calendar:
+   * nothing is waited on here, so closing the tab does not stop the fill.
+   */
+  async function startBackgroundFill() {
+    if (submittingJob) return;
+    setSubmittingJob(true);
+    try {
+      const res = await fetch('/api/social/fill-job', { method: 'POST' });
+      const data = await res.json();
+      if (!data.ok) {
+        addNotification({ type: 'email_failed', title: 'Background fill failed', body: data.error || 'Unknown error' });
+        return;
+      }
+      if (data.nothingToDo) {
+        addNotification({ type: 'info', title: 'Nothing to fill', body: data.message });
+        return;
+      }
+      setFillJob(data.job);
+      addNotification({
+        type: 'success',
+        title: 'Filling in the background',
+        body: `${data.job.counts.requested} post${data.job.counts.requested === 1 ? '' : 's'} queued`
+          + (data.truncated ? ' — run it again afterwards for the rest.' : '. Usually ready within the hour.'),
+      });
+    } catch (e: any) {
+      addNotification({ type: 'email_failed', title: 'Background fill failed', body: e?.message || 'Network error' });
+    } finally {
+      setSubmittingJob(false);
+    }
+  }
+
+  /** Latest job, for the status strip. Cheap: one small blob read. */
+  async function refreshFillJob() {
+    try {
+      const res = await fetch('/api/social/fill-job', { cache: 'no-store' });
+      const data = await res.json();
+      if (data.ok && Array.isArray(data.jobs)) setFillJob(data.jobs[0] || null);
+    } catch { /* the strip is informational — a failed poll just leaves it */ }
   }
 
   async function uploadOwnImage(file: File) {
@@ -1714,7 +1779,15 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"..."},{"caption":"...
                   // generation is failing (e.g. AI rate-limited) — stop
                   // rather than loop forever on the same failing slots.
                   if (!data.createdCount) {
-                    loopError = 'generation stalled — try again in a few minutes.';
+                    // FILL-BUDGET-V2: say which of the two it was. These need
+                    // different things from the user, and calling a starved
+                    // run "stalled, try again in a few minutes" sent people
+                    // back to a wall that waiting could not move.
+                    loopError = data.noRoomForBatch
+                      ? 'the server ran out of time before it could start writing. '
+                        + 'This usually means a slow read of the calendar or the Brain — '
+                        + 'try again, and if it keeps happening the lookahead window is too large.'
+                      : 'generation stalled — try again in a few minutes.';
                     break;
                   }
                   setFillStatus(`Filling… ${pendingLeft} left`);
@@ -1741,6 +1814,17 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"..."},{"caption":"...
               }
             }}>{fillingCalendar ? (fillStatus || 'Filling...') : 'Fill calendar'}</button>
             {/* CRON-AUTOGEN-V1 Fill calendar button */}
+            {/* FILL-BATCH-V1: the same fill, submitted as one batch. Half the
+                token cost and no tab to keep open, at the cost of arriving
+                later — usually within the hour. */}
+            <button
+              style={btnG}
+              disabled={submittingJob || (fillJob && fillJob.status === 'submitted')}
+              title="Plan the whole window and write it in one background job. Costs half as much and does not need the tab open."
+              onClick={() => { setHeaderMenuOpen(false); startBackgroundFill(); }}
+            >
+              {submittingJob ? 'Queueing...' : 'Fill in background'}
+            </button>
             <button style={btnG} onClick={() => { setShowGen(true); setHeaderMenuOpen(false); }}><Sparkles size={13} /> Generate</button>
           </div>
           <button className="soc-header-primary" style={btnP} onClick={() => openComposer()}><Plus size={13} /> New post</button>
@@ -1754,6 +1838,39 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"..."},{"caption":"...
           <h3 style={{ fontFamily: 'var(--font-display)', fontSize: 16, color: 'var(--ink-700)', marginBottom: 6 }}>No accounts ready to post</h3>
           <p style={{ fontSize: 12, color: 'var(--ink-500)', marginBottom: 14 }}>Connect a platform on Channels, then assign briefs on Social Accounts.</p>
           <a href="/channels" style={{ ...btnP, textDecoration: 'none' }}>Go to Channels</a>
+        </div>
+      )}
+
+      {/* FILL-BATCH-V1 status strip. Only shown while a job is in flight or
+          has just finished with something to say. */}
+      {fillJob && fillJob.status !== 'done' && (
+        <div style={{
+          background: 'var(--white)', borderRadius: 'var(--r-md)', padding: '10px 14px',
+          marginBottom: 12, display: 'flex', alignItems: 'center', gap: 10,
+          borderLeft: '3px solid ' + (fillJob.status === 'submitted' ? 'var(--info)' : 'var(--warn)'),
+          boxShadow: 'var(--shadow-sm)', fontSize: 12, color: 'var(--ink-700)',
+        }}>
+          <Clock size={14} color={fillJob.status === 'submitted' ? 'var(--info)' : 'var(--warn)'} />
+          <div style={{ flex: 1 }}>
+            {fillJob.status === 'submitted' && (
+              <>Writing {fillJob.counts.requested} post{fillJob.counts.requested === 1 ? '' : 's'} in the
+              background. Usually ready within the hour — you can close this page.</>
+            )}
+            {fillJob.status === 'partial' && (
+              <>Background fill finished with {fillJob.counts.created} of {fillJob.counts.requested} written.
+              {fillJob.counts.failed > 0 && ` ${fillJob.counts.failed} produced no caption`}
+              {fillJob.counts.skipped > 0 && `, ${fillJob.counts.skipped} slot${fillJob.counts.skipped === 1 ? '' : 's'} were filled meanwhile`}. Run it again to pick up the rest.</>
+            )}
+            {fillJob.status === 'failed' && (<>Background fill failed. {fillJob.error || ''}</>)}
+            {fillJob.status === 'expired' && (
+              <>The background fill did not finish within its 24-hour window. Run it again.</>
+            )}
+          </div>
+          <button
+            onClick={() => setFillJob(null)}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ink-400)', padding: 0 }}
+            title="Hide"
+          ><X size={12} /></button>
         </div>
       )}
 

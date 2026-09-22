@@ -7,6 +7,19 @@
  */
 
 export interface AutoGenerateRunResult {
+  /**
+   * FILL-BUDGET-V2: set when the window was too short to both rank photos
+   * and write captions, so this invocation used the lexical ranking. Not an
+   * error — the slots were still filled — but worth surfacing rather than
+   * silently producing worse matches.
+   */
+  semanticSkipped?: boolean;
+  /**
+   * FILL-BUDGET-V2: set when the run ended without starting a single batch
+   * because the setup phase used the whole window. Distinct from stopping
+   * part-way, which is the normal shape of a multi-click fill.
+   */
+  noRoomForBatch?: boolean;
   ok: boolean;
   createdCount: number;
   skippedCount: number;       // slots that already had posts

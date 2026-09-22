@@ -44,6 +44,14 @@
 [functions."inbound-poll"]
   schedule = "*/15 * * * *"
 
+# FILL-BATCH-V1
+# Every 2 minutes, collect any finished calendar-fill Message Batch and turn
+# it into drafts. A no-op (one small blob read) when nothing is in flight,
+# which is most of the time. 2 minutes matches the sibling schedule that is
+# known to register on this site; the job itself is not latency-sensitive.
+[functions."social-fill-poll"]
+  schedule = "*/2 * * * *"
+
 # CRON-SEQUENCES-V1
 # Daily outreach follow-up sequences at 08:00 UTC.
 [functions."sequences-daily"]

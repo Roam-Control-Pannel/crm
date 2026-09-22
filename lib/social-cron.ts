@@ -29,7 +29,10 @@ import type { Theme } from '@/lib/social-themes';
 import type { PostingTimeSlot } from '@/lib/social-settings-types';
 import type { AutoGenerateRunResult, AutoGenerateAccountResult } from '@/lib/social-cron-types';
 import { getEffectiveSettings } from '@/lib/social-settings';
-import { DEFAULT_LOOKAHEAD_DAYS } from '@/lib/social-settings-types';
+import {
+  DEFAULT_LOOKAHEAD_DAYS,
+  type EffectiveSocialSettings,
+} from '@/lib/social-settings-types';
 import { addNotification } from '@/lib/notifications';
 import { pickBrainImageForContext } from '@/lib/brain-image-match';
 import {
@@ -48,6 +51,12 @@ import {
 } from '@/lib/caption-history';
 import { captionModelSpec, SHORTLIST_TIMEOUT_MS } from '@/lib/ai-models';
 import { fetchSemanticRank, type SemanticRank } from '@/lib/image-shortlist';
+import {
+  brainFingerprint,
+  readShortlists,
+  writeShortlists,
+  type ShortlistCache,
+} from '@/lib/shortlist-cache';
 
 // Mirrors the SocialPost interface defined inline in app/social/page.tsx.
 // Kept in sync by convention — if that interface changes, this one must too.
@@ -382,21 +391,35 @@ export interface CaptionOptions {
 }
 
 /**
- * Build a system prompt that fuses the brief, the brand voice, the theme,
- * per-account overrides and what this account has already published. Then
- * call /api/ai/chat and return the generated caption.
- *
- * Returns empty string on failure — the slot still gets a post with an
- * empty caption so the user can spot it and fill it in manually. Better
- * than silent skip.
+ * Build the system prompt that fuses the brief, the brand voice, the theme,
+ * per-account overrides and what this account has already published, and
+ * return it as a transport-free request.
  */
-export async function generateCaption(
-  origin: string,
+/**
+ * FILL-BATCH-V1
+ *
+ * The request a caption generation makes, with no transport attached.
+ *
+ * Split out of generateCaption so the synchronous path (POST /api/ai/chat,
+ * one slot at a time) and the batched path (one Messages Batch for a whole
+ * fill) build byte-identical prompts. Two copies of this prompt would drift
+ * within a release, and the divergence would be invisible: both would still
+ * produce captions, just differently good ones.
+ */
+export interface CaptionRequest {
+  system: Array<{ type: 'text'; text: string; cache_control?: { type: 'ephemeral' } }>;
+  messages: Array<{ role: 'user'; content: string }>;
+  maxTokens: number;
+  model: string;
+  /** Per-model abort bound. Only the synchronous path uses it. */
+  timeoutMs: number;
+}
+
+export function buildCaptionRequest(
   brief: Brief,
   theme: Theme,
   meta: AccountMetaLite,
   account: RealAccountLite,
-  internalSecret: string,
   scheduledFor?: string,
   // IMAGE-FIRST: the photo already chosen for this slot. When present, the
   // copy is written ABOUT this image (its description, tags, and curated
@@ -404,7 +427,7 @@ export async function generateCaption(
   // Unsplash fallback, where we don't have a rich description to anchor on.
   image?: { description?: string; tags?: string[]; location?: string },
   options?: CaptionOptions
-): Promise<string> {
+): CaptionRequest {
   const tone = meta.toneOverride || brief.tone;
   const contentBrief = meta.contentBriefOverride || brief.contentBrief;
   const hashtags = meta.hashtagsOverride || brief.hashtags;
@@ -484,37 +507,63 @@ export async function generateCaption(
     'Output ONLY the post text. No preamble, no explanations, no "Here is your post:". The output is published verbatim.',
   ].join('\n');
 
+  const userMessage = scheduledFor
+    ? `Write the post. It is scheduled for ${new Date(scheduledFor).toDateString()}. Make it distinct from the other posts in this series — vary the hook, angle, structure, and any examples.`
+    : 'Write the post.';
+
+  return {
+    // Structured system blocks: the stable half carries the cache marker,
+    // and /api/ai/chat passes the array straight through to Anthropic.
+    system: [
+      { type: 'text', text: stablePrompt, cache_control: { type: 'ephemeral' } },
+      { type: 'text', text: variablePrompt },
+    ],
+    messages: [{ role: 'user', content: userMessage }],
+    maxTokens: 800,
+    model: spec.id,
+    timeoutMs: spec.captionTimeoutMs,
+  };
+}
+
+/**
+ * Build a caption request and run it through /api/ai/chat.
+ *
+ * Returns empty string on failure — the slot still gets a post with an
+ * empty caption so the user can spot it and fill it in manually. Better
+ * than silent skip.
+ */
+export async function generateCaption(
+  origin: string,
+  brief: Brief,
+  theme: Theme,
+  meta: AccountMetaLite,
+  account: RealAccountLite,
+  internalSecret: string,
+  scheduledFor?: string,
+  image?: { description?: string; tags?: string[]; location?: string },
+  options?: CaptionOptions
+): Promise<string> {
+  const req = buildCaptionRequest(brief, theme, meta, account, scheduledFor, image, options);
+
   // This runs server-side with no user session, so the call to our own
   // /api/ai/chat MUST carry the internal-call secret. Without it the auth
   // middleware 307-redirects to /login and we silently get an empty string
   // back — the "auto-generated posts have no body copy" bug.
-  const userMessage = scheduledFor
-    ? `Write the post. It is scheduled for ${new Date(scheduledFor).toDateString()}. Make it distinct from the other posts in this series — vary the hook, angle, structure, and any examples.`
-    : 'Write the post.';
+  //
   // Bound each call so one slow generation can't push a batch past the
   // platform's ~26s synchronous-function limit. On timeout the fetch
   // aborts, we return '' and the caller leaves the slot for the next run.
-  // The bound is per-model: Opus writes better and slower, and the batch
-  // budget in runAutoGenerate is derived from this same number so the two
-  // cannot drift apart.
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), spec.captionTimeoutMs);
+  const timer = setTimeout(() => controller.abort(), req.timeoutMs);
   try {
     const res = await fetch(`${origin}/api/ai/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-internal-call': internalSecret },
       body: JSON.stringify({
-        // Structured system blocks: /api/ai/chat passes an array straight
-        // through to Anthropic, so the cache marker survives.
-        systemPrompt: [
-          { type: 'text', text: stablePrompt, cache_control: { type: 'ephemeral' } },
-          { type: 'text', text: variablePrompt },
-        ],
-        messages: [
-          { role: 'user', content: userMessage },
-        ],
-        maxTokens: 800,
-        model: spec.id,
+        systemPrompt: req.system,
+        messages: req.messages,
+        maxTokens: req.maxTokens,
+        model: req.model,
       }),
       signal: controller.signal,
     });
@@ -566,46 +615,95 @@ export interface RunInput {
   lookaheadDaysOverride?: number;
 }
 
-export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunResult> {
-  const startedAt = Date.now();
-  const now = new Date();
-  const result: AutoGenerateRunResult = {
-    ok: false,
-    createdCount: 0,
-    skippedCount: 0,
-    skippedNoThemes: 0,
-    errorCount: 0,
-    rangeStart: now.toISOString(),
-    rangeEnd: '',
-    durationMs: 0,
-    details: [],
-  };
+/**
+ * FILL-PLAN-V1
+ *
+ * Everything a fill needs before any AI call is made: the settings, the
+ * accounts and briefs, the calendar as it stands, the Brain, and the list of
+ * slots that still want a post.
+ *
+ * Extracted from runAutoGenerate so the synchronous fill and the batched
+ * fill (lib/fill-job.ts) plan identically. The phase is deliberately cheap
+ * and side-effect free — dedup, brief and theme selection only — which is
+ * what makes it safe to run twice and what lets a batch job know its whole
+ * workload up front instead of discovering it a request at a time.
+ */
+export interface SlotSpec {
+  account: RealAccountLite;
+  iso: string;
+  slotBrief: Brief;
+  theme: Theme;
+  slotBriefId: string;
+  metaForCaption: AccountMetaLite;
+  acctResult: AutoGenerateAccountResult;
+}
 
-  try {
-    // 1. Settings
-    const settings = await getEffectiveSettings();
+export interface FillPlan {
+  settings: EffectiveSocialSettings;
+  lookaheadDays: number;
+  rangeEnd: string;
+  briefs: Brief[];
+  existingPosts: SocialPostDraft[];
+  brainItems: BrainItemLite[];
+  imageUsage: ImageUsageMap;
+  themeUsage: Map<string, number>;
+  cooldownDays: number;
+  captionSource: CaptionSourcePost[];
+  captionModel: ReturnType<typeof captionModelSpec>;
+  specs: SlotSpec[];
+  /** SHORTLIST-CACHE-V1: shortlists already computed for this library. */
+  shortlists: ShortlistCache;
+  /** Fingerprint the shortlists were computed against. */
+  brainFingerprint: string;
+  /** Counters the planning phase produces for the run report. */
+  skippedCount: number;
+  skippedNoThemes: number;
+  details: AutoGenerateAccountResult[];
+}
+
+export async function planFill(input: RunInput, now: Date): Promise<FillPlan> {
+  let skippedCount = 0;
+  let skippedNoThemes = 0;
+  const details: AutoGenerateAccountResult[] = [];
+    // 1-4. Settings, accounts, briefs, the calendar and the Brain.
+    //
+    // FILL-SETUP-PARALLEL-V1
+    // These were seven sequential round-trips, and on a real account that is
+    // where the fill was dying: the generation loop's budget is measured from
+    // the top of this function, so every second spent here is a second the
+    // loop does not get. With 151 posts and 324 Brain items the setup crossed
+    // the budget on its own and the run created NOTHING, which the UI
+    // reported as "generation stalled". Reproduced at 500ms per call.
+    //
+    // None of them depend on each other, so they go together and setup costs
+    // one round-trip of latency instead of seven. Each optional read keeps
+    // its own catch: a missing Brain must degrade to "no Brain images", not
+    // fail the whole plan.
+    const settingsPromise = getEffectiveSettings();
+    const get = (path: string) => fetchJsonInternal(input.origin, path, input.internalSecret);
+    const optional = (path: string) => get(path).catch(() => null);
+
+    const [settings, accountsJson, metaRes, briefsRes, postsRes, foldersRes, brainRes] =
+      await Promise.all([
+        settingsPromise,
+        get('/api/accounts/status'),
+        get('/api/store/account_meta'),
+        get('/api/store/briefs'),
+        get('/api/store/social_posts'),
+        optional('/api/brain/folders'),
+        optional('/api/brain/items'),
+      ]);
+
     const lookaheadDays = input.lookaheadDaysOverride
       || settings.lookaheadDays
       || DEFAULT_LOOKAHEAD_DAYS;
 
     const rangeEnd = new Date(now);
     rangeEnd.setDate(rangeEnd.getDate() + lookaheadDays);
-    result.rangeEnd = rangeEnd.toISOString();
 
-    // 2. Accounts + meta — read from internal endpoints to avoid coupling
-    //    to client-store helpers that aren't safe server-side.
-    const accountsJson = await fetchJsonInternal(input.origin, '/api/accounts/status', input.internalSecret);
     const realAccounts: RealAccountLite[] = accountsJson?.realAccounts || [];
-
-    const metaRes = await fetchJsonInternal(input.origin, '/api/store/account_meta', input.internalSecret);
     const accountMetas: AccountMetaLite[] = metaRes?.data || [];
-
-    // 3. Briefs
-    const briefsRes = await fetchJsonInternal(input.origin, '/api/store/briefs', input.internalSecret);
     const briefs: Brief[] = briefsRes?.data || [];
-
-    // 4. Existing posts
-    const postsRes = await fetchJsonInternal(input.origin, '/api/store/social_posts', input.internalSecret);
     const existingPosts: SocialPostDraft[] = postsRes?.data || [];
 
     // IMAGE-COOLDOWN-V1 / THEME-ROTATION-V1
@@ -638,27 +736,6 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
     // back to the default rather than reaching the API.
     const captionModel = captionModelSpec(settings.captionModel);
 
-    // IMAGE-SEMANTIC-V1
-    // One shortlist per (theme, brief), memoised for the whole invocation.
-    // The PROMISE is cached, not the result: the four slots in a batch run
-    // concurrently and would otherwise each fire the same request before any
-    // of them had an answer to store.
-    const rankCache = new Map<string, Promise<SemanticRank | null>>();
-    function rankFor(theme: Theme, brief: Brief | undefined): Promise<SemanticRank | null> {
-      if (!settings.semanticImageMatch) return Promise.resolve(null);
-      const key = theme.id + '|' + (brief?.id || '');
-      const hit = rankCache.get(key);
-      if (hit) return hit;
-      const pending = fetchSemanticRank(
-        input.origin,
-        brainItems,
-        theme.title + ' ' + theme.prompt,
-        { briefName: brief?.name, internalSecret: input.internalSecret }
-      );
-      rankCache.set(key, pending);
-      return pending;
-    }
-
     // 5. Brain items (optional). The /api/brain/items payload is raw stored
     // items (blobId + mime + tags, with NO url field), so the old
     // `.filter(b => b.url)` dropped every item and Brain images were never
@@ -667,22 +744,19 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
     // is stored on the post and fetched by Meta at publish time, which
     // can't resolve a relative path. Image MIME only: text/markdown Brain
     // items aren't postable.
-    let brainItems: BrainItemLite[] = [];
+    //
+    // Both reads happened in the parallel block above; this is the shaping.
+    const brainItems: BrainItemLite[] = [];
     try {
-      // Load folders too (id -> name) so each image carries its curated
-      // location/topic label (e.g. "Manchester"). Best-effort — if folders
-      // can't be loaded, items just have no folder and degrade to tags only.
+      // Folder names (id -> name) give each image its curated location label
+      // (e.g. "Manchester"). Best-effort — without them items degrade to
+      // tags only, which is worse matching but still a working fill.
       const folderNameById = new Map<string, string>();
-      try {
-        const foldersRes = await fetchJsonInternal(input.origin, '/api/brain/folders', input.internalSecret);
-        for (const f of (foldersRes?.folders || [])) {
-          if (f?.id && f?.name) folderNameById.set(f.id, f.name);
-        }
-      } catch { /* folders optional */ }
-
-      const brainRes = await fetchJsonInternal(input.origin, '/api/brain/items', input.internalSecret);
+      for (const f of (foldersRes?.folders || [])) {
+        if (f?.id && f?.name) folderNameById.set(f.id, f.name);
+      }
       const rawItems: any[] = brainRes?.items || brainRes?.data || [];
-      brainItems = rawItems
+      brainItems.push(...rawItems
         .filter(i => typeof i?.mime === 'string' && i.mime.startsWith('image/') && i.blobId)
         .map(i => ({
           id: i.id,
@@ -691,28 +765,20 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
           credit: i.description,
           tags: i.tags,
           folder: i.folderId ? folderNameById.get(i.folderId) : undefined,
-        }));
+        })));
     } catch {
-      // Brain endpoint may not exist or be auth-restricted — degrade gracefully
-      brainItems = [];
+      // A malformed payload degrades to no Brain images rather than failing
+      // the plan; every picker falls through to Unsplash.
     }
+
+    // SHORTLIST-CACHE-V1: keyed by the library, so it can only be loaded
+    // once the Brain is known. One small blob read.
+    const fingerprint = brainFingerprint(brainItems);
+    const shortlists = await readShortlists(fingerprint);
 
     // 6. Collect every slot that needs a post. This phase is fast and
     // synchronous — dedup + brief/theme picking only, NO AI calls — so we
     // know the full workload before spending any of the time budget.
-    interface SlotSpec {
-      account: RealAccountLite;
-      iso: string;
-      slotBrief: Brief;
-      theme: Theme;
-      slotBriefId: string;
-      metaForCaption: AccountMetaLite;
-      acctResult: AutoGenerateAccountResult;
-    }
-    const newPosts: SocialPostDraft[] = [];
-    // Track every image used in this run so the pickers can avoid handing
-    // the same photo to multiple posts (the "same image all month" bug).
-    const usedImageUrls = new Set<string>();
     const specs: SlotSpec[] = [];
 
     for (const account of realAccounts) {
@@ -745,7 +811,7 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
         skipped: 0,
         themeIdsUsed: [],
       };
-      if (result.details) result.details.push(acctResult);
+      details.push(acctResult);
 
       for (const iso of datetimes) {
         // Skip if a post already exists for this account at this time.
@@ -754,7 +820,7 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
         );
         if (dup) {
           acctResult.skipped += 1;
-          result.skippedCount += 1;
+          skippedCount += 1;
           continue;
         }
 
@@ -782,7 +848,7 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
           }
         }
         if (!slotBrief || !theme) {
-          result.skippedNoThemes += 1;
+          skippedNoThemes += 1;
           break;
         }
 
@@ -813,6 +879,132 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
     // time-bounded run spreads new posts over the whole calendar rather
     // than filling one account before starting the next.
     specs.sort((a, b) => (a.iso < b.iso ? -1 : a.iso > b.iso ? 1 : 0));
+    // Process oldest slots first and interleave across accounts so a
+    // time-bounded run spreads new posts over the whole calendar rather
+    // than filling one account before starting the next.
+    specs.sort((a, b) => (a.iso < b.iso ? -1 : a.iso > b.iso ? 1 : 0));
+
+  return {
+    settings,
+    lookaheadDays,
+    rangeEnd: rangeEnd.toISOString(),
+    briefs,
+    existingPosts,
+    brainItems,
+    imageUsage,
+    themeUsage,
+    cooldownDays,
+    captionSource,
+    captionModel,
+    specs,
+    shortlists,
+    brainFingerprint: fingerprint,
+    skippedCount,
+    skippedNoThemes,
+    details,
+  };
+}
+
+/**
+ * IMAGE-SEMANTIC-V1: a per-(theme, brief) shortlist, memoised for one run.
+ *
+ * The PROMISE is cached, not the result: the slots in a concurrent batch
+ * would otherwise each fire the same request before any of them had an
+ * answer to store.
+ */
+export interface RankCache {
+  get: (theme: Theme, brief: Brief | undefined) => Promise<SemanticRank | null>;
+  /** Persist anything newly computed. Safe to call with nothing new. */
+  flush: () => Promise<void>;
+}
+
+export function makeRankCache(
+  input: RunInput,
+  brainItems: BrainItemLite[],
+  settings: EffectiveSocialSettings,
+  persisted?: ShortlistCache,
+  fingerprint?: string
+): RankCache {
+  const cache = new Map<string, Promise<SemanticRank | null>>();
+  const fresh = new Map<string, string[]>();
+
+  const get = (theme: Theme, brief: Brief | undefined) => {
+    if (!settings.semanticImageMatch) return Promise.resolve(null);
+    const key = theme.id + '|' + (brief?.id || '');
+    const hit = cache.get(key);
+    if (hit) return hit;
+
+    // SHORTLIST-CACHE-V1: a shortlist already computed for this library is
+    // the same answer, not an approximation of it, so there is nothing to
+    // weigh up — use it and skip the request.
+    const stored = persisted?.hits.get(key);
+    if (stored) {
+      const rank: SemanticRank = new Map();
+      stored.forEach((url, i) => rank.set(url, i));
+      const resolved = Promise.resolve(rank);
+      cache.set(key, resolved);
+      return resolved;
+    }
+
+    const pending = fetchSemanticRank(
+      input.origin,
+      brainItems,
+      theme.title + ' ' + theme.prompt,
+      { briefName: brief?.name, internalSecret: input.internalSecret }
+    ).then(rank => {
+      if (rank && rank.size > 0) {
+        fresh.set(key, [...rank.entries()].sort((a, b) => a[1] - b[1]).map(e => e[0]));
+      }
+      return rank;
+    });
+    cache.set(key, pending);
+    return pending;
+  };
+
+  return {
+    get,
+    flush: async () => {
+      if (!fingerprint || fresh.size === 0) return;
+      await writeShortlists(fingerprint, fresh);
+    },
+  };
+}
+
+export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunResult> {
+  const startedAt = Date.now();
+  const now = new Date();
+  const result: AutoGenerateRunResult = {
+    ok: false,
+    createdCount: 0,
+    skippedCount: 0,
+    skippedNoThemes: 0,
+    errorCount: 0,
+    rangeStart: now.toISOString(),
+    rangeEnd: '',
+    durationMs: 0,
+    details: [],
+  };
+
+  try {
+    // 1-6. Plan the whole fill before spending any of the time budget.
+    const plan = await planFill(input, now);
+    const {
+      settings, existingPosts, brainItems, imageUsage, cooldownDays,
+      captionSource, captionModel, specs,
+    } = plan;
+    result.rangeEnd = plan.rangeEnd;
+    result.skippedCount = plan.skippedCount;
+    result.skippedNoThemes = plan.skippedNoThemes;
+    result.details = plan.details;
+
+    const ranker = makeRankCache(
+      input, brainItems, settings, plan.shortlists, plan.brainFingerprint
+    );
+
+    const newPosts: SocialPostDraft[] = [];
+    // Track every image used in this run so the pickers can avoid handing
+    // the same photo to multiple posts (the "same image all month" bug).
+    const usedImageUrls = new Set<string>();
 
     // 7. Generate captions + pick images. Each caption is a real AI call.
     // Netlify kills a synchronous function at ~26s regardless of the
@@ -833,23 +1025,70 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
     // (fewer slots per click, never a hard kill).
     const SYNC_CEILING_MS = 24_000;
     const PERSIST_RESERVE_MS = 2_500;
-    // IMAGE-SEMANTIC-V1 adds one ranking request in front of the caption
-    // request. The rankings for a batch run inside the same Promise.all, so
-    // the batch grows by one ranking latency, not four — subtract it once.
-    // Cost of being wrong here is a hard kill and an HTML error page, so the
-    // subtraction is unconditional even though most batches reuse a cached
-    // ranking and pay nothing.
-    const TIME_BUDGET_MS = Math.max(
-      1_000,
-      SYNC_CEILING_MS - PERSIST_RESERVE_MS - captionModel.captionTimeoutMs - SHORTLIST_TIMEOUT_MS
-    );
+    // FILL-BUDGET-V2
+    //
+    // Expressed as a DEADLINE rather than a stopwatch. The question before
+    // each batch is "is there room for another one before the ceiling?", and
+    // a stopwatch against a constant answers a different question — one that
+    // silently stops being true as the setup phase grows. The first version
+    // subtracted a fixed reserve from 24s and compared elapsed time to it,
+    // which left 2.5s for setup on Sonnet and produced runs that created
+    // NOTHING on a real account and reported "generation stalled".
+    //
+    // The reserve is also honest about the shortlist now. A ranking is
+    // memoised per invocation AND persisted across them, so only a cold
+    // cache can ever pay for one — reserving it on every batch was reserving
+    // time that in practice is never spent.
+    const deadline = startedAt + SYNC_CEILING_MS;
+    const roomForAnotherBatch = () =>
+      Date.now() + captionModel.captionTimeoutMs + PERSIST_RESERVE_MS <= deadline;
     const CONCURRENCY = 4;
+
+    // FILL-BUDGET-V2 — ranking happens HERE, never inside the loop.
+    //
+    // Ranking inside the loop forced every batch to reserve the shortlist
+    // timeout on top of the caption timeout, and that reserve is what
+    // starved setup down to 2.5s. Worse, it deadlocked on a cold cache: no
+    // room for a batch meant no batch ran, nothing was ranked, the cache
+    // stayed cold, and the next invocation hit exactly the same wall.
+    //
+    // Warming up front fixes both. Every distinct (theme, brief) pair goes
+    // out concurrently, so the cost is ONE ranking latency however many
+    // pairs there are, it is paid once, and it is persisted immediately —
+    // so even an invocation with no time left to generate leaves the next
+    // one faster. The loop then reserves only the caption timeout.
+    const warmed = new Map<string, SemanticRank | null>();
+    const pairKey = (spec: SlotSpec) => spec.theme.id + '|' + spec.slotBriefId;
+    const roomToWarm =
+      Date.now() + SHORTLIST_TIMEOUT_MS + captionModel.captionTimeoutMs + PERSIST_RESERVE_MS <= deadline;
+    if (settings.semanticImageMatch && roomToWarm) {
+      const pairs = new Map<string, SlotSpec>();
+      for (const spec of specs) pairs.set(pairKey(spec), spec);
+      await Promise.all(
+        [...pairs.entries()].map(async ([key, spec]) => {
+          warmed.set(key, await ranker.get(spec.theme, spec.slotBrief));
+        })
+      );
+      // Persist before generating, so a run that ends up with no time to
+      // write a post still moves the fill forward.
+      await ranker.flush();
+    } else if (settings.semanticImageMatch) {
+      // Not enough of the window left to rank AND generate. Generating is
+      // the more valuable half, so this invocation falls back to lexical
+      // ranking (IMAGE-RANK-V2) rather than doing nothing.
+      result.semanticSkipped = true;
+    }
     let postSeq = 0;
 
     for (let i = 0; i < specs.length; i += CONCURRENCY) {
-      if (Date.now() - startedAt > TIME_BUDGET_MS) {
+      if (!roomForAnotherBatch()) {
         result.stoppedEarly = true;
         result.pendingCount = specs.length - i;
+        // Distinguish "the window filled up mid-run", which is normal and
+        // continues on the next click, from "there was never room for even
+        // one batch", which is the starvation FILL-BUDGET-V2 fixed and which
+        // the UI previously reported as the misleading "generation stalled".
+        if (i === 0) result.noRoomForBatch = true;
         break;
       }
       const batch = specs.slice(i, i + CONCURRENCY);
@@ -874,7 +1113,10 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
           // IMAGE-SEMANTIC-V1: ask the model which photos suit this theme
           // before scoring. Null (disabled, failed, timed out) means the
           // lexical ranking decides, exactly as it did before.
-          const semanticRank = await rankFor(spec.theme, spec.slotBrief);
+          // Warmed above — never a network call from inside the loop, so a
+          // batch's cost is exactly one caption timeout. A pair that was not
+          // warmed falls back to the lexical ranking.
+          const semanticRank = warmed.get(spec.theme.id + '|' + spec.slotBriefId) || null;
           const brain = pickBrainImage(
             brainItems, spec.theme, usedImageUrls, spec.slotBrief,
             { usage: imageUsage, slotTime, cooldownDays, semanticRank }
