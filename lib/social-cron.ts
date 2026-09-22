@@ -926,10 +926,6 @@ export async function planFill(input: RunInput, now: Date): Promise<FillPlan> {
     // time-bounded run spreads new posts over the whole calendar rather
     // than filling one account before starting the next.
     specs.sort((a, b) => (a.iso < b.iso ? -1 : a.iso > b.iso ? 1 : 0));
-    // Process oldest slots first and interleave across accounts so a
-    // time-bounded run spreads new posts over the whole calendar rather
-    // than filling one account before starting the next.
-    specs.sort((a, b) => (a.iso < b.iso ? -1 : a.iso > b.iso ? 1 : 0));
 
   return {
     settings,
@@ -1308,8 +1304,15 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
             createdAt: new Date().toISOString(),
           };
           return { post, spec, imageUrl };
-        } catch (err) {
-          console.error('[social-cron] slot generation failed:', err);
+        } catch (err: any) {
+          // FILL-DIAGNOSIS-V2: a slot that threw before or after the caption
+          // call counts in errorCount like any other, so it has to contribute
+          // a reason too — otherwise the run reports failures it cannot
+          // explain and the UI falls back to "check the function logs", which
+          // the person clicking the button generally cannot do.
+          const message = err?.message || String(err);
+          console.error('[social-cron] slot generation failed:', message);
+          noteCaptionError(`slot generation failed: ${message}`);
           return null;
         }
       }));

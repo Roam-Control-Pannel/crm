@@ -10,6 +10,9 @@ import { buildCaptionHistory, captionHistoryLines } from '@/lib/caption-history'
 import { MODEL_SONNET } from '@/lib/ai-models';
 import { fetchSemanticRank } from '@/lib/image-shortlist';
 import { GRAPHIC_FORMATS, type GraphicFormat } from '@/lib/graphic-formats';
+import {
+  emptyFillTotals, accumulateRound, diagnoseRound, shouldContinue, fillOutcomeMessage,
+} from '@/lib/fill-loop';
 import LoadErrorBanner from '@/components/LoadErrorBanner';
 import { buildUnsplashCredit } from '@/lib/unsplash-credit';
 import BrainPicker from '@/components/BrainPicker';
@@ -185,8 +188,16 @@ export default function SocialPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [tab, setTab] = useState<'calendar' | 'list'>('calendar');
-  const [calM, setCalM] = useState(today.getMonth());
-  const [calY, setCalY] = useState(today.getFullYear());
+  // CAL-NAV-V2: the visible month is ONE piece of state — an absolute month
+  // index — not a (month, year) pair. The arrows used to read `calM` from the
+  // render closure to decide whether to wrap the year, while updating it with
+  // a functional setter. Two clicks landing in the same batch therefore both
+  // saw the pre-click month: December → next → next moved the year forward
+  // twice and left the month on January. Shifting one integer makes the wrap
+  // arithmetic unrepresentable.
+  const [calAbs, setCalAbs] = useState(today.getFullYear() * 12 + today.getMonth());
+  const calY = Math.floor(calAbs / 12);
+  const calM = calAbs - calY * 12;
   const [platFilter, setPlatFilter] = useState('all');
   const [acctFilter, setAcctFilter] = useState('all');
 
@@ -1738,11 +1749,12 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"..."},{"caption":"...
               // Instead of asking the user to keep clicking, loop here
               // until the calendar is full, refreshing between rounds so
               // drafts appear as they're created.
-              let totalCreated = 0;
-              let totalSkipped = 0;
-              let pendingLeft = 0;
+              // FILL-DIAGNOSIS-V2: the round-by-round bookkeeping and the
+              // "why did it stop" rules live in lib/fill-loop.ts, where the
+              // order of the terminal checks can be read — and tested —
+              // without picking it out of a click handler.
+              const totals = emptyFillTotals();
               let loopError: string | null = null;
-              let lastEmptyReason: string | null = null;
               const MAX_ROUNDS = 20;   // hard cap: 20 rounds ≈ 80 drafts
               const MAX_RETRIES = 2;   // per-round retries on gateway timeouts
               try {
@@ -1767,61 +1779,21 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"..."},{"caption":"...
                         : `unexpected response (HTTP ${status}).`);
                     break;
                   }
-                  totalCreated += data.createdCount || 0;
-                  // Slots skipped as duplicates are recounted every round —
-                  // keep the latest figure rather than summing.
-                  totalSkipped = data.skippedCount || 0;
-                  pendingLeft = data.pendingCount || 0;
-                  lastEmptyReason = data.emptyReason || null;
+                  accumulateRound(totals, data);
                   // Show progress as each batch lands.
                   const fresh0 = await loadWithMigration<SocialPost[]>('social_posts');
                   if (fresh0.ok && Array.isArray(fresh0.data)) setPosts(fresh0.data);
-                  if (!data.stoppedEarly || !pendingLeft) { pendingLeft = 0; break; }
-                  // A round that created nothing while slots remain means
-                  // generation is failing (e.g. AI rate-limited) — stop
-                  // rather than loop forever on the same failing slots.
-                  if (!data.createdCount) {
-                    // FILL-BUDGET-V2: say which of the two it was. These need
-                    // different things from the user, and calling a starved
-                    // run "stalled, try again in a few minutes" sent people
-                    // back to a wall that waiting could not move.
-                    // CAPTION-ERRORS-V1: when the server knows why the
-                    // captions failed, say that instead of guessing. "Try
-                    // again in a few minutes" is right for a rate limit and
-                    // useless for a bad model id or a missing key.
-                    const why: string[] = Array.isArray(data.captionErrors) ? data.captionErrors : [];
-                    loopError = data.noRoomForBatch
-                      ? 'the server ran out of time before it could start writing. '
-                        + 'This usually means a slow read of the calendar or the Brain — '
-                        + 'try again, and if it keeps happening the lookahead window is too large.'
-                      : why.length > 0
-                        ? `the AI could not write them.\n\n${why.map(e => '• ' + e).join('\n')}`
-                        : 'generation stalled, and the server reported no reason — check the function logs.';
-                    break;
-                  }
-                  setFillStatus(`Filling… ${pendingLeft} left`);
+
+                  // Diagnose BEFORE deciding whether to loop: a round that
+                  // reached every slot and failed every caption looks exactly
+                  // like a finished run from the outside, and the stop check
+                  // used to swallow it.
+                  loopError = diagnoseRound(data, totals);
+                  if (loopError) break;
+                  if (!shouldContinue(data)) { totals.pendingLeft = 0; break; }
+                  setFillStatus(`Filling… ${totals.pendingLeft} left`);
                 }
-                const summary = `Created ${totalCreated} draft${totalCreated === 1 ? '' : 's'}`
-                  + ` (skipped ${totalSkipped} already-filled slot${totalSkipped === 1 ? '' : 's'}).`;
-                if (loopError) {
-                  alert(`${summary}\n\n${pendingLeft || 'Some'} slot${pendingLeft === 1 ? '' : 's'} could not be filled: ${loopError}`);
-                } else if (pendingLeft > 0) {
-                  // Hit the round cap with slots remaining — rare, but don't
-                  // claim the calendar is full when it isn't.
-                  alert(`${summary} ${pendingLeft} slot${pendingLeft === 1 ? '' : 's'} left — click Fill calendar again to continue.`);
-                } else {
-                  // FILL-DIAGNOSIS-V1: "Calendar is full" was said for every
-                  // empty plan, including the ones caused by an account or
-                  // brief the engine could not see. Say which it was.
-                  const reasons: Record<string, string> = {
-                    'no-accounts': 'No connected account can publish right now — check Channels.',
-                    'no-briefs': 'No account has an active brief assigned — check Social Accounts.',
-                    'no-posting-times': 'No posting times fall inside the window — check Settings.',
-                    'no-themes': 'No enabled theme matches the assigned briefs — check Settings.',
-                    'calendar-full': 'Calendar is full.',
-                  };
-                  alert(`${summary} ${reasons[lastEmptyReason || 'calendar-full'] || 'Calendar is full.'}`);
-                }
+                alert(fillOutcomeMessage(totals, loopError));
                 // Refresh either way — a partial run still saved drafts.
                 const fresh = await loadWithMigration<SocialPost[]>('social_posts');
                 if (fresh.ok && Array.isArray(fresh.data)) setPosts(fresh.data);
@@ -1951,9 +1923,9 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"..."},{"caption":"...
               )}
             </div>
             <div style={{ display: 'flex', gap: 6 }}>
-              <button onClick={() => { if (calM === 0) { setCalM(11); setCalY(y => y - 1); } else setCalM(m => m - 1); }} style={{ ...btnG, padding: '5px 10px' }}><ChevronLeft size={14} /></button>
-              <button onClick={() => { setCalM(today.getMonth()); setCalY(today.getFullYear()); }} style={{ ...btnG, padding: '5px 10px', fontSize: 11 }}>Today</button>
-              <button onClick={() => { if (calM === 11) { setCalM(0); setCalY(y => y + 1); } else setCalM(m => m + 1); }} style={{ ...btnG, padding: '5px 10px' }}><ChevronRight size={14} /></button>
+              <button onClick={() => setCalAbs(a => a - 1)} aria-label="Previous month" style={{ ...btnG, padding: '5px 10px' }}><ChevronLeft size={14} /></button>
+              <button onClick={() => setCalAbs(today.getFullYear() * 12 + today.getMonth())} style={{ ...btnG, padding: '5px 10px', fontSize: 11 }}>Today</button>
+              <button onClick={() => setCalAbs(a => a + 1)} aria-label="Next month" style={{ ...btnG, padding: '5px 10px' }}><ChevronRight size={14} /></button>
             </div>
           </div>
           {/* Horizontal scroll wrapper: 7 columns at <560px viewport gets
