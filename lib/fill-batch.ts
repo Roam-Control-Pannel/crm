@@ -86,15 +86,20 @@ export async function submitFillBatch(
   // Warm every shortlist first, concurrently. The picks below are local and
   // instant, but each ranking is a network call; doing them inside the
   // sequential pick loop would serialise ~25 requests and blow the budget.
-  const rankFor = makeRankCache(input, plan.brainItems, plan.settings);
+  const ranker = makeRankCache(
+    input, plan.brainItems, plan.settings, plan.shortlists, plan.brainFingerprint
+  );
   const pairs = new Map<string, SlotSpec>();
   for (const spec of specs) pairs.set(spec.theme.id + '|' + spec.slotBriefId, spec);
-  const ranks = new Map<string, Awaited<ReturnType<typeof rankFor>>>();
+  const ranks = new Map<string, Awaited<ReturnType<typeof ranker.get>>>();
   await Promise.all(
     [...pairs.entries()].map(async ([key, spec]) => {
-      ranks.set(key, await rankFor(spec.theme, spec.slotBrief));
+      ranks.set(key, await ranker.get(spec.theme, spec.slotBrief));
     })
   );
+  // Persist them: a batch fill of a long window may be run more than once,
+  // and the synchronous fill reads the same cache.
+  await ranker.flush();
 
   // Assign photos in slot order, sequentially, so `used` genuinely prevents
   // a repeat. This is the whole reason the ranking pass above is separate:

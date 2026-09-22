@@ -1779,7 +1779,15 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"..."},{"caption":"...
                   // generation is failing (e.g. AI rate-limited) — stop
                   // rather than loop forever on the same failing slots.
                   if (!data.createdCount) {
-                    loopError = 'generation stalled — try again in a few minutes.';
+                    // FILL-BUDGET-V2: say which of the two it was. These need
+                    // different things from the user, and calling a starved
+                    // run "stalled, try again in a few minutes" sent people
+                    // back to a wall that waiting could not move.
+                    loopError = data.noRoomForBatch
+                      ? 'the server ran out of time before it could start writing. '
+                        + 'This usually means a slow read of the calendar or the Brain — '
+                        + 'try again, and if it keeps happening the lookahead window is too large.'
+                      : 'generation stalled — try again in a few minutes.';
                     break;
                   }
                   setFillStatus(`Filling… ${pendingLeft} left`);

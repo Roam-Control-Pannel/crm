@@ -51,6 +51,12 @@ import {
 } from '@/lib/caption-history';
 import { captionModelSpec, SHORTLIST_TIMEOUT_MS } from '@/lib/ai-models';
 import { fetchSemanticRank, type SemanticRank } from '@/lib/image-shortlist';
+import {
+  brainFingerprint,
+  readShortlists,
+  writeShortlists,
+  type ShortlistCache,
+} from '@/lib/shortlist-cache';
 
 // Mirrors the SocialPost interface defined inline in app/social/page.tsx.
 // Kept in sync by convention — if that interface changes, this one must too.
@@ -645,6 +651,10 @@ export interface FillPlan {
   captionSource: CaptionSourcePost[];
   captionModel: ReturnType<typeof captionModelSpec>;
   specs: SlotSpec[];
+  /** SHORTLIST-CACHE-V1: shortlists already computed for this library. */
+  shortlists: ShortlistCache;
+  /** Fingerprint the shortlists were computed against. */
+  brainFingerprint: string;
   /** Counters the planning phase produces for the run report. */
   skippedCount: number;
   skippedNoThemes: number;
@@ -655,8 +665,35 @@ export async function planFill(input: RunInput, now: Date): Promise<FillPlan> {
   let skippedCount = 0;
   let skippedNoThemes = 0;
   const details: AutoGenerateAccountResult[] = [];
-    // 1. Settings
-    const settings = await getEffectiveSettings();
+    // 1-4. Settings, accounts, briefs, the calendar and the Brain.
+    //
+    // FILL-SETUP-PARALLEL-V1
+    // These were seven sequential round-trips, and on a real account that is
+    // where the fill was dying: the generation loop's budget is measured from
+    // the top of this function, so every second spent here is a second the
+    // loop does not get. With 151 posts and 324 Brain items the setup crossed
+    // the budget on its own and the run created NOTHING, which the UI
+    // reported as "generation stalled". Reproduced at 500ms per call.
+    //
+    // None of them depend on each other, so they go together and setup costs
+    // one round-trip of latency instead of seven. Each optional read keeps
+    // its own catch: a missing Brain must degrade to "no Brain images", not
+    // fail the whole plan.
+    const settingsPromise = getEffectiveSettings();
+    const get = (path: string) => fetchJsonInternal(input.origin, path, input.internalSecret);
+    const optional = (path: string) => get(path).catch(() => null);
+
+    const [settings, accountsJson, metaRes, briefsRes, postsRes, foldersRes, brainRes] =
+      await Promise.all([
+        settingsPromise,
+        get('/api/accounts/status'),
+        get('/api/store/account_meta'),
+        get('/api/store/briefs'),
+        get('/api/store/social_posts'),
+        optional('/api/brain/folders'),
+        optional('/api/brain/items'),
+      ]);
+
     const lookaheadDays = input.lookaheadDaysOverride
       || settings.lookaheadDays
       || DEFAULT_LOOKAHEAD_DAYS;
@@ -664,20 +701,9 @@ export async function planFill(input: RunInput, now: Date): Promise<FillPlan> {
     const rangeEnd = new Date(now);
     rangeEnd.setDate(rangeEnd.getDate() + lookaheadDays);
 
-    // 2. Accounts + meta — read from internal endpoints to avoid coupling
-    //    to client-store helpers that aren't safe server-side.
-    const accountsJson = await fetchJsonInternal(input.origin, '/api/accounts/status', input.internalSecret);
     const realAccounts: RealAccountLite[] = accountsJson?.realAccounts || [];
-
-    const metaRes = await fetchJsonInternal(input.origin, '/api/store/account_meta', input.internalSecret);
     const accountMetas: AccountMetaLite[] = metaRes?.data || [];
-
-    // 3. Briefs
-    const briefsRes = await fetchJsonInternal(input.origin, '/api/store/briefs', input.internalSecret);
     const briefs: Brief[] = briefsRes?.data || [];
-
-    // 4. Existing posts
-    const postsRes = await fetchJsonInternal(input.origin, '/api/store/social_posts', input.internalSecret);
     const existingPosts: SocialPostDraft[] = postsRes?.data || [];
 
     // IMAGE-COOLDOWN-V1 / THEME-ROTATION-V1
@@ -718,22 +744,19 @@ export async function planFill(input: RunInput, now: Date): Promise<FillPlan> {
     // is stored on the post and fetched by Meta at publish time, which
     // can't resolve a relative path. Image MIME only: text/markdown Brain
     // items aren't postable.
+    //
+    // Both reads happened in the parallel block above; this is the shaping.
     const brainItems: BrainItemLite[] = [];
     try {
-      // Load folders too (id -> name) so each image carries its curated
-      // location/topic label (e.g. "Manchester"). Best-effort — if folders
-      // can't be loaded, items just have no folder and degrade to tags only.
+      // Folder names (id -> name) give each image its curated location label
+      // (e.g. "Manchester"). Best-effort — without them items degrade to
+      // tags only, which is worse matching but still a working fill.
       const folderNameById = new Map<string, string>();
-      try {
-        const foldersRes = await fetchJsonInternal(input.origin, '/api/brain/folders', input.internalSecret);
-        for (const f of (foldersRes?.folders || [])) {
-          if (f?.id && f?.name) folderNameById.set(f.id, f.name);
-        }
-      } catch { /* folders optional */ }
-
-      const brainRes = await fetchJsonInternal(input.origin, '/api/brain/items', input.internalSecret);
+      for (const f of (foldersRes?.folders || [])) {
+        if (f?.id && f?.name) folderNameById.set(f.id, f.name);
+      }
       const rawItems: any[] = brainRes?.items || brainRes?.data || [];
-      const built: BrainItemLite[] = rawItems
+      brainItems.push(...rawItems
         .filter(i => typeof i?.mime === 'string' && i.mime.startsWith('image/') && i.blobId)
         .map(i => ({
           id: i.id,
@@ -742,12 +765,16 @@ export async function planFill(input: RunInput, now: Date): Promise<FillPlan> {
           credit: i.description,
           tags: i.tags,
           folder: i.folderId ? folderNameById.get(i.folderId) : undefined,
-        }));
-      brainItems.push(...built);
+        })));
     } catch {
-      // Brain endpoint may not exist or be auth-restricted — degrade gracefully.
-      // `brainItems` stays empty and every picker falls through to Unsplash.
+      // A malformed payload degrades to no Brain images rather than failing
+      // the plan; every picker falls through to Unsplash.
     }
+
+    // SHORTLIST-CACHE-V1: keyed by the library, so it can only be loaded
+    // once the Brain is known. One small blob read.
+    const fingerprint = brainFingerprint(brainItems);
+    const shortlists = await readShortlists(fingerprint);
 
     // 6. Collect every slot that needs a post. This phase is fast and
     // synchronous — dedup + brief/theme picking only, NO AI calls — so we
@@ -870,6 +897,8 @@ export async function planFill(input: RunInput, now: Date): Promise<FillPlan> {
     captionSource,
     captionModel,
     specs,
+    shortlists,
+    brainFingerprint: fingerprint,
     skippedCount,
     skippedNoThemes,
     details,
@@ -883,25 +912,61 @@ export async function planFill(input: RunInput, now: Date): Promise<FillPlan> {
  * would otherwise each fire the same request before any of them had an
  * answer to store.
  */
+export interface RankCache {
+  get: (theme: Theme, brief: Brief | undefined) => Promise<SemanticRank | null>;
+  /** Persist anything newly computed. Safe to call with nothing new. */
+  flush: () => Promise<void>;
+}
+
 export function makeRankCache(
   input: RunInput,
   brainItems: BrainItemLite[],
-  settings: EffectiveSocialSettings
-): (theme: Theme, brief: Brief | undefined) => Promise<SemanticRank | null> {
+  settings: EffectiveSocialSettings,
+  persisted?: ShortlistCache,
+  fingerprint?: string
+): RankCache {
   const cache = new Map<string, Promise<SemanticRank | null>>();
-  return (theme, brief) => {
+  const fresh = new Map<string, string[]>();
+
+  const get = (theme: Theme, brief: Brief | undefined) => {
     if (!settings.semanticImageMatch) return Promise.resolve(null);
     const key = theme.id + '|' + (brief?.id || '');
     const hit = cache.get(key);
     if (hit) return hit;
+
+    // SHORTLIST-CACHE-V1: a shortlist already computed for this library is
+    // the same answer, not an approximation of it, so there is nothing to
+    // weigh up — use it and skip the request.
+    const stored = persisted?.hits.get(key);
+    if (stored) {
+      const rank: SemanticRank = new Map();
+      stored.forEach((url, i) => rank.set(url, i));
+      const resolved = Promise.resolve(rank);
+      cache.set(key, resolved);
+      return resolved;
+    }
+
     const pending = fetchSemanticRank(
       input.origin,
       brainItems,
       theme.title + ' ' + theme.prompt,
       { briefName: brief?.name, internalSecret: input.internalSecret }
-    );
+    ).then(rank => {
+      if (rank && rank.size > 0) {
+        fresh.set(key, [...rank.entries()].sort((a, b) => a[1] - b[1]).map(e => e[0]));
+      }
+      return rank;
+    });
     cache.set(key, pending);
     return pending;
+  };
+
+  return {
+    get,
+    flush: async () => {
+      if (!fingerprint || fresh.size === 0) return;
+      await writeShortlists(fingerprint, fresh);
+    },
   };
 }
 
@@ -932,7 +997,9 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
     result.skippedNoThemes = plan.skippedNoThemes;
     result.details = plan.details;
 
-    const rankFor = makeRankCache(input, brainItems, settings);
+    const ranker = makeRankCache(
+      input, brainItems, settings, plan.shortlists, plan.brainFingerprint
+    );
 
     const newPosts: SocialPostDraft[] = [];
     // Track every image used in this run so the pickers can avoid handing
@@ -958,23 +1025,70 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
     // (fewer slots per click, never a hard kill).
     const SYNC_CEILING_MS = 24_000;
     const PERSIST_RESERVE_MS = 2_500;
-    // IMAGE-SEMANTIC-V1 adds one ranking request in front of the caption
-    // request. The rankings for a batch run inside the same Promise.all, so
-    // the batch grows by one ranking latency, not four — subtract it once.
-    // Cost of being wrong here is a hard kill and an HTML error page, so the
-    // subtraction is unconditional even though most batches reuse a cached
-    // ranking and pay nothing.
-    const TIME_BUDGET_MS = Math.max(
-      1_000,
-      SYNC_CEILING_MS - PERSIST_RESERVE_MS - captionModel.captionTimeoutMs - SHORTLIST_TIMEOUT_MS
-    );
+    // FILL-BUDGET-V2
+    //
+    // Expressed as a DEADLINE rather than a stopwatch. The question before
+    // each batch is "is there room for another one before the ceiling?", and
+    // a stopwatch against a constant answers a different question — one that
+    // silently stops being true as the setup phase grows. The first version
+    // subtracted a fixed reserve from 24s and compared elapsed time to it,
+    // which left 2.5s for setup on Sonnet and produced runs that created
+    // NOTHING on a real account and reported "generation stalled".
+    //
+    // The reserve is also honest about the shortlist now. A ranking is
+    // memoised per invocation AND persisted across them, so only a cold
+    // cache can ever pay for one — reserving it on every batch was reserving
+    // time that in practice is never spent.
+    const deadline = startedAt + SYNC_CEILING_MS;
+    const roomForAnotherBatch = () =>
+      Date.now() + captionModel.captionTimeoutMs + PERSIST_RESERVE_MS <= deadline;
     const CONCURRENCY = 4;
+
+    // FILL-BUDGET-V2 — ranking happens HERE, never inside the loop.
+    //
+    // Ranking inside the loop forced every batch to reserve the shortlist
+    // timeout on top of the caption timeout, and that reserve is what
+    // starved setup down to 2.5s. Worse, it deadlocked on a cold cache: no
+    // room for a batch meant no batch ran, nothing was ranked, the cache
+    // stayed cold, and the next invocation hit exactly the same wall.
+    //
+    // Warming up front fixes both. Every distinct (theme, brief) pair goes
+    // out concurrently, so the cost is ONE ranking latency however many
+    // pairs there are, it is paid once, and it is persisted immediately —
+    // so even an invocation with no time left to generate leaves the next
+    // one faster. The loop then reserves only the caption timeout.
+    const warmed = new Map<string, SemanticRank | null>();
+    const pairKey = (spec: SlotSpec) => spec.theme.id + '|' + spec.slotBriefId;
+    const roomToWarm =
+      Date.now() + SHORTLIST_TIMEOUT_MS + captionModel.captionTimeoutMs + PERSIST_RESERVE_MS <= deadline;
+    if (settings.semanticImageMatch && roomToWarm) {
+      const pairs = new Map<string, SlotSpec>();
+      for (const spec of specs) pairs.set(pairKey(spec), spec);
+      await Promise.all(
+        [...pairs.entries()].map(async ([key, spec]) => {
+          warmed.set(key, await ranker.get(spec.theme, spec.slotBrief));
+        })
+      );
+      // Persist before generating, so a run that ends up with no time to
+      // write a post still moves the fill forward.
+      await ranker.flush();
+    } else if (settings.semanticImageMatch) {
+      // Not enough of the window left to rank AND generate. Generating is
+      // the more valuable half, so this invocation falls back to lexical
+      // ranking (IMAGE-RANK-V2) rather than doing nothing.
+      result.semanticSkipped = true;
+    }
     let postSeq = 0;
 
     for (let i = 0; i < specs.length; i += CONCURRENCY) {
-      if (Date.now() - startedAt > TIME_BUDGET_MS) {
+      if (!roomForAnotherBatch()) {
         result.stoppedEarly = true;
         result.pendingCount = specs.length - i;
+        // Distinguish "the window filled up mid-run", which is normal and
+        // continues on the next click, from "there was never room for even
+        // one batch", which is the starvation FILL-BUDGET-V2 fixed and which
+        // the UI previously reported as the misleading "generation stalled".
+        if (i === 0) result.noRoomForBatch = true;
         break;
       }
       const batch = specs.slice(i, i + CONCURRENCY);
@@ -999,7 +1113,10 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
           // IMAGE-SEMANTIC-V1: ask the model which photos suit this theme
           // before scoring. Null (disabled, failed, timed out) means the
           // lexical ranking decides, exactly as it did before.
-          const semanticRank = await rankFor(spec.theme, spec.slotBrief);
+          // Warmed above — never a network call from inside the loop, so a
+          // batch's cost is exactly one caption timeout. A pair that was not
+          // warmed falls back to the lexical ranking.
+          const semanticRank = warmed.get(spec.theme.id + '|' + spec.slotBriefId) || null;
           const brain = pickBrainImage(
             brainItems, spec.theme, usedImageUrls, spec.slotBrief,
             { usage: imageUsage, slotTime, cooldownDays, semanticRank }
