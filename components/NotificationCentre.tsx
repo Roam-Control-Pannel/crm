@@ -53,6 +53,8 @@ const typeColor: Record<string, string> = {
   // SOCIAL-NOTIFS-V1
   social_published: '#2f7a4f', social_publish_failed: '#b53939',
   social_drafted: '#7d6e70', social_scheduled: '#2a5fa4',
+  // AUTOGEN-FAILURE-NOTIFS-V1
+  social_autogen_failed: '#b53939',
 };
 
 function TypeIcon({ type }: { type: string }) {
@@ -75,6 +77,8 @@ function TypeIcon({ type }: { type: string }) {
   if (type === 'social_publish_failed') return <XCircle size={size} color={color} />;
   if (type === 'social_drafted') return <FileEdit size={size} color={color} />;
   if (type === 'social_scheduled') return <CalendarClock size={size} color={color} />;
+  // AUTOGEN-FAILURE-NOTIFS-V1
+  if (type === 'social_autogen_failed') return <AlertTriangle size={size} color={color} />;
   return <Info size={size} color={color} />;
 }
 

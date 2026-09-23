@@ -30,7 +30,11 @@ export type NotificationType =
   | 'social_published'
   | 'social_publish_failed'
   | 'social_drafted'
-  | 'social_scheduled';
+  | 'social_scheduled'
+  // AUTOGEN-FAILURE-NOTIFS-V1: the nightly fill could fail every slot and
+  // say so only in the function logs, which nobody reads. A run that tried
+  // and created nothing now reaches the bell like any other failure.
+  | 'social_autogen_failed';
 
 export interface Notification {
   id: string;

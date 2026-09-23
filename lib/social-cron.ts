@@ -35,6 +35,7 @@ import {
   DEFAULT_LOOKAHEAD_DAYS,
   type EffectiveSocialSettings,
 } from '@/lib/social-settings-types';
+import { runOutcomeNotification } from '@/lib/autogen-notify';
 import { addNotification } from '@/lib/notifications';
 import { pickBrainImageForContext } from '@/lib/brain-image-match';
 import {
@@ -1374,18 +1375,6 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
       await saveCollection(DEFAULT_USER_ID, 'social_posts', all);
     }
 
-    // 8. Notification (de-duped within 24h)
-    if (result.createdCount > 0) {
-      await addNotification({
-        type: 'social_drafted',
-        title: 'Auto-generated drafts',
-        body: `Created ${result.createdCount} draft${result.createdCount === 1 ? '' : 's'} `
-          + `across ${result.details?.length || 0} account${(result.details?.length || 0) === 1 ? '' : 's'}.`,
-        href: '/social',
-        dedupeKey: 'social-autogen-' + new Date().toISOString().slice(0, 10),
-      });
-    }
-
     if (captionErrors.length > 0) result.captionErrors = captionErrors;
     result.ok = true;
   } catch (err: any) {
@@ -1394,6 +1383,29 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
     result.errorCount = 1;
   }
 
+  // 8. Notification (de-duped within 24h).
+  //
+  // Deliberately outside the try: a blob write that fails here used to be
+  // caught above and reported as a failed RUN, discarding drafts that had
+  // already been saved. The notification is now the last thing that happens
+  // and cannot change the outcome it is describing.
+  await notifyRunOutcome(result);
+
   result.durationMs = Date.now() - startedAt;
   return result;
+}
+
+/**
+ * AUTOGEN-FAILURE-NOTIFS-V1: write whatever lib/autogen-notify.ts decided this
+ * run deserves. The rule lives there; the blob write lives here.
+ */
+async function notifyRunOutcome(result: AutoGenerateRunResult): Promise<void> {
+  const notification = runOutcomeNotification(result, new Date().toISOString().slice(0, 10));
+  if (!notification) return;
+  try {
+    await addNotification(notification);
+  } catch (err: any) {
+    // Never let the bell take the run down with it.
+    console.error('[social-cron] could not write run notification:', err?.message || err);
+  }
 }
