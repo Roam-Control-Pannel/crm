@@ -598,8 +598,15 @@ export async function generateCaption(
     const data: any = await res.json();
     const text = (data?.content || '').trim();
     // A 200 with nothing in it is its own failure, and a distinct one: the
-    // request was accepted and the model still produced no post.
-    return text ? { text } : { text: '', error: 'the model returned an empty response' };
+    // request was accepted and the model still produced no post. ANTHROPIC-
+    // CONTENT-V1: /api/ai/chat now sends the API's own account of why it was
+    // empty (stop_reason, block types, output tokens), so prefer that over
+    // the generic line — "empty response" told us nothing across ten slots.
+    if (text) return { text };
+    const why = typeof data?.error === 'string' && data.error
+      ? data.error
+      : 'the model returned an empty response';
+    return { text: '', error: why };
   } catch (err: any) {
     const error = err?.name === 'AbortError'
       ? `timed out after ${Math.round(req.timeoutMs / 1000)}s`

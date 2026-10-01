@@ -4,6 +4,7 @@ import { getToolSchemas, executeTool, REQUIRES_CONFIRM } from '@/lib/roamio-tool
 import { safeEqual } from '@/lib/safe-equal';
 import { DEFAULT_CHAT_MODEL } from '@/lib/ai-models';
 import { normaliseSystem } from '@/lib/ai-system-blocks';
+import { extractText, describeEmptyResponse } from '@/lib/anthropic-content';
 
 // sharp-free but Node-only (node:crypto for the confirm binding below).
 export const runtime = 'nodejs';
@@ -193,10 +194,20 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // ----- Non-tool path: legacy behaviour preserved ---------------------
+    // ----- Non-tool path -------------------------------------------------
     if (!toolMode) {
       logCacheUsage(baseBody.model, data);
-      return NextResponse.json({ content: data?.content?.[0]?.text || '' });
+      // ANTHROPIC-CONTENT-V1: this branch used to read data.content[0].text
+      // while every other branch in this file used extractText(). A response
+      // whose first block is not a text block therefore came back as '' —
+      // reported downstream as "the model returned an empty response", with
+      // nothing to say which of the two it was. The reader is shared now, and
+      // a genuinely empty result carries the API's own account of itself.
+      const content = extractText(data?.content);
+      if (content) return NextResponse.json({ content });
+      const reason = describeEmptyResponse(data);
+      console.error('[ai/chat] empty completion from', baseBody.model + ':', reason);
+      return NextResponse.json({ content: '', error: reason });
     }
 
     // ----- Tool-use loop -------------------------------------------------
@@ -287,14 +298,6 @@ export async function POST(req: NextRequest) {
 // =================================================================
 // Helpers
 // =================================================================
-
-function extractText(blocks: any[]): string {
-  return blocks
-    .filter((b: any) => b.type === 'text')
-    .map((b: any) => b.text)
-    .join('\n')
-    .trim();
-}
 
 function buildClientResponse(blocks: any[]) {
   // No pending tools, but record any executed tool calls in the text we
