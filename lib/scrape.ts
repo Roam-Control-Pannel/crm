@@ -9,6 +9,8 @@
  * Cloudflare challenges, the user can always paste content manually.
  */
 
+import { fetchGuarded, UrlGuardError } from './url-guard';
+
 const FETCH_TIMEOUT_MS = 12_000;
 const MAX_BYTES = 2_000_000; // 2 MB ceiling — guards against runaway downloads
 const MAX_TEXT = 60_000;     // cap stored/returned text so we don't blow Brain blobs
@@ -25,31 +27,32 @@ export interface ScrapeResult {
 }
 
 export async function scrapeUrl(url: string): Promise<ScrapeResult> {
-  // Validate + normalise. We only handle http(s); anything else gets rejected
-  // before we burn a network call.
-  let normalised: URL;
-  try {
-    normalised = new URL(url);
-  } catch {
-    return { ok: false, url, error: 'Invalid URL' };
-  }
-  if (normalised.protocol !== 'http:' && normalised.protocol !== 'https:') {
-    return { ok: false, url, error: 'Only http(s) URLs are supported' };
-  }
-
+  // URL-GUARD-V1
+  //
+  // The scheme check below was the only validation here, which left the
+  // function free to read anything the deploy's network can reach — cloud
+  // metadata, internal services — and hand the body back to the caller. A
+  // host allowlist is not an option: reading business websites nobody listed
+  // in advance is the whole job. So this uses the weaker correct rule, which
+  // 'public' mode implements: any public address, never a private one,
+  // checked against what the hostname actually resolves to, and re-checked
+  // after every redirect. `redirect: 'follow'` used to mean only the first
+  // address was ever seen.
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
   try {
-    const res = await fetch(normalised.toString(), {
-      signal: controller.signal,
-      redirect: 'follow',
-      headers: {
-        // Some sites refuse the default node UA. Pretend to be a recent
-        // browser so we get the same HTML a user would see.
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-GB,en;q=0.9',
+    const res = await fetchGuarded(url, {
+      mode: 'public',
+      init: {
+        signal: controller.signal,
+        headers: {
+          // Some sites refuse the default node UA. Pretend to be a recent
+          // browser so we get the same HTML a user would see.
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'en-GB,en;q=0.9',
+        },
       },
     });
 
@@ -84,6 +87,12 @@ export async function scrapeUrl(url: string): Promise<ScrapeResult> {
   } catch (err: any) {
     if (err?.name === 'AbortError') {
       return { ok: false, url, error: `Timed out after ${FETCH_TIMEOUT_MS}ms` };
+    }
+    if (err instanceof UrlGuardError) {
+      // The guard's messages are fixed text chosen to be safe to show: they
+      // never carry an upstream status or body, so a refusal reveals nothing
+      // about what is or is not listening on the blocked address.
+      return { ok: false, url, error: err.message };
     }
     return { ok: false, url, error: err?.message || 'Fetch failed' };
   } finally {
