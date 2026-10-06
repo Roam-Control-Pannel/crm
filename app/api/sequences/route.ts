@@ -126,6 +126,52 @@ async function updateStatus(email: string, attrs: Record<string, string>): Promi
   }
 }
 
+/**
+ * SEQ-CLAIM-BEFORE-SEND-V1
+ *
+ * The step a contact is on lives in Brevo's OUTREACH_STATUS, and that is what
+ * the next run reads to decide what to send. The old order was send first,
+ * then write the status, and count an error if the write failed — which the
+ * comment at the call site correctly described as "otherwise the next cron
+ * run sees the contact still in email_sent and re-sends day 2", and which
+ * incrementing a counter does nothing to prevent. A contact whose PUT 429'd
+ * (likely, somewhere in 11k) received the identical day-2 email every single
+ * day until a PUT happened to succeed.
+ *
+ * Writing the status FIRST makes that impossible: the status IS the claim. The
+ * two failure modes are no longer symmetric, and the asymmetry is the point —
+ *
+ *   write fails    -> nothing is sent, the contact keeps its current status,
+ *                     and the next run retries the whole step. Costs a day.
+ *   send fails     -> roll the status back so the next run retries. Costs
+ *                     nothing.
+ *   rollback fails -> the contact skips this one step. Costs one email.
+ *
+ * A skipped follow-up is a bad day. Mailing the same business daily until
+ * someone notices is a blocklisting, so every path here is biased towards
+ * sending less.
+ *
+ * Retries are deliberately stingy: this loop walks 11k contacts sequentially
+ * against a ~26s ceiling with no wall-clock budget of its own, so a retry
+ * storm would turn a Brevo wobble into a run that dies before it reaches the
+ * end of the list. One retry per call, and a hard cap on how many the run may
+ * spend in total — after which a failed claim simply means the step waits for
+ * tomorrow, which is the safe direction.
+ */
+const MAX_STATUS_RETRIES_PER_RUN = 25;
+
+async function claimStep(
+  email: string,
+  attrs: Record<string, string>,
+  budget: { retriesLeft: number }
+): Promise<boolean> {
+  if (await updateStatus(email, attrs)) return true;
+  if (budget.retriesLeft <= 0) return false;
+  budget.retriesLeft--;
+  await new Promise(r => setTimeout(r, 250));
+  return updateStatus(email, attrs);
+}
+
 export async function GET(req: NextRequest) {
   const auth = authorize(req);
   if (!auth.ok) {
@@ -145,6 +191,9 @@ export async function GET(req: NextRequest) {
   const todayDate = now.toISOString().slice(0, 10);
   const counts = { day2: 0, day7: 0, day14: 0, errors: 0, processed: 0 };
   let capped = false;
+  // SEQ-CLAIM-BEFORE-SEND-V1: per-invocation, so a warm container cannot
+  // carry a spent budget into the next run.
+  const statusBudget = { retriesLeft: MAX_STATUS_RETRIES_PER_RUN };
 
   // GUARD-DAILY-RUN-V1
   // With a redundant backup trigger, the daily run could be invoked more than
@@ -221,20 +270,37 @@ export async function GET(req: NextRequest) {
           capped = true;
           continue;
         }
+        // SEQ-CLAIM-BEFORE-SEND-V1 — claim the step, then send.
+        const claimed = await claimStep(
+          contact.email,
+          { OUTREACH_STATUS: 'followed_up', LAST_CONTACT_DATE: todayDate },
+          statusBudget
+        );
+        if (!claimed) {
+          // Nothing has been sent. The contact keeps `email_sent`, so the
+          // next run retries this step cleanly.
+          console.error(`[sequences] could not claim day 2 for ${redactEmail(contact.email)} — not sending`);
+          counts.errors++;
+          continue;
+        }
         const sent = await sendFollowUp(contact, 2, senderOpts, templates);
         if (sent) {
-          // Send already happened; if the status update fails we MUST count
-          // this as an error — otherwise the next cron run sees the contact
-          // still in `email_sent` and re-sends day 2.
-          const statusOk = await updateStatus(contact.email, {
-            OUTREACH_STATUS: 'followed_up',
-            LAST_CONTACT_DATE: todayDate,
-          });
           counts.day2++;
           alreadySent++;
-          if (!statusOk) counts.errors++;
         } else {
           counts.errors++;
+          // Put the claim back so the step is retried rather than skipped.
+          const rolledBack = await claimStep(
+            contact.email,
+            { OUTREACH_STATUS: 'email_sent', LAST_CONTACT_DATE: lastContact },
+            statusBudget
+          );
+          if (!rolledBack) {
+            console.error(
+              `[sequences] day 2 send failed for ${redactEmail(contact.email)} and the status ` +
+                `rollback also failed — this contact will skip day 2`
+            );
+          }
         }
       }
       // Day 7 — final nudge
@@ -243,17 +309,34 @@ export async function GET(req: NextRequest) {
           capped = true;
           continue;
         }
+        // SEQ-CLAIM-BEFORE-SEND-V1 — same shape as day 2 above.
+        const claimed = await claimStep(
+          contact.email,
+          { OUTREACH_STATUS: 'final_nudge', LAST_CONTACT_DATE: todayDate },
+          statusBudget
+        );
+        if (!claimed) {
+          console.error(`[sequences] could not claim day 7 for ${redactEmail(contact.email)} — not sending`);
+          counts.errors++;
+          continue;
+        }
         const sent = await sendFollowUp(contact, 3, senderOpts, templates);
         if (sent) {
-          const statusOk = await updateStatus(contact.email, {
-            OUTREACH_STATUS: 'final_nudge',
-            LAST_CONTACT_DATE: todayDate,
-          });
           counts.day7++;
           alreadySent++;
-          if (!statusOk) counts.errors++;
         } else {
           counts.errors++;
+          const rolledBack = await claimStep(
+            contact.email,
+            { OUTREACH_STATUS: 'followed_up', LAST_CONTACT_DATE: lastContact },
+            statusBudget
+          );
+          if (!rolledBack) {
+            console.error(
+              `[sequences] day 7 send failed for ${redactEmail(contact.email)} and the status ` +
+                `rollback also failed — this contact will skip day 7`
+            );
+          }
         }
       }
       // Day 14 — mark cold

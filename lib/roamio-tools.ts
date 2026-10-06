@@ -11,7 +11,7 @@
  * and toggle, confirm for update/delete. Adjust REQUIRES_CONFIRM below.
  */
 
-import { getCollection, saveCollection, DEFAULT_USER_ID } from './store';
+import { getCollection, saveCollection, mutateCollection, DEFAULT_USER_ID } from './store';
 
 // =================================================================
 // Types — kept local on purpose. Task shape mirrors app/tasks/page.tsx.
@@ -1024,23 +1024,85 @@ export async function executeTool(name: string, input: any): Promise<any> {
     }
 
     case 'reschedule_post': {
-      const posts = (await getCollection<any[]>(DEFAULT_USER_ID, 'social_posts')) || [];
-      const idx = posts.findIndex((p: any) => p.id === input.id);
-      if (idx === -1) return { ok: false, error: `Post ${input.id} not found` };
-      // Sanity-check the date.
+      // Sanity-check the date before touching the store, so a bad input
+      // cannot cost a read.
       const t = new Date(input.scheduledAt).getTime();
       if (!Number.isFinite(t)) return { ok: false, error: 'Invalid scheduledAt' };
-      posts[idx] = { ...posts[idx], scheduledAt: input.scheduledAt };
-      await saveCollection(DEFAULT_USER_ID, 'social_posts', posts);
+
+      // COLLECTION-CAS-V1
+      // This used to read the whole collection, set one element and write the
+      // array straight back. The write is a full replace, so ANY other write
+      // landing in between was silently reinstated to its pre-mutation state
+      // — including publish-due marking a DIFFERENT post `published`, which
+      // then looked schedulable again and went out to the platform twice.
+      // The hazard is written up twenty lines above for regenerate_caption
+      // and was left in both siblings. mutateCollection applies the change
+      // conditionally on the document being unchanged, so a concurrent write
+      // makes us re-apply rather than overwrite.
+      let found = false;
+      let conflict: string | null = null;
+      try {
+        await mutateCollection<any[]>(DEFAULT_USER_ID, 'social_posts', current => {
+          const posts = current || [];
+          const live = posts.find((p: any) => p.id === input.id);
+          found = !!live;
+          if (!live) return posts;
+          // A post that is mid-publish or already out is not reschedulable:
+          // moving its date cannot un-send it, and the publisher owns the row
+          // until it settles.
+          if (live.status === 'publishing' || live.status === 'published') {
+            conflict = live.status;
+            return posts;
+          }
+          return posts.map((p: any) =>
+            p.id === input.id ? { ...p, scheduledAt: input.scheduledAt } : p
+          );
+        });
+      } catch (err: any) {
+        return { ok: false, error: err?.message || 'Could not reschedule post' };
+      }
+      if (!found) return { ok: false, error: `Post ${input.id} not found` };
+      if (conflict) {
+        return {
+          ok: false,
+          error:
+            conflict === 'published'
+              ? `Post ${input.id} has already been published, so it cannot be rescheduled.`
+              : `Post ${input.id} is being published right now. Try again once it has finished.`,
+        };
+      }
       return { ok: true, id: input.id, scheduledAt: input.scheduledAt };
     }
 
     case 'delete_post': {
-      const posts = (await getCollection<any[]>(DEFAULT_USER_ID, 'social_posts')) || [];
-      const before = posts.length;
-      const next = posts.filter((p: any) => p.id !== input.id);
-      if (next.length === before) return { ok: false, error: `Post ${input.id} not found` };
-      await saveCollection(DEFAULT_USER_ID, 'social_posts', next);
+      // COLLECTION-CAS-V1 — same full-replace hazard as reschedule_post above.
+      let found = false;
+      let publishing = false;
+      try {
+        await mutateCollection<any[]>(DEFAULT_USER_ID, 'social_posts', current => {
+          const posts = current || [];
+          const live = posts.find((p: any) => p.id === input.id);
+          found = !!live;
+          if (!live) return posts;
+          // Deleting a row the publisher is mid-way through strands the
+          // in-flight send: the platform call may already have gone out, and
+          // there would be nothing left to record the result against.
+          if (live.status === 'publishing') {
+            publishing = true;
+            return posts;
+          }
+          return posts.filter((p: any) => p.id !== input.id);
+        });
+      } catch (err: any) {
+        return { ok: false, error: err?.message || 'Could not delete post' };
+      }
+      if (!found) return { ok: false, error: `Post ${input.id} not found` };
+      if (publishing) {
+        return {
+          ok: false,
+          error: `Post ${input.id} is being published right now. Try again once it has finished.`,
+        };
+      }
       return { ok: true, deletedId: input.id };
     }
 

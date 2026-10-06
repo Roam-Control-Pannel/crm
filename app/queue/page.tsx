@@ -204,10 +204,38 @@ export default function QueuePage() {
     };
   }, [columns, contacts]);
 
+  // QUEUE-CLAIM-BEFORE-SEND-V1
+  // The send was checked and the status PUT that follows it was not, so a
+  // rejected PUT left the email delivered, the card reading "Enrolled", and
+  // the contact back in "Not contacted" on the next refresh. The cron drives
+  // off OUTREACH_STATUS, so it never sent day 2 or day 7: the business got
+  // one email and stopped, with the Retry button disabled (see :522) and no
+  // way to recover.
+  //
+  // Claiming first makes the status the thing that gates the send, the same
+  // ordering the sequences cron now uses. A failed claim means nothing was
+  // sent, so the card stays actionable and retrying is safe; a failed send
+  // rolls the claim back. The claim also carries LAST_CONTACT_DATE, which
+  // the send route sets separately and best-effort — without it the contact
+  // sits in email_sent with no follow-up clock and the cron skips it
+  // forever.
   async function enrol(contact: Contact) {
     const key = String(contact.id);
     setSendStates(s => ({ ...s, [key]: 'sending' }));
+    const today = new Date().toISOString().slice(0, 10);
     try {
+      const claim = await fetch('/api/brevo/contacts', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: contact.email,
+          OUTREACH_STATUS: 'email_sent',
+          PAUSED: 'false',          // clear in case this is a re-enrolment
+          LAST_CONTACT_DATE: today, // the follow-up clock the cron reads
+        }),
+      });
+      if (!claim.ok) throw new Error('Could not update the contact — nothing was sent');
+
       const res = await fetch('/api/brevo/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -219,14 +247,16 @@ export default function QueuePage() {
           step: 1,
         }),
       });
-      if (!res.ok) throw new Error('Send failed');
-      // Flip status so the cron picks up day 2 / day 7 / day 14 automatically.
-      // Also clear PAUSED in case this is a re-enrolment.
-      await fetch('/api/brevo/contacts', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: contact.email, OUTREACH_STATUS: 'email_sent', PAUSED: 'false' }),
-      });
+      if (!res.ok) {
+        // Put the claim back, so the cron does not start following up on an
+        // email that never went out and the card returns to the queue.
+        await fetch('/api/brevo/contacts', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: contact.email, OUTREACH_STATUS: 'not_contacted' }),
+        }).catch(() => {});
+        throw new Error('Send failed');
+      }
       setSendStates(s => ({ ...s, [key]: 'done' }));
       // Refresh after a short beat so the card moves into the next column.
       setTimeout(() => { loadContacts(); }, 700);
@@ -519,7 +549,11 @@ function KanbanCard({ contact, sendState, pausePending, onEnrol, onTogglePause, 
       {columnKey === 'not_contacted' && (
         <button
           onClick={onEnrol}
-          disabled={sendState !== 'idle'}
+          // QUEUE-CLAIM-BEFORE-SEND-V1: 'error' renders a "Retry" label
+          // below, so it must stay clickable — `!== 'idle'` disabled the one
+          // state the label exists for. Retrying is safe now that the claim
+          // is rolled back on failure.
+          disabled={sendState === 'sending' || sendState === 'done'}
           style={{
             marginTop: 4,
             padding: '7px 10px',
