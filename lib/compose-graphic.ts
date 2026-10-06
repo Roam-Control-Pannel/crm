@@ -134,7 +134,13 @@ export function assertBrandFont(fontPath: string = FONT_PATH): void {
   if (fontChecked === fontPath) return;
   let buf: Buffer;
   try {
-    buf = fs.readFileSync(fontPath);
+    // NEXT16-TURBOPACK-TRACE-V1: the path is a parameter, so Turbopack's
+    // static analysis gives up and traces the ENTIRE project into this
+    // function's bundle — 391 files where Next 14 had 124, which is how a
+    // deploy starts failing on size limits. The files are declared
+    // explicitly in next.config.js (outputFileTracingIncludes), so the
+    // inference is not needed; this opts out of it.
+    buf = fs.readFileSync(/* turbopackIgnore: true */ fontPath);
   } catch {
     throw new Error(
       `Brand font missing at ${fontPath}. It is bundled via outputFileTracingIncludes ` +
@@ -389,7 +395,8 @@ export async function composeGraphic(
   if (opts.logo) {
     try {
       const mark = Math.round(width * 0.075);
-      const logo = await sharp(fs.readFileSync(logoPath))
+      // NEXT16-TURBOPACK-TRACE-V1 — see assertBrandFont above.
+      const logo = await sharp(fs.readFileSync(/* turbopackIgnore: true */ logoPath))
         .resize(mark, mark, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
         .png()
         .toBuffer();

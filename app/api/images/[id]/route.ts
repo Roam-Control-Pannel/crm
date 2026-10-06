@@ -6,8 +6,13 @@ export const dynamic = 'force-dynamic';
 
 const STORE_NAME = 'roam-uploads';
 
+/**
+ * NEXT16-ASYNC-PARAMS-V1: `params` is a Promise from Next 15 onward, so each
+ * handler awaits it once and uses the resolved object. Destructuring it in
+ * the signature as before now yields a Promise and every read is undefined.
+ */
 interface RouteParams {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }
 
 /**
@@ -36,14 +41,15 @@ interface RouteParams {
  *     cache and no session required to fetch it.
  */
 export async function GET(_req: NextRequest, { params }: RouteParams) {
+  const { id } = await params;
   // Guard 1: shape-check before the key ever reaches the blob client.
-  if (!isValidBlobId(params.id)) {
+  if (!isValidBlobId(id)) {
     return new NextResponse('Not found', { status: 404 });
   }
 
   try {
     const store = getStore(STORE_NAME);
-    const result = await store.getWithMetadata(params.id, { type: 'arrayBuffer' });
+    const result = await store.getWithMetadata(id, { type: 'arrayBuffer' });
 
     if (!result) {
       return new NextResponse('Not found', { status: 404 });
@@ -70,8 +76,8 @@ export async function GET(_req: NextRequest, { params }: RouteParams) {
       headers: {
         'Content-Type': contentType,
         'Content-Disposition': servable
-          ? `inline; filename="${params.id}"`
-          : `attachment; filename="${params.id}"`,
+          ? `inline; filename="${id}"`
+          : `attachment; filename="${id}"`,
         'Content-Security-Policy': csp,
         'Cache-Control': 'public, max-age=31536000, immutable',
       },

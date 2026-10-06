@@ -30,9 +30,10 @@ function resolveKey(rawKey: string) {
 
 export async function GET(
   _req: NextRequest,
-  { params }: { params: { key: string } }
+  { params }: { params: Promise<{ key: string }> }
 ) {
-  const key = resolveKey(params.key);
+  const { key: rawKey } = await params;
+  const key = resolveKey(rawKey);
   if (!key) {
     return NextResponse.json({ error: 'Unknown collection' }, { status: 400 });
   }
@@ -50,9 +51,10 @@ export async function GET(
 
 export async function POST(
   req: NextRequest,
-  { params }: { params: { key: string } }
+  { params }: { params: Promise<{ key: string }> }
 ) {
-  const key = resolveKey(params.key);
+  const { key: rawKey } = await params;
+  const key = resolveKey(rawKey);
   if (!key) {
     return NextResponse.json({ error: 'Unknown collection' }, { status: 400 });
   }
@@ -77,9 +79,10 @@ export async function POST(
 
 export async function DELETE(
   _req: NextRequest,
-  { params }: { params: { key: string } }
+  { params }: { params: Promise<{ key: string }> }
 ) {
-  const key = resolveKey(params.key);
+  const { key: rawKey } = await params;
+  const key = resolveKey(rawKey);
   if (!key) {
     return NextResponse.json({ error: 'Unknown collection' }, { status: 400 });
   }
