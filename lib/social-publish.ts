@@ -1,4 +1,5 @@
 import { getUserTokens, DEFAULT_USER_ID } from '@/lib/tokens';
+import { checkUrl, fetchGuarded } from '@/lib/url-guard';
 
 /**
  * Single-account publish logic for LinkedIn / Facebook / Instagram.
@@ -55,6 +56,36 @@ function budgetedSignal(deadline: number, cap = REQUEST_TIMEOUT_MS): AbortSignal
   const remaining = deadline - Date.now();
   if (remaining < MIN_USEFUL_MS) throw new PublishDeadlineExceeded();
   return AbortSignal.timeout(Math.min(cap, remaining));
+}
+
+/**
+ * URL-GUARD-V1: the hosts a post image may legitimately come from.
+ *
+ * Images reach a post from exactly two places — this app's own blob store,
+ * served through /api/images/[id] and /api/social/compose on our origin, and
+ * the Unsplash fallback. There is no third legitimate case, so this is an
+ * allowlist rather than a private-range block.
+ *
+ * It matters because the LinkedIn path below fetches the image SERVER-SIDE
+ * and PUTs the bytes to LinkedIn as the post image. Without this, a caller
+ * posting {"platform":"linkedin","imageUrl":"http://169.254.169.254/..."}
+ * makes this function read an address only the deploy can reach and publish
+ * whatever comes back. publish-due reaches the same code unattended from a
+ * stored imageUrl.
+ *
+ * Facebook and Instagram hand the URL to Meta's Graph API instead of
+ * fetching it here, so they are not an SSRF against our network — but an
+ * image from an unexpected host should not be published anywhere, so the
+ * check runs before the platform switch.
+ */
+function allowedImageHosts(): string[] {
+  const hosts = ['images.unsplash.com'];
+  for (const origin of [process.env.URL, process.env.DEPLOY_PRIME_URL, process.env.DEPLOY_URL]) {
+    if (!origin) continue;
+    try { hosts.push(new URL(origin).hostname.toLowerCase()); } catch { /* ignore */ }
+  }
+  if (process.env.NODE_ENV !== 'production') hosts.push('localhost', '127.0.0.1');
+  return hosts;
 }
 
 export interface PublishInput {
@@ -264,6 +295,18 @@ export async function publishToAccount(rawInput: PublishInput): Promise<PublishR
 
   const input = resolveRoutingFromAccountId(rawInput);
   const { accountId, platform, caption, imageUrl, metaPageId, linkedinAuthorUrn } = input;
+
+  // URL-GUARD-V1 — see allowedImageHosts() above.
+  if (imageUrl) {
+    const verdict = await checkUrl(imageUrl, {
+      mode: 'allowlist',
+      allowedHosts: allowedImageHosts(),
+    });
+    if (!verdict.ok) {
+      console.error('[social-publish] refused image URL:', imageUrl);
+      return fail(input, verdict.reason || 'That image host is not permitted.', 400);
+    }
+  }
   // PUBLISH-DEADLINE-V1: every network call below is bounded by this.
   const deadline = rawInput.deadline ?? Date.now() + MAX_POST_MS;
   const tokens = await getUserTokens(DEFAULT_USER_ID);
@@ -337,10 +380,26 @@ export async function publishToAccount(rawInput: PublishInput): Promise<PublishR
           return fail(input, 'LinkedIn did not return upload URL', 502, initData);
         }
 
-        const imgRes = await fetch(imageUrl, { signal: budgetedSignal(deadline) });
+        // URL-GUARD-V1: re-checked here and after every redirect hop, because
+        // an allowlisted host answering 302 to an internal address is the
+        // same attack with one extra step.
+        let imgRes: Response;
+        try {
+          imgRes = await fetchGuarded(imageUrl, {
+            mode: 'allowlist',
+            allowedHosts: allowedImageHosts(),
+            init: { signal: budgetedSignal(deadline) },
+          });
+        } catch (err: any) {
+          console.error('[social-publish] image fetch refused:', err?.message, imageUrl);
+          return fail(input, 'Could not fetch the source image.', 502);
+        }
         if (!imgRes.ok) {
+          // The upstream status is logged, never returned: echoing it turns a
+          // refused fetch into a working port and path scanner for the
+          // function's network.
           console.error('Source image fetch failed:', imgRes.status, imageUrl);
-          return fail(input, `Could not fetch source image (${imgRes.status})`, 502);
+          return fail(input, 'Could not fetch the source image.', 502);
         }
         const imgBuffer = await imgRes.arrayBuffer();
         const imgContentType = imgRes.headers.get('content-type') || 'image/jpeg';
