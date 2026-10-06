@@ -3,6 +3,7 @@ import {
   recordCronRun,
   sendsToday,
   claimDailyRun,
+  releaseDailyRun,
   type CronRunRecord,
 } from '@/lib/cron-status';
 import { fetchAllContacts } from '@/lib/brevo';
@@ -194,6 +195,9 @@ export async function GET(req: NextRequest) {
   // SEQ-CLAIM-BEFORE-SEND-V1: per-invocation, so a warm container cannot
   // carry a spent budget into the next run.
   const statusBudget = { retriesLeft: MAX_STATUS_RETRIES_PER_RUN };
+  // DAILY-CLAIM-RELEASE-V1: only the invocation that acquired the claim may
+  // close it out.
+  let holdsClaim = false;
 
   // GUARD-DAILY-RUN-V1
   // With a redundant backup trigger, the daily run could be invoked more than
@@ -207,6 +211,7 @@ export async function GET(req: NextRequest) {
     let claimed = false;
     try {
       claimed = await claimDailyRun(todayDate);
+      holdsClaim = claimed;
     } catch (err: any) {
       // If we can't determine whether the day is claimed, do NOT proceed —
       // running blind could double-send. Return a transient error so the next
@@ -360,10 +365,16 @@ export async function GET(req: NextRequest) {
       message,
     };
     await recordCronRun(record);
+    // DAILY-CLAIM-RELEASE-V1: the day is done, so no later trigger repeats it.
+    if (holdsClaim) await releaseDailyRun(todayDate, true);
 
     return NextResponse.json({ success: true, ...counts, capped, message, record });
   } catch (err: any) {
     console.error('Sequences error:', err);
+    // DAILY-CLAIM-RELEASE-V1: this run did not finish the day's follow-ups,
+    // so hand the claim back and let a backup trigger pick it up. Leaving it
+    // held is how a failed run turned into a silently skipped day.
+    if (holdsClaim) await releaseDailyRun(todayDate, false);
     const record: CronRunRecord = {
       ranAt: now.toISOString(),
       ok: false,

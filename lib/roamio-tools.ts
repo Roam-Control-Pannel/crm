@@ -11,7 +11,7 @@
  * and toggle, confirm for update/delete. Adjust REQUIRES_CONFIRM below.
  */
 
-import { getCollection, saveCollection, mutateCollection, DEFAULT_USER_ID } from './store';
+import { getCollection, mutateCollection, DEFAULT_USER_ID } from './store';
 
 // =================================================================
 // Types — kept local on purpose. Task shape mirrors app/tasks/page.tsx.
@@ -465,8 +465,18 @@ async function loadTasks(): Promise<RoamTask[]> {
   return Array.isArray(data) ? data : [];
 }
 
-async function saveTasks(tasks: RoamTask[]): Promise<void> {
-  await saveCollection(DEFAULT_USER_ID, 'tasks', tasks);
+/**
+ * BLOB-CAS-V1: every task tool reads the list, changes one row and saves the
+ * whole thing, so two tool calls in one assistant turn could drop each
+ * other's work. mutateTasks keeps the change keyed and conditional.
+ */
+async function mutateTasks(apply: (tasks: RoamTask[]) => RoamTask[]): Promise<RoamTask[]> {
+  return mutateCollection<RoamTask[]>(
+    DEFAULT_USER_ID,
+    'tasks',
+    current => apply(Array.isArray(current) ? current : []),
+    { what: 'the task list' }
+  );
 }
 
 function todayISO(): string {
@@ -509,7 +519,6 @@ function internalCallHeaders(extra?: Record<string, string>): Record<string, str
 export async function executeTool(name: string, input: any): Promise<any> {
   switch (name) {
     case 'create_task': {
-      const tasks = await loadTasks();
       const task: RoamTask = {
         id: Date.now().toString(),
         title: input.title,
@@ -522,7 +531,7 @@ export async function executeTool(name: string, input: any): Promise<any> {
         createdAt: new Date().toISOString(),
         aiSuggested: true,
       };
-      await saveTasks([task, ...tasks]);
+      await mutateTasks(current => [task, ...current]);
       return { ok: true, task };
     }
 
@@ -557,30 +566,37 @@ export async function executeTool(name: string, input: any): Promise<any> {
     }
 
     case 'complete_task': {
-      const tasks = await loadTasks();
-      const idx = tasks.findIndex(t => t.id === input.id);
-      if (idx === -1) return { ok: false, error: `No task with id ${input.id}` };
-      tasks[idx] = { ...tasks[idx], completed: true };
-      await saveTasks(tasks);
-      return { ok: true, task: tasks[idx] };
+      let updated: RoamTask | null = null;
+      await mutateTasks(current => {
+        const live = current.find(t => t.id === input.id);
+        if (!live) { updated = null; return current; }
+        updated = { ...live, completed: true };
+        return current.map(t => (t.id === input.id ? updated! : t));
+      });
+      if (!updated) return { ok: false, error: `No task with id ${input.id}` };
+      return { ok: true, task: updated };
     }
 
     case 'update_task': {
-      const tasks = await loadTasks();
-      const idx = tasks.findIndex(t => t.id === input.id);
-      if (idx === -1) return { ok: false, error: `No task with id ${input.id}` };
       const { id, ...patch } = input;
-      tasks[idx] = { ...tasks[idx], ...patch };
-      await saveTasks(tasks);
-      return { ok: true, task: tasks[idx] };
+      let updated: RoamTask | null = null;
+      await mutateTasks(current => {
+        const live = current.find(t => t.id === id);
+        if (!live) { updated = null; return current; }
+        updated = { ...live, ...patch };
+        return current.map(t => (t.id === id ? updated! : t));
+      });
+      if (!updated) return { ok: false, error: `No task with id ${id}` };
+      return { ok: true, task: updated };
     }
 
     case 'delete_task': {
-      const tasks = await loadTasks();
-      const before = tasks.length;
-      const next = tasks.filter(t => t.id !== input.id);
-      if (next.length === before) return { ok: false, error: `No task with id ${input.id}` };
-      await saveTasks(next);
+      let found = false;
+      await mutateTasks(current => {
+        found = current.some(t => t.id === input.id);
+        return found ? current.filter(t => t.id !== input.id) : current;
+      });
+      if (!found) return { ok: false, error: `No task with id ${input.id}` };
       return { ok: true, deletedId: input.id };
     }
 
@@ -1007,19 +1023,30 @@ export async function executeTool(name: string, input: any): Promise<any> {
       // scheduledAt in the past, and went out to the platform a second time
       // on the next tick.
       //
-      // Re-read and apply both mutations to the fresh array, keyed by id.
-      const fresh = (await getCollection<any[]>(DEFAULT_USER_ID, 'social_posts')) || [];
-      const freshIdx = fresh.findIndex((p: any) => p.id === input.id);
-      if (freshIdx === -1) {
-        return { ok: false, error: `Post ${input.id} no longer exists` };
-      }
-      const merged = fresh
-        // Drop the throwaway post /draft created — it really is in this array.
-        .filter((p: any) => p.id !== data.post.id)
-        // Apply only the caption change to whatever the post looks like now,
-        // so a status or schedule change made meanwhile is preserved.
-        .map((p: any) => (p.id === input.id ? { ...p, caption: updatedCaption } : p));
-      await saveCollection(DEFAULT_USER_ID, 'social_posts', merged);
+      // BLOB-CAS-V1: both mutations are applied inside the conditional write,
+      // against the document it actually lands on. The existence check goes
+      // in there too — checking before the write is the same race the write
+      // is guarding.
+      let stillExists = false;
+      await mutateCollection<any[]>(
+        DEFAULT_USER_ID,
+        'social_posts',
+        current => {
+          const posts = current || [];
+          stillExists = posts.some((p: any) => p.id === input.id);
+          if (!stillExists) return posts;
+          return (
+            posts
+              // Drop the throwaway post /draft created.
+              .filter((p: any) => p.id !== data.post.id)
+              // Apply only the caption change to whatever the post looks like
+              // now, so a status or schedule change made meanwhile is kept.
+              .map((p: any) => (p.id === input.id ? { ...p, caption: updatedCaption } : p))
+          );
+        },
+        { what: 'the social posts' }
+      );
+      if (!stillExists) return { ok: false, error: `Post ${input.id} no longer exists` };
       return { ok: true, id: input.id, captionPreview: updatedCaption.slice(0, 100) };
     }
 

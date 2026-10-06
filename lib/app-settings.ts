@@ -1,5 +1,6 @@
 import { getStore } from '@netlify/blobs';
 import { readStored } from './store-read';
+import { mutateBlob } from './blob-cas';
 import {
   DEFAULT_SEQUENCE_TEMPLATES,
   sanitizeStepTemplate,
@@ -111,7 +112,30 @@ export async function updateAppSettings(patch: AppSettingsPatch): Promise<AppSet
     }
   }
   try {
-    await store().setJSON(KEY, merged as any);
+    // BLOB-CAS-V1: this folds a patch onto the stored settings, so two saves
+    // overlapping used to end with only the later one applied — the sender
+    // details quietly reverting because a template was saved at the same
+    // moment. The fold now happens against the document the write lands on.
+    return await mutateBlob<AppSettings>(
+      store(),
+      KEY,
+      live => {
+        const base = live || current;
+        const next: AppSettings = {
+          sender: { ...base.sender, ...(patch.sender || {}) },
+          cadence: { ...base.cadence, ...(patch.cadence || {}) },
+          templates: mergeTemplates(base.templates, patch.templates),
+        };
+        for (const k of ['followUpDays', 'finalNudgeDays', 'coldDays', 'dailySendCap'] as const) {
+          const v = next.cadence[k];
+          if (!Number.isFinite(v) || v < 0 || !Number.isInteger(v)) {
+            next.cadence[k] = DEFAULT_APP_SETTINGS.cadence[k];
+          }
+        }
+        return next;
+      },
+      { what: 'the app settings' }
+    );
   } catch (err) {
     console.error('[app-settings] write failed:', err);
   }

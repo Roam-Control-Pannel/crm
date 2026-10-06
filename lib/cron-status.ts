@@ -1,5 +1,6 @@
 import { getStore } from '@netlify/blobs';
 import { readStored, isStoreReadError } from './store-read';
+import { mutateBlob } from './blob-cas';
 
 /**
  * System-level state for the daily outreach sequences cron.
@@ -102,34 +103,124 @@ export async function recordCronRun(record: CronRunRecord): Promise<void> {
     }
     throw err;
   }
-  const next: CronStatus = {
-    lastRun: record,
-    history: [record, ...current.history].slice(0, HISTORY_LIMIT),
-  };
-  await store.setJSON(KEY, next as any);
+  // BLOB-CAS-V1: two runs finishing close together (the Netlify cron and the
+  // GitHub backup) each read the history and wrote their own entry over it,
+  // so one of the two records vanished — from the very log used to tell
+  // whether a run happened.
+  try {
+    await mutateBlob<CronStatus>(
+      store,
+      KEY,
+      live => ({
+        lastRun: record,
+        history: [record, ...(live?.history || current.history)].slice(0, HISTORY_LIMIT),
+      }),
+      { what: 'the cron run history' }
+    );
+  } catch (err) {
+    // Same reasoning as the read above: this runs after the emails have gone
+    // out, and a throw here would replace the caller's real outcome.
+    console.error(
+      '[cron-status] could not record the run — outcome was:',
+      JSON.stringify(record),
+      err
+    );
+  }
 }
 
 /**
  * Claim the daily scheduled sequences run for `dateStr` (YYYY-MM-DD).
  *
- * Returns true if THIS caller acquired the claim, false if it was already
- * claimed for that date. This lets a redundant trigger (e.g. a GitHub Actions
- * backup) run the daily sequence ONLY when the primary Netlify cron didn't —
- * without risk of double-emailing contacts. Whoever claims the day first does
- * the work; later scheduled callers see the claim and skip.
+ * Returns true if THIS caller acquired the claim, false if someone else holds
+ * it. A redundant trigger (the GitHub Actions backup) then runs the day's
+ * sequences only when the primary Netlify cron did not, without risk of
+ * double-emailing.
  *
- * The store uses strong consistency, so the read sees a prior claim from any
- * non-simultaneous caller. The remaining read-then-write window is sub-second;
- * combined with scheduling the backup well after the primary's slot, two
- * scheduled runs claiming the same day is effectively impossible. Manual
- * "Run now" calls do not go through this path, so they are never blocked.
+ * DAILY-CLAIM-RELEASE-V1
+ *
+ * Two things were wrong with the previous version.
+ *
+ * First, it was read-then-write with nothing binding the two, so two
+ * simultaneous callers could both read "unclaimed" and both proceed. That is
+ * now a conditional write: exactly one caller can turn an unclaimed day into
+ * a claimed one.
+ *
+ * Second, and worse, there was no way out of a claim. The sequences loop walks
+ * 11k contacts with no wall-clock budget against a ~26s ceiling, so a run that
+ * is killed mid-way leaves the day claimed with most of its follow-ups unsent.
+ * Both backups then saw the claim, returned {success:true, skipped:true}, and
+ * the workflow gate passed them green: the day's email silently did not go
+ * out and nothing anywhere said so.
+ *
+ * So a claim now records whether it finished. An unfinished claim older than
+ * STALE_CLAIM_MS can be taken over — which is what a backup trigger is for —
+ * while a finished one is never re-run. The window is far longer than any run
+ * can survive (the platform kills it at ~26s) and far shorter than the gap to
+ * the first backup, so it cannot cause a double-send.
  */
+const STALE_CLAIM_MS = 10 * 60 * 1000;
+
+interface DailyClaim {
+  date: string;
+  claimedAt: string;
+  completedAt?: string;
+}
+
 export async function claimDailyRun(dateStr: string): Promise<boolean> {
   const store = statusStore();
-  const existing = (await store.get(CLAIM_KEY, { type: 'json' })) as { date?: string } | null;
-  if (existing?.date === dateStr) return false;
-  await store.setJSON(CLAIM_KEY, { date: dateStr, claimedAt: new Date().toISOString() });
-  return true;
+  let acquired = false;
+  await mutateBlob<DailyClaim>(
+    store,
+    CLAIM_KEY,
+    current => {
+      const held =
+        current?.date === dateStr &&
+        (!!current.completedAt ||
+          Date.now() - new Date(current.claimedAt).getTime() < STALE_CLAIM_MS);
+      if (held) {
+        acquired = false;
+        return current as DailyClaim;
+      }
+      if (current?.date === dateStr && !current.completedAt) {
+        console.warn(
+          `[cron-status] taking over a stale claim for ${dateStr} (claimed ${current.claimedAt}, never completed)`
+        );
+      }
+      acquired = true;
+      return { date: dateStr, claimedAt: new Date().toISOString() };
+    },
+    { what: 'the daily run claim' }
+  );
+  return acquired;
+}
+
+/**
+ * DAILY-CLAIM-RELEASE-V1: close out a claim this process acquired.
+ *
+ * `completed: true` marks the day done so no later trigger repeats it.
+ * `completed: false` releases it, so a backup trigger can pick the day up —
+ * used when the run threw and its follow-ups did not all go out.
+ *
+ * Never throws: it runs on the way out of a run whose emails have already
+ * been sent, and the caller's own outcome matters more than this bookkeeping.
+ */
+export async function releaseDailyRun(dateStr: string, completed: boolean): Promise<void> {
+  try {
+    await mutateBlob<DailyClaim>(
+      statusStore(),
+      CLAIM_KEY,
+      current => {
+        // Only touch our own day: a later day's claim is not ours to clear.
+        if (current?.date !== dateStr) return current as DailyClaim;
+        return completed
+          ? { ...current, completedAt: new Date().toISOString() }
+          : { date: dateStr, claimedAt: new Date(0).toISOString() };
+      },
+      { what: 'the daily run claim' }
+    );
+  } catch (err) {
+    console.error(`[cron-status] could not release the claim for ${dateStr}:`, err);
+  }
 }
 
 /**
@@ -185,9 +276,22 @@ export async function recordInboundRun(record: InboundRunRecord): Promise<void> 
     }
     throw err;
   }
-  const next: InboundStatus = {
-    lastRun: record,
-    history: [record, ...current.history].slice(0, HISTORY_LIMIT),
-  };
-  await store.setJSON(INBOUND_KEY, next as any);
+  // BLOB-CAS-V1: same lost-update shape as recordCronRun above.
+  try {
+    await mutateBlob<InboundStatus>(
+      store,
+      INBOUND_KEY,
+      live => ({
+        lastRun: record,
+        history: [record, ...(live?.history || current.history)].slice(0, HISTORY_LIMIT),
+      }),
+      { what: 'the inbound poll history' }
+    );
+  } catch (err) {
+    console.error(
+      '[cron-status] could not record the inbound run — run was:',
+      JSON.stringify(record),
+      err
+    );
+  }
 }

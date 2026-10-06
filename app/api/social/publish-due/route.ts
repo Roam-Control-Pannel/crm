@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getCollection, saveCollection, DEFAULT_USER_ID } from '@/lib/store';
+import { getCollection, mutateCollection, DEFAULT_USER_ID } from '@/lib/store';
 import { publishToAccount, PublishPlatform, parseAccountId, MAX_POST_MS } from '@/lib/social-publish';
 import { buildUnsplashCredit } from '@/lib/unsplash-credit';
 import { safeEqual } from '@/lib/safe-equal';
@@ -103,24 +103,32 @@ async function persistResults(
   results: SocialPostStored['results'],
   finalStatus?: SocialPostStored['status']
 ): Promise<SocialPostStored[]> {
-  const fresh = (await getCollection<SocialPostStored[]>(DEFAULT_USER_ID, 'social_posts')) || [];
-  const next = fresh.map(p =>
-    p.id === postId
-      ? {
-          ...p,
-          results,
-          ...(finalStatus
-            ? {
-                status: finalStatus,
-                publishingStartedAt: undefined,
-                publishedAt: new Date().toISOString(),
-              }
-            : {}),
-        }
-      : p
+  // BLOB-CAS-V1: the re-read above narrowed the window between reading and
+  // writing but could not close it — this write still replaced the whole
+  // document, so anything that landed in between was reverted. It is now a
+  // conditional write: if the document moved, the keyed change is re-applied
+  // to the newer value instead of overwriting it.
+  return mutateCollection<SocialPostStored[]>(
+    DEFAULT_USER_ID,
+    'social_posts',
+    current =>
+      (current || []).map(p =>
+        p.id === postId
+          ? {
+              ...p,
+              results,
+              ...(finalStatus
+                ? {
+                    status: finalStatus,
+                    publishingStartedAt: undefined,
+                    publishedAt: new Date().toISOString(),
+                  }
+                : {}),
+            }
+          : p
+      ),
+    { what: 'the social posts' }
   );
-  await saveCollection(DEFAULT_USER_ID, 'social_posts', next);
-  return next;
 }
 
 export async function GET(req: NextRequest) {
@@ -195,7 +203,8 @@ async function handle(req: NextRequest) {
   // arithmetic below wishful thinking.
   const startTime = Date.now();
 
-  let collection: SocialPostStored[] = posts.slice();
+  // The per-post writes below each return the collection they persisted;
+  // nothing downstream reads it, so they are awaited for ordering only.
 
   // PUBLISH-DUE-DETAILS-V1: summary type widened to carry imageUrl and
   // per-account details for diagnostics.
@@ -233,37 +242,55 @@ async function handle(req: NextRequest) {
     }
 
     // CLAIM-V1
-    // Re-read the freshest collection right before claiming this post. With the
-    // in-app client trigger plus the Netlify and GitHub cron paths, multiple
-    // invocations can run concurrently; without a claim they could each read the
-    // same 'scheduled' post from their initial snapshot and double-publish it.
-    // The blob store uses strong consistency, so re-reading here sees a competing
-    // run's 'publishing' write and lets us bail. Whoever writes 'publishing'
-    // first wins; the others skip. This shrinks the race to the sub-millisecond
-    // window between this read and the save below.
+    // With the in-app client trigger plus the Netlify and GitHub cron paths,
+    // multiple invocations can run concurrently; without a claim they could
+    // each read the same 'scheduled' post and double-publish it. Whoever
+    // writes 'publishing' first wins; the others skip.
     const startedAtIso = new Date().toISOString();
-    const fresh = (await getCollection<SocialPostStored[]>(DEFAULT_USER_ID, 'social_posts')) || [];
-    const live = fresh.find(p => p.id === post.id);
-    if (!live) continue;
-    const claimable =
-      live.status === 'scheduled' ||
-      (live.status === 'publishing' &&
-        !!live.publishingStartedAt &&
-        now - new Date(live.publishingStartedAt).getTime() > STALE_PUBLISHING_MS);
-    if (!claimable) {
-      // Another concurrent run already claimed or finished this post.
+
+    // BLOB-CAS-V1: claiming a post is the one write where losing the race
+    // means posting to LinkedIn, Facebook and Instagram twice, so the
+    // claimability test and the write that acts on it have to be the same
+    // atomic step. They were two steps with a sub-millisecond gap between
+    // them, which the old comment here called "shrinking the race" — it did,
+    // and shrinking is not closing. The conditional write means exactly one
+    // concurrent run
+    // can turn this post into 'publishing'; the loser re-reads, sees the
+    // claim, and skips.
+    let live: SocialPostStored | undefined;
+    let claimed = false;
+    try {
+      await mutateCollection<SocialPostStored[]>(
+        DEFAULT_USER_ID,
+        'social_posts',
+        current => {
+          const posts = current || [];
+          const row = posts.find(p => p.id === post.id);
+          live = row;
+          claimed = false;
+          if (!row) return posts;
+          const claimable =
+            row.status === 'scheduled' ||
+            (row.status === 'publishing' &&
+              !!row.publishingStartedAt &&
+              now - new Date(row.publishingStartedAt).getTime() > STALE_PUBLISHING_MS);
+          if (!claimable) return posts;
+          claimed = true;
+          return posts.map(p =>
+            p.id === post.id
+              ? { ...p, status: 'publishing' as const, publishingStartedAt: startedAtIso }
+              : p
+          );
+        },
+        { what: 'the social posts' }
+      );
+    } catch (err) {
+      // Could not claim — never publish on an unknown claim state.
+      console.error(`[publish-due] could not claim ${post.id}:`, err);
       continue;
     }
-
-    // Mark THIS post 'publishing' and persist before any network work, so a
-    // mid-run timeout leaves only this one post recoverable and never strands
-    // posts we haven't reached yet.
-    collection = fresh.map(p =>
-      p.id === post.id
-        ? { ...p, status: 'publishing' as const, publishingStartedAt: startedAtIso }
-        : p
-    );
-    await saveCollection(DEFAULT_USER_ID, 'social_posts', collection);
+    // Another concurrent run already claimed or finished this post.
+    if (!live || !claimed) continue;
 
     // PUBLISH-PARTIAL-PERSIST-V1
     // Seed from whatever a previous (killed) attempt already managed to
@@ -339,7 +366,7 @@ async function handle(req: NextRequest) {
       // PUBLISH-PARTIAL-PERSIST-V1: write the outcome of THIS account before
       // starting the next one. The post stays 'publishing' so the stale path
       // still recovers it, but the per-account record is now durable.
-      collection = await persistResults(post.id, results);
+      await persistResults(post.id, results);
     }
 
     const allResults = Object.values(results);
@@ -347,7 +374,7 @@ async function handle(req: NextRequest) {
     const anyPublished = allResults.some(r => r.status === 'published');
     const finalStatus: SocialPostStored['status'] = allPublished ? 'published' : anyPublished ? 'partial' : 'failed';
 
-    collection = await persistResults(post.id, results, finalStatus);
+    await persistResults(post.id, results, finalStatus);
 
     summary.push({
       id: post.id,

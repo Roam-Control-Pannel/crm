@@ -180,6 +180,58 @@ export const EMPTY_OVERRIDES: ThemeOverrides = {
   deletions: [],
 };
 
+/**
+ * THEME-OVERRIDE-MERGE-V1
+ *
+ * How a PUT to /api/social/settings treats the themeOverrides it carries.
+ *
+ * 'merge' is the default and what every editing action means: the client
+ * sends the one field it changed and the rest of the server's overrides are
+ * left alone. The settings route used to write `incomingOverrides` straight
+ * over the stored value instead, so toggling a single seed theme off — which
+ * sends additions:[] — deleted every custom theme the user had added, with no
+ * error. The call site's own comment said the opposite was happening.
+ *
+ * 'replace' exists because one action genuinely means it: "Reset themes to
+ * defaults" sends an all-empty override whose intent is to clear, and which
+ * is byte-identical to the no-op a merge would ignore. Intent that cannot be
+ * read off the payload has to be stated, so the client states it.
+ */
+export type ThemeOverridesMode = 'merge' | 'replace';
+
+/**
+ * Fold an incoming partial override onto the stored one.
+ *
+ * - `enabled` and `edits` merge by key, so an unrelated theme keeps its state.
+ * - `deletions` union, so a delete is not undone by the next unrelated save.
+ * - `additions` upsert by id, so re-saving an edited custom theme replaces it
+ *   rather than duplicating it, and a custom theme that has since been
+ *   deleted does not come back.
+ */
+export function mergeThemeOverrides(
+  existing: ThemeOverrides | undefined,
+  incoming: Partial<ThemeOverrides> | undefined
+): ThemeOverrides {
+  const base = existing || EMPTY_OVERRIDES;
+  if (!incoming) return base;
+
+  const deletions = Array.from(
+    new Set([...(base.deletions || []), ...(incoming.deletions || [])])
+  );
+  const deleted = new Set(deletions);
+
+  const byId = new Map<string, Theme>();
+  for (const t of base.additions || []) byId.set(t.id, t);
+  for (const t of incoming.additions || []) byId.set(t.id, t);
+
+  return {
+    enabled: { ...(base.enabled || {}), ...(incoming.enabled || {}) },
+    edits: { ...(base.edits || {}), ...(incoming.edits || {}) },
+    additions: Array.from(byId.values()).filter(t => !deleted.has(t.id)),
+    deletions,
+  };
+}
+
 // MULTI-BRIEF-V1: empty weight map = treat all briefs as equal.
 export const EMPTY_BRIEF_WEIGHTS: BriefWeights = {};
 

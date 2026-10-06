@@ -278,6 +278,9 @@ export default function SocialSettingsPage() {
   async function putPartial(body: {
     postingTimes?: PostingTimes;
     themeOverrides?: ThemeOverrides;
+    // THEME-OVERRIDE-MERGE-V1: omitted means 'merge', which is what every
+    // editing action wants. Only "Reset themes to defaults" sends 'replace'.
+    themeOverridesMode?: 'merge' | 'replace';
     captionModel?: string;
     semanticImageMatch?: boolean;
   }) {
@@ -382,8 +385,11 @@ export default function SocialSettingsPage() {
 
   // Send overrides directly — used by the edit modal (which knows whether
   // a theme is seed or user-added).
-  function putOverridesRaw(themeOverrides: ThemeOverrides) {
-    return putPartial({ themeOverrides });
+  function putOverridesRaw(
+    themeOverrides: ThemeOverrides,
+    mode: 'merge' | 'replace' = 'merge'
+  ) {
+    return putPartial({ themeOverrides, themeOverridesMode: mode });
   }
 
   function toggleThemeEnabled(theme: Theme) {
@@ -393,7 +399,9 @@ export default function SocialSettingsPage() {
     setThemes(nextThemes); // optimistic
     // Build a minimal override that just flips this one id's enabled flag.
     // Other overrides on the server (edits, additions, deletions) are
-    // preserved because we only send `enabled`.
+    // preserved because the route merges — THEME-OVERRIDE-MERGE-V1. It used
+    // to replace, so this comment described the opposite of what happened
+    // and every custom theme was deleted on each toggle.
     putOverridesRaw({
       enabled: { [theme.id]: !theme.enabled },
       edits: {},
@@ -925,8 +933,13 @@ export default function SocialSettingsPage() {
           onCancel={() => setConfirmResetThemes(false)}
           onConfirm={() => {
             setConfirmResetThemes(false);
-            // Empty overrides == defaults from seed.
-            putOverridesRaw({ enabled: {}, edits: {}, additions: [], deletions: [] });
+            // THEME-OVERRIDE-MERGE-V1: the only call that means "replace".
+            // An all-empty override is byte-identical to the no-op every
+            // other caller sends, so the intent has to be stated.
+            putOverridesRaw(
+              { enabled: {}, edits: {}, additions: [], deletions: [] },
+              'replace'
+            );
           }}
         />
       )}
