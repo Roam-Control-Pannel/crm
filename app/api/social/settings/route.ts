@@ -4,8 +4,6 @@ import {
 // CRON-AUTOGEN-V1: postingTimes can now contain an optional `lookaheadDays`
 // number alongside the three platform arrays. The validation below only
 // inspects the three platform keys, so lookaheadDays passes through unchanged.
-  readSettingsBlob,
-  writeSettingsBlob,
   mutateSettingsBlob,
   deleteSettingsBlob,
   getEffectiveSettings,
@@ -14,7 +12,6 @@ import {
   DEFAULT_POSTING_TIMES,
   EMPTY_OVERRIDES,
   mergeThemeOverrides,
-  type SocialSettingsBlob,
   type PostingTimes,
   type ThemeOverrides,
 } from '@/lib/social-settings-types';

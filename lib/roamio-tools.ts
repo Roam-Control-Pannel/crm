@@ -519,7 +519,6 @@ function internalCallHeaders(extra?: Record<string, string>): Record<string, str
 export async function executeTool(name: string, input: any): Promise<any> {
   switch (name) {
     case 'create_task': {
-      const tasks = await loadTasks();
       const task: RoamTask = {
         id: Date.now().toString(),
         title: input.title,
@@ -1024,30 +1023,30 @@ export async function executeTool(name: string, input: any): Promise<any> {
       // scheduledAt in the past, and went out to the platform a second time
       // on the next tick.
       //
-      // Re-read and apply both mutations to the fresh array, keyed by id.
-      const fresh = (await getCollection<any[]>(DEFAULT_USER_ID, 'social_posts')) || [];
-      const freshIdx = fresh.findIndex((p: any) => p.id === input.id);
-      if (freshIdx === -1) {
-        return { ok: false, error: `Post ${input.id} no longer exists` };
-      }
-      const merged = fresh
-        // Drop the throwaway post /draft created — it really is in this array.
-        .filter((p: any) => p.id !== data.post.id)
-        // Apply only the caption change to whatever the post looks like now,
-        // so a status or schedule change made meanwhile is preserved.
-        .map((p: any) => (p.id === input.id ? { ...p, caption: updatedCaption } : p));
+      // BLOB-CAS-V1: both mutations are applied inside the conditional write,
+      // against the document it actually lands on. The existence check goes
+      // in there too — checking before the write is the same race the write
+      // is guarding.
+      let stillExists = false;
       await mutateCollection<any[]>(
         DEFAULT_USER_ID,
         'social_posts',
-        current =>
-          (current || [])
-            // Drop the throwaway post /draft created.
-            .filter((p: any) => p.id !== data.post.id)
-            // Apply only the caption change to whatever the post looks like
-            // now, so a status or schedule change made meanwhile is kept.
-            .map((p: any) => (p.id === input.id ? { ...p, caption: updatedCaption } : p)),
+        current => {
+          const posts = current || [];
+          stillExists = posts.some((p: any) => p.id === input.id);
+          if (!stillExists) return posts;
+          return (
+            posts
+              // Drop the throwaway post /draft created.
+              .filter((p: any) => p.id !== data.post.id)
+              // Apply only the caption change to whatever the post looks like
+              // now, so a status or schedule change made meanwhile is kept.
+              .map((p: any) => (p.id === input.id ? { ...p, caption: updatedCaption } : p))
+          );
+        },
         { what: 'the social posts' }
       );
+      if (!stillExists) return { ok: false, error: `Post ${input.id} no longer exists` };
       return { ok: true, id: input.id, captionPreview: updatedCaption.slice(0, 100) };
     }
 

@@ -203,7 +203,8 @@ async function handle(req: NextRequest) {
   // arithmetic below wishful thinking.
   const startTime = Date.now();
 
-  let collection: SocialPostStored[] = posts.slice();
+  // The per-post writes below each return the collection they persisted;
+  // nothing downstream reads it, so they are awaited for ordering only.
 
   // PUBLISH-DUE-DETAILS-V1: summary type widened to carry imageUrl and
   // per-account details for diagnostics.
@@ -259,7 +260,7 @@ async function handle(req: NextRequest) {
     let live: SocialPostStored | undefined;
     let claimed = false;
     try {
-      collection = await mutateCollection<SocialPostStored[]>(
+      await mutateCollection<SocialPostStored[]>(
         DEFAULT_USER_ID,
         'social_posts',
         current => {
@@ -365,7 +366,7 @@ async function handle(req: NextRequest) {
       // PUBLISH-PARTIAL-PERSIST-V1: write the outcome of THIS account before
       // starting the next one. The post stays 'publishing' so the stale path
       // still recovers it, but the per-account record is now durable.
-      collection = await persistResults(post.id, results);
+      await persistResults(post.id, results);
     }
 
     const allResults = Object.values(results);
@@ -373,7 +374,7 @@ async function handle(req: NextRequest) {
     const anyPublished = allResults.some(r => r.status === 'published');
     const finalStatus: SocialPostStored['status'] = allPublished ? 'published' : anyPublished ? 'partial' : 'failed';
 
-    collection = await persistResults(post.id, results, finalStatus);
+    await persistResults(post.id, results, finalStatus);
 
     summary.push({
       id: post.id,
