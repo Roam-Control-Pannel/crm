@@ -29,14 +29,34 @@ const nextConfig = {
   },
   // GRAPHIC-COMPOSE-V1
   // lib/compose-graphic.ts reads the brand font and the lion mark from disk at
-  // render time, through paths built from process.cwd(). Next's tracer follows
-  // static imports, not runtime path joins, so without this the files are left
-  // out of the deployed function bundle. A missing logo is skipped with a
-  // warning; a missing font makes the route throw by design, because the
-  // alternative is Pango quietly substituting a face and shipping an off-brand
-  // graphic nobody notices.
-  outputFileTracingIncludes: {
-    '/api/social/compose': ['./assets/fonts/**', './public/logo-lionFav-icon.png'],
+  // render time, through paths built from process.cwd(). A missing logo is
+  // skipped with a warning; a missing font makes the route throw by design,
+  // because the alternative is Pango quietly substituting a face and shipping
+  // an off-brand graphic nobody notices.
+  //
+  // This key sat at the top level, where Next 14 does not recognise it — it
+  // moved there in Next 15 — so `next build` printed "Unrecognized key(s) in
+  // object: 'outputFileTracingIncludes'" and the whole declaration did
+  // nothing.
+  //
+  // It was doing nothing harmlessly, which is worth being exact about:
+  // deleting the key entirely and building from a clean .next still traces
+  // assets/fonts/InstrumentSerif-Regular.ttf and public/logo-lionFav-icon.png
+  // into the compose route's bundle, because FONT_PATH is
+  // path.join(process.cwd(), 'assets', 'fonts', '…') — all string literals,
+  // which @vercel/nft evaluates statically. So the font ships either way and
+  // the route was never broken in production.
+  //
+  // It is moved rather than deleted because relying on that inference is a
+  // thinner guarantee than declaring the dependency: a later refactor that
+  // builds the path from a variable would silently drop the font, and the
+  // first sign would be every graphic failing on a deploy that passed
+  // locally. Under `experimental` the declaration is read, and the build log
+  // is clean.
+  experimental: {
+    outputFileTracingIncludes: {
+      '/api/social/compose': ['./assets/fonts/**', './public/logo-lionFav-icon.png'],
+    },
   },
   async headers() {
     return [{ source: '/:path*', headers: securityHeaders }];

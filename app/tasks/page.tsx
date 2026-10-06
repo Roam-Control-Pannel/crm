@@ -38,8 +38,8 @@ async function fetchTasks():Promise<Task[]>{
   if(!res.ok)throw new Error(res.error||'Could not load tasks');
   return Array.isArray(res.data)?res.data:[];
 }
-async function persistTasks(tasks:Task[]):Promise<void>{
-  await saveRemote('tasks',tasks);
+async function persistTasks(tasks:Task[]):Promise<boolean>{
+  return saveRemote('tasks',tasks);
 }
 function fmtDate(s:string):string{
   const d=new Date(s);const now=new Date();
@@ -85,10 +85,29 @@ export default function TasksPage(){
     }
   })();},[]);
 
+  /**
+   * SAVE-TRUTH-V1: saveRemote returns false on a non-OK response without
+   * throwing, and persistTasks discarded that — so a failed write left the
+   * list on screen showing a task the server never accepted, which came
+   * back on the next load. Same shape as the calendar's savePosts.
+   */
+  function persist(next:Task[]){
+    persistTasks(next)
+      .then(ok=>{
+        if(ok)return;
+        addNotification({type:'email_failed',title:'Tasks not saved',body:'That change could not be saved. Reloading the server copy.'});
+        return fetchTasks().then(setTasks);
+      })
+      .catch(err=>{
+        console.error('[tasks] persist failed:',err);
+        addNotification({type:'email_failed',title:'Tasks not saved',body:'That change could not be saved and the server copy could not be re-read. Reload the page before editing further.'});
+      });
+  }
+
   function addTask(){
     if(!form.title.trim())return;
     const task:Task={id:Date.now().toString(),...form,completed:false,createdAt:new Date().toISOString()};
-    const updated=[task,...tasks];setTasks(updated);persistTasks(updated);
+    const updated=[task,...tasks];setTasks(updated);persist(updated);
     addNotification({type:'info',title:'Task created',body:form.title});
     setForm({title:'',description:'',priority:'medium',category:'outreach',assignee:'Andy',dueDate:new Date().toISOString().split('T')[0]});
     setShowAdd(false);
@@ -96,12 +115,12 @@ export default function TasksPage(){
 
   function toggle(id:string){
     const updated=tasks.map(t=>t.id===id?{...t,completed:!t.completed}:t);
-    setTasks(updated);persistTasks(updated);
+    setTasks(updated);persist(updated);
   }
 
   function remove(id:string){
     const updated=tasks.filter(t=>t.id!==id);
-    setTasks(updated);persistTasks(updated);
+    setTasks(updated);persist(updated);
   }
 
   const filtered=tasks.filter(t=>{

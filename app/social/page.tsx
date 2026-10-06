@@ -109,8 +109,8 @@ async function fetchPosts(): Promise<SocialPost[]> {
   return Array.isArray(res.data) ? res.data : [];
 }
 
-async function savePosts(posts: SocialPost[]): Promise<void> {
-  await saveRemote('social_posts', posts);
+async function savePosts(posts: SocialPost[]): Promise<boolean> {
+  return saveRemote('social_posts', posts);
 }
 
 
@@ -549,9 +549,46 @@ export default function SocialPage() {
     }
   }
 
+  /**
+   * SAVE-TRUTH-V1
+   *
+   * saveRemote returns false on a non-OK response without throwing, and
+   * savePosts discarded that, so every calendar mutation was optimistic with
+   * no second half. When the blob write 503'd the operator dragged a
+   * scheduled post from Tuesday to Friday, the calendar showed Friday, the
+   * server still held Tuesday, and it published on Tuesday. Bulk delete was
+   * worse: the selected posts vanished from the screen, stayed on the
+   * server, and still went out to all three platforms.
+   *
+   * A write that did not happen is not a save. On failure this says so and
+   * re-reads, so what is on screen is what the server actually holds —
+   * reverting to the previous local state would only be a second guess at
+   * it.
+   */
+  function persistPosts(next: SocialPost[]) {
+    savePosts(next)
+      .then(ok => {
+        if (ok) return;
+        addNotification({
+          type: 'email_failed',
+          title: 'Calendar not saved',
+          body: 'The change could not be saved. Reloading the server copy so you are not editing a version that does not exist.',
+        });
+        return fetchPosts().then(setPosts);
+      })
+      .catch(err => {
+        console.error('[social] persist failed:', err);
+        addNotification({
+          type: 'email_failed',
+          title: 'Calendar not saved',
+          body: 'The change could not be saved and the server copy could not be re-read. Reload the page before editing further.',
+        });
+      });
+  }
+
   function saveAndSet(next: SocialPost[]) {
     setPosts(next);
-    savePosts(next);
+    persistPosts(next);
   }
 
   // Functional variant — use when the next state depends on prior state and
@@ -559,7 +596,7 @@ export default function SocialPage() {
   function updatePosts(updater: (prev: SocialPost[]) => SocialPost[]) {
     setPosts(prev => {
       const next = updater(prev);
-      savePosts(next);
+      persistPosts(next);
       return next;
     });
   }
@@ -2208,7 +2245,7 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"..."},{"caption":"...
                   const ids = selectedIds;
                   setPosts(prev => {
                     const next = prev.filter(p => !ids.has(p.id));
-                    savePosts(next);
+                    persistPosts(next);  // SAVE-TRUTH-V1
                     return next;
                   });
                   setSelectedIds(new Set());
