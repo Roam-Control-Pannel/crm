@@ -15,13 +15,23 @@
 // runs through. Keeping the reader here, in one dep-free place, is what stops
 // the next caller hand-rolling it again.
 
-/** Every text block in the response, joined. Non-text blocks are skipped. */
+/**
+ * Every text block in the response, concatenated. Non-text blocks are
+ * skipped.
+ *
+ * Concatenated, not joined with a separator: splitting a response across
+ * blocks is a transport detail, and the text continues from one into the
+ * next. Joining with a newline invents whitespace the model did not write —
+ * which in a caption is a visible blank line in a published post. A caption
+ * ending one block with "…at low tide." and continuing the next with
+ * "\n\n#RoamLocal" should come back with two newlines, not three.
+ */
 export function extractText(blocks: unknown): string {
   if (!Array.isArray(blocks)) return '';
   return blocks
     .filter((b: any) => b?.type === 'text' && typeof b.text === 'string')
     .map((b: any) => b.text)
-    .join('\n')
+    .join('')
     .trim();
 }
 

@@ -65,6 +65,12 @@ export interface FillJob {
   slots: FillJobSlot[];
   counts: { requested: number; created: number; failed: number; skipped: number };
   error?: string;
+  /**
+   * CAPTION-ERRORS-V1: why the failed slots failed, so a background fill that
+   * produced nothing can say so. The synchronous fill reports this already;
+   * the batch path counted failures and dropped every reason.
+   */
+  captionErrors?: string[];
 }
 
 export function isActive(job: FillJob): boolean {
@@ -186,7 +192,18 @@ export interface IngestOutcome {
   failed: number;
   /** Slots whose calendar position was taken while the batch ran. */
   skipped: number;
+  /**
+   * CAPTION-ERRORS-V1: distinct reasons the failed slots failed, in
+   * first-seen order and capped. `failed` on its own is a number nobody can
+   * act on — the synchronous fill learned that the hard way, reporting an
+   * exhausted API balance as "generation stalled" for days.
+   */
+  errors: string[];
 }
+
+/** Distinct reasons, first-seen order, capped. Forty identical rate-limit
+ *  messages say no more than one. */
+const MAX_INGEST_ERRORS = 3;
 
 /**
  * Build the posts for a finished batch.
@@ -201,7 +218,7 @@ export interface IngestOutcome {
  */
 export function postsFromResults(
   job: FillJob,
-  results: Array<{ customId: string; type: string; text?: string }>,
+  results: Array<{ customId: string; type: string; text?: string; error?: string }>,
   existing: Array<{ accountIds?: string[]; scheduledAt?: string }>,
   now: Date = new Date()
 ): IngestOutcome {
@@ -211,16 +228,29 @@ export function postsFromResults(
   );
 
   const posts: IngestPost[] = [];
+  const errors: string[] = [];
   let created = 0, failed = 0, skipped = 0;
   let seq = 0;
+
+  const note = (reason: string) => {
+    if (errors.length < MAX_INGEST_ERRORS && !errors.includes(reason)) errors.push(reason);
+  };
 
   for (const result of results) {
     const slot = bySlot.get(result.customId);
     // A result for a slot this job never planned cannot be placed anywhere.
-    if (!slot) { failed += 1; continue; }
+    if (!slot) {
+      failed += 1;
+      note(`a result arrived for slot ${result.customId}, which this job never planned`);
+      continue;
+    }
 
     const caption = (result.type === 'succeeded' ? result.text || '' : '').trim();
-    if (!caption) { failed += 1; continue; }
+    if (!caption) {
+      failed += 1;
+      note(result.error || `the batch returned ${result.type} with no caption`);
+      continue;
+    }
 
     const key = slot.accountId + '|' + slot.scheduledAt;
     if (taken.has(key)) { skipped += 1; continue; }
@@ -247,7 +277,7 @@ export function postsFromResults(
     created += 1;
   }
 
-  return { posts, created, failed, skipped };
+  return { posts, created, failed, skipped, errors };
 }
 
 /** Final status for a job whose results have been applied. */

@@ -19,6 +19,8 @@
  * me a post now", which is why the synchronous path stays.
  */
 
+import { extractText, describeEmptyResponse } from './anthropic-content';
+
 /** Anthropic's own ceiling: 100,000 requests or 256 MB, whichever is first. */
 export const MAX_BATCH_REQUESTS = 100_000;
 
@@ -58,7 +60,11 @@ export interface BatchResult {
   type: BatchResultType;
   /** Response text, present only when type is 'succeeded'. */
   text?: string;
-  /** Error type, present on 'errored'. */
+  /**
+   * Why this row produced no caption. Present on 'errored', and also on a
+   * 'succeeded' row whose response carried no readable text — those are
+   * failed slots too, and the reason reaches the Fill alert and the bell.
+   */
   error?: string;
 }
 
@@ -144,12 +150,31 @@ export function parseResultsJsonl(body: string): BatchResult[] {
       continue;
     }
     if (type === 'succeeded') {
-      // Content is a block array; the caption is the first text block. A
-      // response with no text block is a success with nothing in it, which
-      // the caller must treat as a failed slot rather than an empty caption.
-      const blocks: any[] = row?.result?.message?.content || [];
-      const text = blocks.find(b => b?.type === 'text')?.text;
-      out.push({ customId, type: 'succeeded', text: typeof text === 'string' ? text : undefined });
+      // ANTHROPIC-CONTENT-V1
+      //
+      // This was the third copy of the Messages API text reader, and the one
+      // nobody fixed. The in-code comment above it asserted the premise
+      // outright — "the caption is the first text block" — and took exactly
+      // that, so a caption split across two blocks lost everything after the
+      // first. postsFromResults then saw a non-empty string, counted it in
+      // `created`, and wrote the truncated half to the calendar as a draft
+      // with no error anywhere. At MAX_SLOTS_PER_JOB that is up to 120
+      // captions per job, silently cut short.
+      //
+      // It is also the only caption path that runs on a SCHEDULE, so it is
+      // the one where nobody is watching when it goes wrong. PR #140 moved
+      // the reader into lib/anthropic-content.ts and wired /api/ai/chat to
+      // it; this finishes that.
+      const message = row?.result?.message;
+      const text = extractText(message?.content);
+      out.push({
+        customId,
+        type: 'succeeded',
+        text: text || undefined,
+        // A success with nothing readable in it is still a failed slot, and
+        // the caller has to say why rather than leaving a blank draft.
+        error: text ? undefined : describeEmptyResponse(message),
+      });
     } else {
       out.push({
         customId,

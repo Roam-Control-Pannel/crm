@@ -127,6 +127,10 @@ export async function POST(req: NextRequest) {
         failed: outcome.failed,
         skipped: outcome.skipped,
       };
+      // CAPTION-ERRORS-V1: a background fill that produced nothing has to say
+      // why. Without this the jobs list showed "0 created, 42 failed" and the
+      // reason only existed in the function log.
+      if (outcome.errors.length > 0) job.captionErrors = outcome.errors;
       job.status = statusFromOutcome(outcome, job.slots.length);
       job.updatedAt = new Date().toISOString();
       ingested += 1;
