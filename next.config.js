@@ -20,13 +20,10 @@ const securityHeaders = [
 
 const nextConfig = {
   reactStrictMode: true,
-  // LINT-V1: `next lint` defaults to app/pages/components/lib/src, which
-  // leaves the scheduled functions in netlify/ unchecked — the very code that
-  // had no fetch timeouts. Listing the dirs explicitly brings them in, for
-  // both `npm run lint` and the build-time lint pass.
-  eslint: {
-    dirs: ['app', 'components', 'lib', 'netlify', 'types'],
-  },
+  // LINT-V1 note: `next lint` was removed in Next 16, so the dirs this used
+  // to list are covered by eslint.config.mjs and the `lint` script instead.
+  // netlify/ in particular must stay in scope — the scheduled functions are
+  // the code that had no fetch timeouts.
   // GRAPHIC-COMPOSE-V1
   // lib/compose-graphic.ts reads the brand font and the lion mark from disk at
   // render time, through paths built from process.cwd(). A missing logo is
@@ -47,16 +44,17 @@ const nextConfig = {
   // which @vercel/nft evaluates statically. So the font ships either way and
   // the route was never broken in production.
   //
-  // It is moved rather than deleted because relying on that inference is a
-  // thinner guarantee than declaring the dependency: a later refactor that
-  // builds the path from a variable would silently drop the font, and the
-  // first sign would be every graphic failing on a deploy that passed
-  // locally. Under `experimental` the declaration is read, and the build log
-  // is clean.
-  experimental: {
-    outputFileTracingIncludes: {
-      '/api/social/compose': ['./assets/fonts/**', './public/logo-lionFav-icon.png'],
-    },
+  // Declared rather than left to inference, because relying on that is a
+  // thinner guarantee: a later refactor that builds the path from a variable
+  // would silently drop the font, and the first sign would be every graphic
+  // failing on a deploy that passed locally.
+  //
+  // The key has now moved twice. It belonged under `experimental` on Next
+  // 14, moved to the top level in 15, and stays there in 16 — so this is
+  // back where the October review originally said to put it, which was right
+  // for 15 and wrong for the 14 we were on at the time.
+  outputFileTracingIncludes: {
+    '/api/social/compose': ['./assets/fonts/**', './public/logo-lionFav-icon.png'],
   },
   async headers() {
     return [{ source: '/:path*', headers: securityHeaders }];

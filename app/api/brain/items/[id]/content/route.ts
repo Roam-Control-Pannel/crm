@@ -11,7 +11,12 @@ export const runtime = 'nodejs';
 
 const BLOB_STORE = 'roam-uploads';
 
-interface RouteParams { params: { id: string } }
+/**
+ * NEXT16-ASYNC-PARAMS-V1: `params` is a Promise from Next 15 onward, so each
+ * handler awaits it once and uses the resolved object. Destructuring it in
+ * the signature as before now yields a Promise and every read is undefined.
+ */
+interface RouteParams { params: Promise<{ id: string }> }
 
 /**
  * Return the full text content of a single Brain item.
@@ -22,9 +27,10 @@ interface RouteParams { params: { id: string } }
  * fetch it directly via /api/images/[blobId].
  */
 export async function GET(_req: NextRequest, { params }: RouteParams) {
+  const { id } = await params;
   try {
     const items = await getItems();
-    const item = items.find(i => i.id === params.id);
+    const item = items.find(i => i.id === id);
     if (!item) {
       return NextResponse.json({ ok: false, error: 'Item not found' }, { status: 404 });
     }

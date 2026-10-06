@@ -4,7 +4,9 @@
   functions = "netlify/functions"
 
 [build.environment]
-  NODE_VERSION = "20"
+  # Node 20 reached end of life in April 2026 and Next 16 requires >=20.9.
+  # Pinned to 22 so the deploy runs the same major the build and CI do.
+  NODE_VERSION = "22"
   # Run the whole CRM on UK time. "Europe/London" tracks GMT in winter and BST
   # in summer automatically, so server-side Date logic (SSR, posting-slot
   # interpretation in lib/social-cron.ts) matches the UK-based team's clock.

@@ -315,7 +315,9 @@ export default function SocialPage() {
   // Load the latest fill job once, then poll only while one is in flight.
   // A finished job needs no polling, and an idle page should not be hitting
   // the server every minute for a blob that is not changing.
-  useEffect(() => { refreshFillJob(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  useEffect(() => {
+    refreshFillJob();
+  }, []);
   useEffect(() => {
     if (!fillJob || fillJob.status !== 'submitted') return;
     const tick = setInterval(async () => {
@@ -326,6 +328,12 @@ export default function SocialPage() {
       if (fresh.ok && Array.isArray(fresh.data)) setPosts(fresh.data);
     }, 30_000);
     return () => clearInterval(tick);
+    // Deliberately keyed on the id and status rather than the whole job:
+    // those are the only fields this effect reads, and depending on the
+    // object would tear down and rebuild the 30s interval every time a poll
+    // returned a new (equal) job. The directive has to sit on the line
+    // before the dependency array, which is where the rule reports —
+    // inline in the body it suppresses nothing, and ESLint 9 now says so.
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
   }, [fillJob?.id, fillJob?.status]);
 
@@ -1543,7 +1551,7 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"..."},{"caption":"...
   // for the cron" — they don't need to distinguish "queued" from "actively
   // hitting LinkedIn's API right now".
   function PostStatusBadge({ status }: { status: SocialPost['status'] }) {
-    const map: Record<SocialPost['status'], { label: string; bg: string; fg: string; icon: JSX.Element }> = {
+    const map: Record<SocialPost['status'], { label: string; bg: string; fg: string; icon: React.JSX.Element }> = {
       draft:      { label: 'Draft',      bg: 'var(--paper)',    fg: 'var(--ink-500)', icon: <Edit3 size={10} /> },
       scheduled:  { label: 'Scheduled',  bg: '#fcecd3',         fg: 'var(--warn)',  icon: <Clock size={10} /> },
       publishing: { label: 'Publishing', bg: '#fcecd3',         fg: 'var(--warn)',  icon: <RefreshCw size={10} /> },

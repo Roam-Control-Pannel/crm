@@ -7,20 +7,26 @@ import { readErrorResponse } from '@/lib/store-read';
 
 export const dynamic = 'force-dynamic';
 
-interface RouteParams { params: { id: string } }
+/**
+ * NEXT16-ASYNC-PARAMS-V1: `params` is a Promise from Next 15 onward, so each
+ * handler awaits it once and uses the resolved object. Destructuring it in
+ * the signature as before now yields a Promise and every read is undefined.
+ */
+interface RouteParams { params: Promise<{ id: string }> }
 
 export async function PATCH(req: NextRequest, { params }: RouteParams) {
+  const { id } = await params;
   try {
     const { name, parentId } = await req.json();
     const folders = await getFolders();
-    const idx = folders.findIndex(f => f.id === params.id);
+    const idx = folders.findIndex(f => f.id === id);
     if (idx === -1) return NextResponse.json({ ok: false, error: 'Folder not found' }, { status: 404 });
 
     // Prevent making a folder its own ancestor
     if (parentId !== undefined) {
       let cursor: string | null = parentId;
       while (cursor) {
-        if (cursor === params.id) {
+        if (cursor === id) {
           return NextResponse.json({ ok: false, error: 'Cannot move folder into its own descendant' }, { status: 400 });
         }
         cursor = folders.find(f => f.id === cursor)?.parentId || null;
@@ -38,6 +44,7 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
 }
 
 export async function DELETE(_req: NextRequest, { params }: RouteParams) {
+  const { id } = await params;
   try {
     const folders = await getFolders();
     // Find all descendants (recursive)
@@ -46,7 +53,7 @@ export async function DELETE(_req: NextRequest, { params }: RouteParams) {
       toDelete.add(id);
       folders.filter(f => f.parentId === id).forEach(c => collect(c.id));
     }
-    collect(params.id);
+    collect(id);
 
     // Remove folders + their items
     const remaining = folders.filter(f => !toDelete.has(f.id));

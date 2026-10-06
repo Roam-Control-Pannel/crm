@@ -110,7 +110,7 @@ function isPublicImageRead(pathname: string): boolean {
 }
 
 export default withAuth(
-  function middleware(req) {
+  function middleware(_req) {
     return NextResponse.next();
   },
   {
