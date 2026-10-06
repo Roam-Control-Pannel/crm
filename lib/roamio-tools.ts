@@ -652,6 +652,10 @@ export async function executeTool(name: string, input: any): Promise<any> {
           mime: i.mime,
           folder: i.folder,
           uploadedAt: i.uploadedAt,
+          // TOOL-TRUST-V1: provenance, not decoration. sourceUrl is set only
+          // on items added by scraping a URL, and it is how the chat route
+          // knows this result carries text from outside the app.
+          ...(i.sourceUrl ? { sourceUrl: i.sourceUrl } : {}),
         })),
       };
     }
@@ -672,6 +676,8 @@ export async function executeTool(name: string, input: any): Promise<any> {
           description: data.item?.description,
           tags: data.item?.tags,
           mime: data.item?.mime,
+          // TOOL-TRUST-V1 — see search_brain above.
+          ...(data.item?.sourceUrl ? { sourceUrl: data.item.sourceUrl } : {}),
           message: 'This item is a binary file (PDF or image). Tell the user to open it from the Brain page — you cannot read its contents directly.',
         };
       }
@@ -683,6 +689,9 @@ export async function executeTool(name: string, input: any): Promise<any> {
         ok: true,
         description: data.item?.description,
         tags: data.item?.tags,
+        // TOOL-TRUST-V1: a Brain document that came from a scrape is web
+        // page text, however long ago it was saved.
+        ...(data.item?.sourceUrl ? { sourceUrl: data.item.sourceUrl } : {}),
         truncated: content.length > MAX,
         content: content.length > MAX ? content.slice(0, MAX) + '\n\n…[truncated]' : content,
       };
