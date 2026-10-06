@@ -3,7 +3,7 @@ import { getStore } from '@netlify/blobs';
 import { generateCaption, pickBrainImage, pickUnsplashImage } from '@/lib/social-cron';
 import { getEffectiveSettings } from '@/lib/social-settings';
 import { DEFAULT_BRIEFS, type Brief } from '@/lib/briefs';
-import { getCollection, saveCollection, DEFAULT_USER_ID } from '@/lib/store';
+import { getCollection, mutateCollection, DEFAULT_USER_ID } from '@/lib/store';
 import { buildImageUsage, DEFAULT_IMAGE_COOLDOWN_DAYS } from '@/lib/image-usage';
 import { buildCaptionHistory } from '@/lib/caption-history';
 import { fetchSemanticRank } from '@/lib/image-shortlist';
@@ -56,8 +56,16 @@ export async function POST(req: NextRequest) {
     if (briefs.length === 0) {
       // First run on a fresh account — seed defaults and persist, same
       // behaviour the client-side fetchBriefs() implements.
+      // BLOB-CAS-V1 with create-only semantics underneath: if another
+      // request seeded the defaults first, take theirs rather than writing a
+      // second copy over it.
       briefs = DEFAULT_BRIEFS;
-      await saveCollection(DEFAULT_USER_ID, 'briefs', briefs);
+      briefs = await mutateCollection<Brief[]>(
+        DEFAULT_USER_ID,
+        'briefs',
+        current => (current && current.length > 0 ? current : DEFAULT_BRIEFS),
+        { what: 'the briefs' }
+      );
     }
     const brief = briefs.find(b => b.id === briefId);
     if (!brief) {
@@ -271,8 +279,15 @@ export async function POST(req: NextRequest) {
       createdAt: new Date().toISOString(),
     };
 
-    const existing = (await getCollection<any[]>(DEFAULT_USER_ID, 'social_posts')) || [];
-    await saveCollection(DEFAULT_USER_ID, 'social_posts', [post, ...existing]);
+    // BLOB-CAS-V1: prepending to a snapshot read moments earlier reverted
+    // anything written in between — and this route is called BY the fill and
+    // by regenerate_caption, both of which write posts of their own.
+    await mutateCollection<any[]>(
+      DEFAULT_USER_ID,
+      'social_posts',
+      current => [post, ...(current || [])],
+      { what: 'the social posts' }
+    );
 
     return NextResponse.json({ ok: true, post });
   } catch (err: any) {

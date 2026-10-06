@@ -29,7 +29,7 @@ import type { Theme } from '@/lib/social-themes';
 import type { PostingTimeSlot } from '@/lib/social-settings-types';
 import type { AutoGenerateRunResult, AutoGenerateAccountResult } from '@/lib/social-cron-types';
 import { getEffectiveSettings } from '@/lib/social-settings';
-import { getCollection, saveCollection, DEFAULT_USER_ID } from '@/lib/store';
+import { getCollection, mutateCollection, DEFAULT_USER_ID } from '@/lib/store';
 import { getItems as getBrainItems, getFolders as getBrainFolders } from '@/lib/brain-store';
 import {
   DEFAULT_LOOKAHEAD_DAYS,
@@ -1377,9 +1377,21 @@ export async function runAutoGenerate(input: RunInput): Promise<AutoGenerateRunR
         console.error('[social-cron] pre-save re-read failed, skipping persist:', err);
         throw new Error('Could not re-read social_posts before saving; aborted to avoid overwriting newer data');
       }
-      const existingIds = new Set(base.map((p: SocialPostDraft) => p.id));
-      const all = [...base, ...newPosts.filter(p => !existingIds.has(p.id))];
-      await saveCollection(DEFAULT_USER_ID, 'social_posts', all);
+      // BLOB-CAS-V1: the re-read above was the right instinct but the write
+      // after it was still a full replace, so anything landing in the gap was
+      // reverted. The merge now happens inside a conditional write, against
+      // whatever is stored at the moment it lands. `base` remains the
+      // fallback for the first attempt only — see the fail-closed guard above.
+      await mutateCollection<SocialPostDraft[]>(
+        DEFAULT_USER_ID,
+        'social_posts',
+        current => {
+          const live = Array.isArray(current) ? current : base;
+          const existingIds = new Set(live.map((p: SocialPostDraft) => p.id));
+          return [...live, ...newPosts.filter(p => !existingIds.has(p.id))];
+        },
+        { what: 'the social posts' }
+      );
     }
 
     if (captionErrors.length > 0) result.captionErrors = captionErrors;

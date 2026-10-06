@@ -15,6 +15,7 @@
 
 import { getStore } from '@netlify/blobs';
 import { readStored } from '@/lib/store-read';
+import { mutateBlob } from '@/lib/blob-cas';
 
 const STORE_NAME = 'roam-system';
 const KEY = 'social-fill-jobs';
@@ -86,28 +87,74 @@ export async function readJobs(): Promise<FillJob[]> {
   return Array.isArray(data) ? data : [];
 }
 
-export async function writeJobs(jobs: FillJob[]): Promise<void> {
-  // Newest first, capped. Active jobs are never dropped by the cap: losing
-  // one would leave its batch running with nothing to collect the results.
+/** Newest first, capped. Active jobs are never dropped by the cap: losing
+ *  one would leave its batch running with nothing to collect the results. */
+function orderAndCap(jobs: FillJob[]): FillJob[] {
   const sorted = [...jobs].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
   const active = sorted.filter(isActive);
   const finished = sorted.filter(j => !isActive(j)).slice(0, MAX_RETAINED_JOBS);
-  await store().setJSON(KEY, [...active, ...finished] as any);
+  return [...active, ...finished];
 }
 
-/** Read, apply, write. The whole store is one small blob, so this is enough. */
+/**
+ * BLOB-CAS-V1
+ *
+ * Replace the job list with `jobs`, keeping any job that was created while
+ * the caller was working.
+ *
+ * The poll reads this list, spends up to twenty seconds ingesting batch
+ * results, then writes what it read back. A job submitted in that window —
+ * the operator clicking "Fill in background" — was in the document the poll
+ * never saw, so the write erased it. Its Anthropic batch then ran to
+ * completion, billed for up to 120 captions, and was never collected: the
+ * calendar stayed empty and the jobs list showed no trace of it.
+ *
+ * Merging by id rather than replacing wholesale means a job the caller did
+ * not know about survives. The caller still owns the jobs it passes: for
+ * those, its version wins, because it is the one that just advanced them.
+ */
+export async function writeJobs(jobs: FillJob[]): Promise<void> {
+  const mine = new Map(jobs.map(j => [j.id, j]));
+  await mutateBlob<FillJob[]>(
+    store(),
+    KEY,
+    current => {
+      const merged = [...jobs];
+      for (const existing of current || []) {
+        if (!mine.has(existing.id)) merged.push(existing);
+      }
+      return orderAndCap(merged);
+    },
+    { what: 'the social fill jobs' }
+  );
+}
+
+/**
+ * BLOB-CAS-V1: apply a change to one job, leaving every other row as it is
+ * at the moment of the write rather than as it was at the moment of the read.
+ */
 export async function updateJob(
   id: string,
   apply: (job: FillJob) => FillJob
 ): Promise<FillJob | null> {
-  const jobs = await readJobs();
-  const idx = jobs.findIndex(j => j.id === id);
-  if (idx === -1) return null;
-  const next = apply(jobs[idx]);
-  next.updatedAt = new Date().toISOString();
-  jobs[idx] = next;
-  await writeJobs(jobs);
-  return next;
+  let updated: FillJob | null = null;
+  await mutateBlob<FillJob[]>(
+    store(),
+    KEY,
+    current => {
+      const jobs = current || [];
+      const live = jobs.find(j => j.id === id);
+      if (!live) {
+        updated = null;
+        return orderAndCap(jobs);
+      }
+      const next = { ...apply(live), updatedAt: new Date().toISOString() };
+      updated = next;
+      return orderAndCap(jobs.map(j => (j.id === id ? next : j)));
+    },
+    { what: 'the social fill jobs' }
+  );
+  return updated;
 }
 
 // ---------------------------------------------------------------------------

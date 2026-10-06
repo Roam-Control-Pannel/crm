@@ -1,5 +1,6 @@
 import { getStore } from '@netlify/blobs';
 import { readStored } from './store-read';
+import { mutateBlob } from './blob-cas';
 
 /**
  * Persistent reply storage.
@@ -81,13 +82,27 @@ export async function storeReply(
   // A read failure throws out of listRepliesForContact — deliberately not
   // caught. Appending to an invented empty list would drop this contact's
   // entire reply history on the write below.
-  const existing = await listRepliesForContact(fullReply.fromEmail);
-  // Idempotency: skip if we've already seen this UID for this contact.
-  if (existing.some((r) => r.uid === fullReply.uid)) {
-    return { stored: false, reason: 'duplicate' };
-  }
-  const next = [fullReply, ...existing].slice(0, PER_CONTACT_LIMIT);
-  await store().setJSON(keyFor(fullReply.fromEmail), next as any);
+  // BLOB-CAS-V1: the idempotency check moves inside the write. Reading the
+  // list, finding no matching uid and then writing is the race it was meant
+  // to prevent one level up — two polls processing the same mailbox could
+  // each decide a reply was new. It is now decided against the document the
+  // write actually lands on.
+  let duplicate = false;
+  await mutateBlob<StoredReply[]>(
+    store(),
+    keyFor(fullReply.fromEmail),
+    current => {
+      const existing = Array.isArray(current) ? current : [];
+      if (existing.some((r) => r.uid === fullReply.uid)) {
+        duplicate = true;
+        return existing;
+      }
+      duplicate = false;
+      return [fullReply, ...existing].slice(0, PER_CONTACT_LIMIT);
+    },
+    { what: `the replies for ${fullReply.fromEmail}` }
+  );
+  if (duplicate) return { stored: false, reason: 'duplicate' };
 
   // Update the global recent index so the dashboard can find the latest
   // replies without scanning every contact.
@@ -146,12 +161,20 @@ export async function recentReplies(limit = 20): Promise<StoredReply[]> {
 
 async function updateRecentIndex(entry: RecentIndexEntry): Promise<void> {
   try {
-    const current = (await store().get(RECENT_INDEX_KEY, { type: 'json' })) as RecentIndexEntry[] | null;
-    const filtered = (current || []).filter(
-      (e) => !(e.email === entry.email && e.uid === entry.uid)
+    // BLOB-CAS-V1: one poll ingesting several replies wrote this index once
+    // per reply, each from its own snapshot, so all but the last vanished
+    // from the dashboard's "recent replies".
+    await mutateBlob<RecentIndexEntry[]>(
+      store(),
+      RECENT_INDEX_KEY,
+      current => {
+        const filtered = (Array.isArray(current) ? current : []).filter(
+          (e) => !(e.email === entry.email && e.uid === entry.uid)
+        );
+        return [entry, ...filtered].slice(0, RECENT_INDEX_LIMIT);
+      },
+      { what: 'the recent replies index' }
     );
-    const next = [entry, ...filtered].slice(0, RECENT_INDEX_LIMIT);
-    await store().setJSON(RECENT_INDEX_KEY, next as any);
   } catch (err) {
     console.error('[replies] updateRecentIndex failed:', err);
   }

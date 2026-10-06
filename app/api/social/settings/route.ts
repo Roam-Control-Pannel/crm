@@ -6,12 +6,14 @@ import {
 // inspects the three platform keys, so lookaheadDays passes through unchanged.
   readSettingsBlob,
   writeSettingsBlob,
+  mutateSettingsBlob,
   deleteSettingsBlob,
   getEffectiveSettings,
 } from '@/lib/social-settings';
 import {
   DEFAULT_POSTING_TIMES,
   EMPTY_OVERRIDES,
+  mergeThemeOverrides,
   type SocialSettingsBlob,
   type PostingTimes,
   type ThemeOverrides,
@@ -103,10 +105,6 @@ export async function PUT(req: NextRequest) {
       );
     }
 
-    // Read the existing blob so we can do partial updates — e.g. saving
-    // just times shouldn't wipe overrides.
-    const existing = await readSettingsBlob();
-
     // MULTI-BRIEF-V1: validate weights are non-negative integers.
     let validWeights = incomingWeights;
     if (validWeights) {
@@ -118,19 +116,12 @@ export async function PUT(req: NextRequest) {
       validWeights = clean;
     }
 
-    const next: SocialSettingsBlob = {
-      version: 1,
-      postingTimes: incomingTimes || existing?.postingTimes || DEFAULT_POSTING_TIMES,
-      themeOverrides: incomingOverrides || existing?.themeOverrides || EMPTY_OVERRIDES,
-      briefWeights: validWeights || existing?.briefWeights || {},
-      captionModel:
-        incomingModel === undefined ? existing?.captionModel : (incomingModel as string),
-      semanticImageMatch:
-        incomingSemantic === undefined
-          ? existing?.semanticImageMatch
-          : (incomingSemantic as boolean),
-      updatedAt: new Date().toISOString(),
-    };
+    // THEME-OVERRIDE-MERGE-V1: the client says whether its overrides replace
+    // the stored set or fold onto it. Every editing action means 'merge' — it
+    // sends the one field it changed — and only "Reset themes to defaults"
+    // means 'replace'. The two are byte-identical on the wire, so the mode is
+    // stated rather than inferred.
+    const replaceOverrides = body?.themeOverridesMode === 'replace';
 
     // Light validation — don't block on shape issues but log them.
     if (incomingTimes) {
@@ -145,13 +136,27 @@ export async function PUT(req: NextRequest) {
       }
     }
 
-    const ok = await writeSettingsBlob(next);
-    if (!ok) {
-      return NextResponse.json(
-        { error: 'Failed to write settings blob' },
-        { status: 500 }
-      );
-    }
+    // BLOB-CAS-V1: fold the patch onto whatever is stored at the moment of
+    // the write, not at the moment of an earlier read. Two saves overlapping
+    // (a lookahead field blurring while a theme toggle is still in the air)
+    // used to end with only the later one applied.
+    await mutateSettingsBlob(existing => ({
+      version: 1,
+      postingTimes: incomingTimes || existing?.postingTimes || DEFAULT_POSTING_TIMES,
+      themeOverrides: incomingOverrides
+        ? (replaceOverrides
+            ? (incomingOverrides as any)
+            : mergeThemeOverrides(existing?.themeOverrides, incomingOverrides as any))
+        : existing?.themeOverrides || EMPTY_OVERRIDES,
+      briefWeights: validWeights || existing?.briefWeights || {},
+      captionModel:
+        incomingModel === undefined ? existing?.captionModel : (incomingModel as string),
+      semanticImageMatch:
+        incomingSemantic === undefined
+          ? existing?.semanticImageMatch
+          : (incomingSemantic as boolean),
+      updatedAt: new Date().toISOString(),
+    }));
 
     const settings = await getEffectiveSettings();
     return NextResponse.json({ ok: true, settings });

@@ -2,6 +2,7 @@ import { getStore } from '@netlify/blobs';
 import { DEFAULT_IMAGE_COOLDOWN_DAYS } from './image-usage';
 import { DEFAULT_CAPTION_MODEL, isKnownCaptionModel } from './ai-models';
 import { readStored } from './store-read';
+import { mutateBlob } from './blob-cas';
 import { SEED_THEMES, type Theme } from './social-themes';
 import {
   DEFAULT_POSTING_TIMES,
@@ -66,6 +67,10 @@ export async function readSettingsBlob(): Promise<SocialSettingsBlob | null> {
 
 /**
  * Write the full blob. Overwrites whatever's there.
+ *
+ * Prefer mutateSettingsBlob below for anything that derives the new value
+ * from the old one; this exists for callers that genuinely hold the whole
+ * intended state.
  */
 export async function writeSettingsBlob(blob: SocialSettingsBlob): Promise<boolean> {
   try {
@@ -75,6 +80,27 @@ export async function writeSettingsBlob(blob: SocialSettingsBlob): Promise<boole
     console.error('[social-settings] writeSettingsBlob failed:', err);
     return false;
   }
+}
+
+/**
+ * BLOB-CAS-V1: read the settings, apply a change, write it back only if
+ * nothing else has written in between.
+ *
+ * The settings route is a read-modify-write — it folds a partial patch onto
+ * the stored blob — so two saves in flight at once (the lookahead field
+ * blurring while a theme toggle is still in the air) ended with only the
+ * later one applied, silently reverting the earlier.
+ *
+ * Throws on a read failure (FAIL-CLOSED-READS-V1) and on a write that could
+ * not win; both mean nothing was saved, which the caller must report rather
+ * than swallow.
+ */
+export async function mutateSettingsBlob(
+  apply: (current: SocialSettingsBlob | null) => SocialSettingsBlob
+): Promise<SocialSettingsBlob> {
+  return mutateBlob<SocialSettingsBlob>(store(), KEY, apply, {
+    what: 'the social settings',
+  });
 }
 
 /**
@@ -116,8 +142,24 @@ export function mergeThemes(overrides: ThemeOverrides): Theme[] {
       return merged;
     });
 
-  // 3. Append additions
-  const all: Theme[] = [...seedMerged, ...overrides.additions];
+  // 3. Append additions, with the same deletions and edits applied.
+  //
+  // THEME-OVERRIDE-MERGE-V1: additions used to be appended raw, so `deletions`
+  // only ever filtered SEED_THEMES. Deleting a custom theme appeared to work
+  // purely because the settings route replaced the whole override blob on
+  // every save and dropped the addition along with everything else. With the
+  // route merging properly, a delete has to actually delete.
+  const addedMerged: Theme[] = overrides.additions
+    .filter(t => !deletions.has(t.id))
+    .map(t => {
+      const edit = overrides.edits[t.id];
+      const enabledOverride = overrides.enabled[t.id];
+      const merged: Theme = edit ? { ...t, ...edit } : { ...t };
+      if (typeof enabledOverride === 'boolean') merged.enabled = enabledOverride;
+      return merged;
+    });
+
+  const all: Theme[] = [...seedMerged, ...addedMerged];
 
   // 4. Sort alphabetically within category for stable display order
   all.sort((a, b) => {

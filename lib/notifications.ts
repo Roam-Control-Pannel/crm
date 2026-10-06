@@ -1,5 +1,6 @@
 import { getStore } from '@netlify/blobs';
 import { readStored } from './store-read';
+import { mutateBlob } from './blob-cas';
 
 /**
  * Persistent notification store.
@@ -42,44 +43,71 @@ export async function listNotifications(): Promise<Notification[]> {
   return data ?? [];
 }
 
+/**
+ * BLOB-CAS-V1
+ *
+ * Two notifications written at once used to end with one of them gone: both
+ * read the list, both prepended their own entry, and the later write replaced
+ * the earlier. The publish cron, the Brevo webhook and the inbound poller all
+ * write here and all run on overlapping schedules, so the bell was quietly
+ * dropping exactly the alerts that arrive in bursts.
+ *
+ * The de-dupe check moves inside the mutation as well. Reading the list,
+ * deciding a key is new, and then writing is the same race one level up: two
+ * identical webhooks could each find no recent match and both land.
+ */
 export async function addNotification(
   input: Omit<Notification, 'id' | 'time' | 'read'>
 ): Promise<Notification | null> {
-  const current = await listNotifications();
-
-  // De-dupe: if same key fired within the window, skip silently. Stops
-  // the cron and webhooks from spamming on repeat triggers.
-  if (input.dedupeKey) {
-    const cutoff = Date.now() - DEDUPE_WINDOW_MS;
-    const recent = current.find(n =>
-      n.dedupeKey === input.dedupeKey && new Date(n.time).getTime() >= cutoff
-    );
-    if (recent) return null;
-  }
-
   const notif: Notification = {
     ...input,
     id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
     time: new Date().toISOString(),
     read: false,
   };
-  const next = [notif, ...current].slice(0, HISTORY_LIMIT);
+
+  let deduped = false;
   try {
-    await store().setJSON(KEY, next as any);
-    return notif;
+    await mutateBlob<Notification[]>(
+      store(),
+      KEY,
+      current => {
+        const list = Array.isArray(current) ? current : [];
+        // De-dupe: if the same key fired within the window, skip silently.
+        // Stops the cron and webhooks from spamming on repeat triggers.
+        if (input.dedupeKey) {
+          const cutoff = Date.now() - DEDUPE_WINDOW_MS;
+          const recent = list.find(
+            n => n.dedupeKey === input.dedupeKey && new Date(n.time).getTime() >= cutoff
+          );
+          if (recent) {
+            deduped = true;
+            return list;
+          }
+        }
+        deduped = false;
+        return [notif, ...list].slice(0, HISTORY_LIMIT);
+      },
+      { what: 'the notification list' }
+    );
   } catch (err) {
     console.error('addNotification failed:', err);
     return null;
   }
+  return deduped ? null : notif;
 }
 
 export async function markRead(ids: string[] | 'all'): Promise<void> {
-  const current = await listNotifications();
-  const next = current.map(n =>
-    (ids === 'all' || ids.includes(n.id)) ? { ...n, read: true } : n
-  );
   try {
-    await store().setJSON(KEY, next as any);
+    await mutateBlob<Notification[]>(
+      store(),
+      KEY,
+      current =>
+        (Array.isArray(current) ? current : []).map(n =>
+          ids === 'all' || ids.includes(n.id) ? { ...n, read: true } : n
+        ),
+      { what: 'the notification list' }
+    );
   } catch (err) {
     console.error('markRead failed:', err);
   }
