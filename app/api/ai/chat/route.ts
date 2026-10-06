@@ -4,6 +4,10 @@ import { getToolSchemas, executeTool, REQUIRES_CONFIRM } from '@/lib/roamio-tool
 import { safeEqual } from '@/lib/safe-equal';
 import { DEFAULT_CHAT_MODEL } from '@/lib/ai-models';
 import { normaliseSystem } from '@/lib/ai-system-blocks';
+import {
+  newTrustNonce, trustSystemRule, wrapToolResult, resultIsUntrusted,
+  needsConfirmation, TAINT_GATED_TOOLS,
+} from '@/lib/tool-trust';
 import { extractText, describeEmptyResponse } from '@/lib/anthropic-content';
 
 // sharp-free but Node-only (node:crypto for the confirm binding below).
@@ -102,6 +106,22 @@ function logCacheUsage(model: string, data: any): void {
   );
 }
 
+/**
+ * TOOL-TRUST-V1: append the untrusted-data rule to whatever system the
+ * caller sent, in whichever shape they sent it.
+ *
+ * Appended rather than prepended, deliberately: a caller's cached prefix is
+ * marked with cache_control on its FIRST blocks, and a per-request nonce
+ * placed before them would change the cached bytes on every call and throw
+ * the cache away. At the end it costs nothing.
+ */
+function withTrustRule(system: any, nonce: string): any {
+  const rule = { type: 'text', text: trustSystemRule(nonce) };
+  if (Array.isArray(system)) return [...system, rule];
+  if (typeof system === 'string' && system) return [{ type: 'text', text: system }, rule];
+  return [rule];
+}
+
 async function callAnthropic(
   body: any,
   deadline: number
@@ -174,10 +194,15 @@ export async function POST(req: NextRequest) {
     }
 
     // ----- First model call ----------------------------------------------
+    // TOOL-TRUST-V1: one nonce for this request, shared by the system rule
+    // and every tool_result wrapper so they agree. Appended AFTER the
+    // caller's blocks, so a per-request value never invalidates the cached
+    // prefix a caller marked with cache_control.
+    const nonce = newTrustNonce();
     const baseBody: any = {
       model: model || DEFAULT_CHAT_MODEL,
       max_tokens: maxTokens || (toolMode ? CHAT_MAX_TOKENS : 4096),
-      system: normaliseSystem(systemPrompt),
+      system: toolMode ? withTrustRule(normaliseSystem(systemPrompt), nonce) : normaliseSystem(systemPrompt),
       messages,
     };
     if (toolMode) baseBody.tools = toolSchemas;
@@ -215,6 +240,10 @@ export async function POST(req: NextRequest) {
     // results back, repeat until Claude stops asking for tools.
     let iterations = 0;
     let convo: any[] = [...messages];
+    // TOOL-TRUST-V1: true once any tool in THIS turn has returned text from
+    // outside the app. Never reset — a turn that has read a web page stays
+    // read.
+    let tainted = false;
 
     while (iterations++ < MAX_TOOL_ITERATIONS) {
       const stopReason = data.stop_reason;
@@ -230,7 +259,11 @@ export async function POST(req: NextRequest) {
       // Check whether ANY of the tool calls in this turn require confirm.
       // If so, return early and let the client gate execution. We pass the
       // first such call back so the UI can render its confirm card.
-      const pendingTool = toolUses.find((t: any) => REQUIRES_CONFIRM[t.name]);
+      // TOOL-TRUST-V1: a writing tool that normally runs unattended needs a
+      // click once the turn is tainted, so a page cannot cause a write.
+      const pendingTool = toolUses.find((t: any) =>
+        needsConfirmation(t.name, Boolean(REQUIRES_CONFIRM[t.name]), tainted)
+      );
       if (pendingTool) {
         return NextResponse.json({
           content: extractText(blocks),
@@ -250,10 +283,13 @@ export async function POST(req: NextRequest) {
       const toolResults: any[] = [];
       for (const tu of toolUses) {
         const result = await executeTool(tu.name, tu.input);
+        // TOOL-TRUST-V1: taint BEFORE the next iteration, so the gate above
+        // sees it on the turn the external text actually arrived.
+        if (resultIsUntrusted(tu.name, result)) tainted = true;
         toolResults.push({
           type: 'tool_result',
           tool_use_id: tu.id,
-          content: JSON.stringify(result),
+          content: wrapToolResult(result, nonce),
         });
       }
 
@@ -343,7 +379,12 @@ async function runConfirmedTool(opts: {
 
   // 2. Only tools that are actually deferred can arrive down the confirm
   //    path. Anything else was never gated and has no business here.
-  if (!REQUIRES_CONFIRM[pendingConfirm.name]) {
+  // TOOL-TRUST-V1: a tool is legitimately here either because it always
+  // requires confirmation, or because the turn that proposed it was tainted
+  // and it is one of the taint-gated writers. The signature checked below is
+  // the real authorisation — the server mints one only for a call it
+  // actually deferred — so this stays as the cheap first filter it was.
+  if (!REQUIRES_CONFIRM[pendingConfirm.name] && !TAINT_GATED_TOOLS.has(pendingConfirm.name)) {
     return NextResponse.json(
       { error: 'Tool does not require confirmation.' },
       { status: 400 }
@@ -372,6 +413,9 @@ async function runConfirmedTool(opts: {
   // Stitch the conversation: original messages + the assistant turn that
   // contained the tool_use + a user turn containing the tool_result. Then
   // ask Claude to produce a natural-language closing message.
+  // TOOL-TRUST-V1: the confirmed tool's own result is wrapped too, and the
+  // closing call carries the rule that gives the wrapper meaning.
+  const nonce = newTrustNonce();
   const convo = [
     ...messages,
     { role: 'assistant', content: pendingConfirm.assistant_content },
@@ -381,7 +425,7 @@ async function runConfirmedTool(opts: {
         {
           type: 'tool_result',
           tool_use_id: pendingConfirm.tool_use_id,
-          content: JSON.stringify(result),
+          content: wrapToolResult(result, nonce),
         },
       ],
     },
@@ -390,7 +434,7 @@ async function runConfirmedTool(opts: {
   const { ok, status, data, raw, timedOut } = await callAnthropic({
     model: model || DEFAULT_CHAT_MODEL,
     max_tokens: maxTokens || CHAT_MAX_TOKENS,
-    system: normaliseSystem(systemPrompt),
+    system: withTrustRule(normaliseSystem(systemPrompt), nonce),
     messages: convo,
     tools: toolSchemas,
   }, deadline);
