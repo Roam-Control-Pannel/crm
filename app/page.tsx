@@ -112,7 +112,32 @@ export default function Dashboard() {
     await load();
   }
 
-  const today = new Date().toLocaleDateString('en-GB', { timeZone: 'Europe/London', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  // HYDRATION-DATE-V1
+  //
+  // This read the clock during render. The page is a client component with
+  // no `dynamic` export, so Next prerenders it at BUILD time: the date baked
+  // into the server HTML is the date the deploy was built, and the browser
+  // renders the date it is opened on. Once those differ — which they do from
+  // the day after a deploy until the next one — every load mismatches, and
+  // React throws #418, #423 and #425 and discards the server HTML for a
+  // full client re-render.
+  //
+  // The clock cannot be read until the client is running, so it is not read
+  // until then. The subtitle renders without the date on the server and
+  // gains it on mount, which is the only honest version of "today" a
+  // prerendered page has.
+  const [today, setToday] = useState('');
+  useEffect(() => {
+    setToday(
+      new Date().toLocaleDateString('en-GB', {
+        timeZone: 'Europe/London',
+        weekday: 'long',
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+      })
+    );
+  }, []);
   const lastUpdatedLabel = lastUpdated
     ? (() => {
         const s = Math.floor((Date.now() - lastUpdated.getTime()) / 1000);
@@ -144,7 +169,7 @@ export default function Dashboard() {
       <div className="page-header">
         <div>
           <h1 className="page-title">Growth Dashboard</h1>
-          <p className="page-sub">{today} · Live data from Brevo{lastUpdatedLabel && ` · Updated ${lastUpdatedLabel}`}</p>
+          <p className="page-sub">{today && `${today} · `}Live data from Brevo{lastUpdatedLabel && ` · Updated ${lastUpdatedLabel}`}</p>
         </div>
         <div className="btn-row">
           <button onClick={handleRefresh} disabled={refreshing} className="btn-ghost" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 }}>

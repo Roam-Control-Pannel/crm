@@ -719,8 +719,12 @@ export default function HubPage(){
   async function handleToolConfirm(chatId:string,msgId:string,pending:{name:string;input:any;tool_use_id:string;assistantContent:any[];signature?:string}){
     const chat=chats.find(c=>c.id===chatId)||activeChat;
     if(!chat)return;
-    const updated=chat.messages.map(m=>m.id===msgId?{...m,confirmed:true,pendingTool:undefined}:m);
-    updateChat(chatId,updated);
+    // CONFIRM-TRUTH-V1: do NOT strip pendingTool or mark the message
+    // confirmed yet. The server can still refuse — a stale or missing HMAC
+    // signature returns 400 — and clearing the card first left the operator
+    // believing a destructive action had run with no way to re-issue it.
+    // The card is marked confirmed below, only once the server says it ran.
+    const updated=chat.messages;
     setLoading(true);
     // Send up to and INCLUDING the pre-tool assistant message — the server
     // will append the tool_result and the new assistant reply.
@@ -751,14 +755,33 @@ export default function HubPage(){
       // Without it the server refuses to execute the confirmed tool.
       signature:pending.signature,
     },memoryContext,briefs);
+    // CONFIRM-TRUTH-V1
+    //
+    // `executedTools: result.executedTools || [{name,input}]` was a fallback
+    // that fired on exactly the case it should not have. The confirm path
+    // answers 400 {error:'Tool confirmation could not be verified…'} when the
+    // signature is missing or stale; callRoamio turns that into an error
+    // message with no executedTools, so the fallback asserted the tool HAD
+    // run. The operator clicked Confirm on "Delete post", the server refused
+    // to execute it, and the UI rendered a green "✓ Delete post" chip under
+    // the error text — a destructive action reported as done when nothing
+    // happened, with the confirm card already gone.
+    //
+    // The server is the only thing that knows what ran, so only the server's
+    // answer is reported. On a refusal the confirm card is left intact and
+    // actionable so the operator can simply ask again.
+    const ran = Array.isArray(result.executedTools) ? result.executedTools : [];
     const responseMsg:Message={
       id:Date.now().toString(),
       role:'assistant',
       content:result.text||'Done.',
       timestamp:new Date(),
-      executedTools:result.executedTools||[{name:pending.name,input:pending.input}],
+      executedTools:ran,
     };
-    updateChat(chatId,[...updated,responseMsg]);
+    const settled = ran.length > 0
+      ? updated.map(m=>m.id===msgId?{...m,confirmed:true,pendingTool:undefined}:m)
+      : updated;
+    updateChat(chatId,[...settled,responseMsg]);
     setLoading(false);
   }
 
