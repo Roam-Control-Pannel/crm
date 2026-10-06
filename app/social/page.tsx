@@ -113,6 +113,22 @@ async function savePosts(posts: SocialPost[]): Promise<void> {
   await saveRemote('social_posts', posts);
 }
 
+
+/**
+ * ANTHROPIC-CONTENT-V1: why an /api/ai/chat call produced no text.
+ *
+ * The route answers 200 with an empty `content` and an `error` describing
+ * what the model did — "hit its max_tokens limit before producing any text",
+ * "declined to write this one", and so on — or a non-OK status with an
+ * `error` of its own. All three callers here discarded both and said "Empty
+ * response", so a diagnosis the server had already made never reached anyone.
+ */
+function aiFailureReason(res: Response, data: any): string {
+  if (typeof data?.error === 'string' && data.error) return data.error;
+  if (!res.ok) return `The AI service returned HTTP ${res.status}.`;
+  return 'The model returned an empty response.';
+}
+
 // ============================================================================
 // Style tokens
 // ============================================================================
@@ -899,12 +915,20 @@ Return ONLY the caption text. No JSON, no markdown, no preamble. Just the captio
         body: JSON.stringify({ messages: [{ role: 'user', content: prompt }], model: MODEL_SONNET }),
       });
       const data = await res.json();
-      const txt = (typeof data.content === 'string' ? data.content : (data.content?.[0]?.text || data.text || '')).trim();
+      // ANTHROPIC-CONTENT-V1: the route returns `content` as a string and,
+      // when it is empty, an `error` saying why — a stop_reason, the blocks
+      // it produced, the tokens it spent. This used to ignore that and show
+      // "Empty response", which is the absence of a diagnosis.
+      const txt = typeof data.content === 'string' ? data.content.trim() : '';
       if (txt) {
         setForm(f => ({ ...f, caption: txt }));
         addNotification({ type: 'info', title: 'Caption generated', body: 'Edit it as you like' });
       } else {
-        addNotification({ type: 'email_failed', title: 'Generation failed', body: 'Empty response' });
+        addNotification({
+          type: 'email_failed',
+          title: 'Generation failed',
+          body: aiFailureReason(res, data),
+        });
       }
     } catch (e) {
       addNotification({ type: 'email_failed', title: 'Generation failed', body: 'Network error' });
@@ -961,12 +985,16 @@ Return ONLY the expanded caption text. No JSON, no markdown, no preamble. Just t
         body: JSON.stringify({ messages: [{ role: 'user', content: prompt }], model: MODEL_SONNET }),
       });
       const data = await res.json();
-      const txt = (typeof data.content === 'string' ? data.content : (data.content?.[0]?.text || data.text || '')).trim();
+      const txt = typeof data.content === 'string' ? data.content.trim() : '';
       if (txt) {
         setForm(f => ({ ...f, caption: txt }));
         addNotification({ type: 'info', title: 'Caption expanded', body: 'Edit it as you like' });
       } else {
-        addNotification({ type: 'email_failed', title: 'Expand failed', body: 'Empty response' });
+        addNotification({
+          type: 'email_failed',
+          title: 'Expand failed',
+          body: aiFailureReason(res, data),
+        });
       }
     } catch (e) {
       addNotification({ type: 'email_failed', title: 'Expand failed', body: 'Network error' });
@@ -1256,7 +1284,20 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"..."},{"caption":"...
           body: JSON.stringify({ messages: [{ role: 'user', content: prompt }], maxTokens: 4096 }),
         });
         const data = await res.json();
-        const txt = typeof data.content === 'string' ? data.content : (data.content?.[0]?.text || data.text || '');
+        const txt = typeof data.content === 'string' ? data.content : '';
+        // ANTHROPIC-CONTENT-V1: an empty body fails both parse layers below
+        // and, because the truncation heuristic needs >100 characters, was
+        // reported as "AI response was not valid JSON. Try generating again."
+        // — sending the operator back to retry identical settings against a
+        // cause the server had already diagnosed and logged.
+        if (!txt.trim()) {
+          addNotification({
+            type: 'email_failed',
+            title: 'Generation skipped for ' + acc.handle,
+            body: aiFailureReason(res, data),
+          });
+          continue;
+        }
 
         // PARSE-HARDENING-V1: see PR notes. Three layers of defence against
         // the AI returning slightly-malformed JSON that previously dumped raw
@@ -1853,6 +1894,14 @@ Output ONLY valid JSON, no markdown. Example: [{"caption":"..."},{"caption":"...
               {fillJob.counts.skipped > 0 && `, ${fillJob.counts.skipped} slot${fillJob.counts.skipped === 1 ? '' : 's'} were filled meanwhile`}. Run it again to pick up the rest.</>
             )}
             {fillJob.status === 'failed' && (<>Background fill failed. {fillJob.error || ''}</>)}
+            {/* CAPTION-ERRORS-V1: the batch path counted its failures and
+                dropped every reason, so a background fill that wrote nothing
+                said only "0 of 42". Same reasons the synchronous fill shows. */}
+            {Array.isArray(fillJob.captionErrors) && fillJob.captionErrors.length > 0 && (
+              <ul style={{ margin: '6px 0 0', paddingLeft: 18, color: 'var(--ink-600)' }}>
+                {fillJob.captionErrors.map((why: string) => <li key={why}>{why}</li>)}
+              </ul>
+            )}
             {fillJob.status === 'expired' && (
               <>The background fill did not finish within its 24-hour window. Run it again.</>
             )}

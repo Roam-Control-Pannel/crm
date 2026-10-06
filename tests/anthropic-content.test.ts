@@ -10,7 +10,8 @@ export async function run(t: T) {
   {
     const split = { content: [text('Line one.'), text('Line two.')] };
     t.is('text split across blocks: old reader loses the rest', legacyRead(split), 'Line one.');
-    t.is('text split across blocks: new reader joins them', extractText(split.content), 'Line one.\nLine two.');
+    t.is('text split across blocks: new reader concatenates them, inventing no whitespace',
+      extractText(split.content), 'Line one.Line two.');
 
     const leading = { content: [{ type: 'thinking', thinking: 'hmm' }, text('The caption.')] };
     t.is('non-text block first: old reader returns nothing', legacyRead(leading), '');
