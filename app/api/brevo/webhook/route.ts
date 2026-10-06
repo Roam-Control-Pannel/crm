@@ -272,7 +272,20 @@ export async function POST(req: NextRequest) {
   }
 
   console.log(`[webhook] done: processed=${results.processed} updated=${results.updated} skipped=${results.skipped} errors=${results.errors}`);
-  return NextResponse.json({ ok: true, ...results });
+
+  // WEBHOOK-207-V1
+  // This answered 200 unconditionally, and Brevo only redelivers non-2xx. A
+  // batch in which every contact PUT was rejected — 40 opens, clicks and
+  // bounces — was therefore recorded by Brevo as delivered and dropped for
+  // good. A hard_bounce lost that way never sets OUTREACH_STATUS:'cold', so
+  // the daily sequences cron keeps mailing a dead address and the damage
+  // shows up later as sender reputation.
+  //
+  // 207 Multi-Status is the same contract publish-due and inbound/poll
+  // already use: `ok` stays true because the ROUTE worked, and the status
+  // code tells the caller some of the work inside it did not. Brevo retries
+  // on it, which is exactly what we want.
+  return NextResponse.json({ ok: true, ...results }, { status: results.errors > 0 ? 207 : 200 });
 }
 
 /**
